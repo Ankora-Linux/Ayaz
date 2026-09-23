@@ -1,95 +1,105 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Ayaz DE Logo" width="220" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
+  <img src="assets/logo.png" alt="Ayaz DE Logo" width="200" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
   <br><br>
-  <h1>Ayaz Masaüstü Ortamı (Ayaz DE)</h1>
-  <p><b>Ankora Linux İçin Devuan Tabanlı, Systemd-Free Hafif Çekirdekli, Modern Kiosk Masaüstü Ortamı (Tauri + Rust)</b></p>
+  <h1>Ayaz Desktop Environment (Ayaz DE)</h1>
+  <p><b>Ankora Linux İçin Minimalist, Ultra Hafif ve Kiosk Uyumlu Masaüstü Ortamı</b></p>
 
   <p>
     <img src="https://img.shields.io/badge/S%C3%9CR%C3%9CM-2.0.0-ffffff?style=for-the-badge&labelColor=111111" alt="Sürüm">
-    <img src="https://img.shields.io/badge/DA%C4%9EITIM-ANKORA_LINUX-059669?style=for-the-badge&labelColor=111111" alt="Dağıtım">
-    <img src="https://img.shields.io/badge/TABAN-DEVUAN_DAEDALUS-d1d1d1?style=for-the-badge&labelColor=111111" alt="Taban">
+    <img src="https://img.shields.io/badge/%C3%87EK%C4%B0RDEK-TAURI_%2B_RUST-059669?style=for-the-badge&labelColor=111111" alt="Çekirdek">
+    <img src="https://img.shields.io/badge/HEDEF-ANKORA_LINUX-2563eb?style=for-the-badge&labelColor=111111" alt="Dağıtım">
     <img src="https://img.shields.io/badge/L%C3%B0SANS-MIT-41a013?style=for-the-badge&labelColor=111111" alt="Lisans">
   </p>
 </div>
 
-Ayaz Desktop Environment (Ayaz DE); Ankora Linux işletim sistemi için geliştirilmiş, ultra hafif, endüstriyel monokrom tasarım diline ve yerel yapay zeka entegrasyonuna sahip bağımsız bir Kiosk masaüstü ortamıdır. Rust ve WebKitGTK (Tauri 1.5) üzerinde sıfır çökme, minimal bellek ayak izi ve tek tıkla GUI üzerinden güncelleme (Ayaz Güncelleyici) yetenekleriyle çalışır.
+---
+
+## ❄️ Ayaz Masaüstü Ortamı Nedir?
+
+**Ayaz DE**, **Ankora Linux** işletim sistemi için özel olarak tasarlanmış, systemd kirliliğinden arındırılmış (Devuan SysVinit uyumlu), ultra hafif ve yüksek tepkiselliğe sahip bağımsız bir masaüstü ortamıdır.
+
+Geleneksel ağır masaüstü ortamlarının (GNOME/KDE) aksine, **Rust** ve **WebKitGTK (Tauri 1.5)** mimarisi üzerinde çalışır. Kiosk modunda sıfır çökme, minimal bellek ayak izi (~80-120 MB RAM) ve endüstriyel monokrom cam tasarımı sunar.
 
 ---
 
-## 📌 Ankora OS Nedir?
+## ✨ Öne Çıkan Özellikler
 
-Ankora OS, genel kullanım dağıtımlarında bulunan gereksiz servis kirliliğini (telemetri, kullanılmayan daemon'lar) engellemek ve donanım limitlerini en verimli şekilde kullanmak amacıyla geliştirilmiştir. Masaüstü ortamında görsel tutarlılık sağlarken arka planda Linux çekirdek parametrelerini (sysctl, zram) düşük gecikmeye göre optimize eder.
-
-Sistemde bulunan yerel AI bileşeni, uzak sunuculara veya API anahtarlarına bağımlı değildir. Makine üzerindeki yerel kaynakları kullanarak doğrudan terminal içinden teknik komut yardımı, hata ayıklama ve sistem analizi sunar.
-
----
-
-## 🛠 Temel Mühendislik Tercihleri ve Mimarisi
-
-### 1. Kademeli Bellek Yönetimi (ZRAM + SWAP Hiyerarşisi)
-Düşük RAM kapasitesinde Out-Of-Memory (OOM) kilitlenmelerini engellemek için bellek mimarisi hiyerarşik olarak kurgulanmıştır:
-* **ZRAM:** RAM üzerinde sıkıştırılmış blok alanı oluşturarak disk I/O yükünü düşürür ve ilk bellek taşıntılarını karşılar.
-* **Disk SWAP:** ZRAM kapasitesi dolduğunda devreye giren ikincil yedek alandır.
-* **vm.swappiness & vm.vfs_cache_pressure:** Çekirdek parametreleri disk okuma/yazma gecikmesini minimize edecek değerlere çekilmiştir.
-
-### 2. Çevrimdışı Terminal AI Asistanı (`yardimci`)
-Terminalde `yardimci` komutuyla çağrılan bileşen, internet bağlantısı gerektirmeksizin çalışır:
-* Veriler harici sunuculara gönderilmez, tamamen yerel bellek üzerinde işlenir.
-* Shell komutları, paket bağımlılıkları ve sistem konfigürasyon dosyaları için hızlı referans sağlar.
-
-### 3. Çift Masaüstü Kirliliğini Önleme (Unified Desktop Stack)
-Hem KDE Plasma hem de XFCE masaüstü ortamlarında sistem üzerine aynı görevi yapan çift uygulama yüklenmez:
-* **Dosya Yöneticisi:** Her iki ortamda da çakışmaları engellemek için varsayılan olarak **Dolphin** kullanılır.
-* **Görsel Bütünlük:** Simge seti olarak **Fairy Wren** entegre edilmiştir.
-
-### 4. Şişkinlikten Arındırılmış Sistem (Bloat-Free)
-* ISO boyutunu ve sistem açılış süresini olumsuz etkileyen Office suitleri (LibreOffice vb.) imajdan çıkarılmıştır.
-* Kullanıcı ihtiyaç duyduğu paketi depo üzerinden tek komutla kurabilir.
-
-### 5. Dahili Oyun ve Grafik Katmanı
-* **GameMode:** Oyun başlatıldığında CPU valörünü performance moduna çeker.
-* **MangoHud:** Vulkan/OpenGL katmanında FPS, sıcaklık ve RAM kullanım değerlerini önceden yapılandırılmış olarak sunar.
+* **🚀 Ultra Düşük Bellek ve CPU Tüketimi:** Gereksiz arka plan servisleri olmadan doğrudan donanım verimliliğine odaklanır.
+* **🔄 Ayaz Güncelleyici (GUI Update Manager):** Kullanıcıların terminale girmeden doğrudan masaüstü arayüzünden tek tıkla en son `.deb` güncellemelerini denetlemesini, indirmesini ve kurmasını sağlar.
+* **🧠 Yerel Yapay Zeka Teftiş Ajanı:** Ollama (localhost), Google Gemini ve Groq modellerini destekleyen, onaylı sistem komutları (`apt-get clean`, `df -h`) üretebilen akıllı asistan.
+* **🎨 Modern Cam (Glassmorphism) Tasarım:**
+  * 3 farklı tema (Nordik Açık, Modern Grafit, Derin Gece).
+  * 8 adet yüksek çözünürlüklü vektörel (SVG) monokrom duvar kağıdı.
+  * Windows 11 ve Chrome OS Flex'ten ilham alan ortalanmış Görev Çubuğu ve Başlat Menüsü.
+* **🔒 Kiosk ve Donanım Güvenliği:**
+  * Binary blacklist kalkanı (`sudo`, `su`, `pkexec`, `dd` vb. yetkisiz doğrudan çalıştırma engeli).
+  * Hardlink ve Path Traversal korumalı belge görüntüleyici (PDF/Markdown/Metin).
+  * Devuan SysVinit ve X11 `nodm` oto-oturum açma uyumluluğu.
 
 ---
 
-## 📊 Sürüm Karşılaştırma Tablosu
+## 📁 Proje Dizin Yapısı
 
-| Sürüm Adı | Sistem Tabanı | Yayın Tipi | Odak Noktası | Durum |
-| :--- | :--- | :--- | :--- | :--- |
-| **Ankora AI Debian** | Debian 13 (Trixie) | Sabit / Stable | Yüksek sistem stabilitesi, düşük kaynak kullanımı | **Aktif Sürüm** |
-| **Ankora Kurumsal** | Debian LTS | Sabit / LTS | Merkezi yönetim profilleri, sıkılaştırılmış güvenlik (AppArmor) | **Planlama** |
-| **Ankora Geliştirici** | Debian / Arch | Özel Derleme | Hazır derleyici araçları (GCC, Rust, Go, Python) ve Zsh terminal yapısı | **Özel Sürüm** |
+```
+Ayaz/
+├── .github/workflows/
+│   └── release-de.yml          # GitHub Actions otomatik .deb derleme iş akışı
+├── assets/                     # Logo ve masaüstü önizleme görselleri
+├── scripts/
+│   ├── ayaz-update-helper.sh   # Şifresiz güvenli root paket kurucu
+│   └── ankora-updater-sudoers  # Helper için tek satırlık sudoers izni
+├── src/                        # Ayaz DE Web Kullanıcı Arayüzü
+│   ├── app.js                  # Pencere yöneticisi, güncelleyici ve masaüstü mantığı
+│   ├── index.html              # Masaüstü çalışma alanı, pencereler ve başlat menüsü
+│   ├── style.css               # Monokrom cam tasarım sistemi ve tema stilleri
+│   └── *.svg                   # Vektörel arka planlar ve sistem ikonları
+├── src-tauri/                  # Ayaz DE Rust Arka Planı
+│   ├── Cargo.toml              # Rust bağımlılıkları ve ayaz-de paketi
+│   ├── tauri.conf.json         # Kiosk pencere kuralları, CSP güvenlik politikası
+│   └── src/main.rs             # Sistem telemetrisi, IPC köprüsü, güncelleme motoru
+└── package.json
+```
 
 ---
 
-## 📋 Sistem Gereksinimleri
+## 🛠️ Yerel Geliştirme ve Derleme
 
-| Bileşen | Minimum Gereksinim | Önerilen Sistem |
-| :--- | :--- | :--- |
-| **İşlemci (CPU)** | 64-bit Çift Çekirdek (1.5 GHz) | 64-bit Dört Çekirdek (2.0 GHz+) |
-| **Bellek (RAM)** | 2 GB (ZRAM Aktif) | 4 GB ve üzeri |
-| **Depolama** | 15 GB Boş Disk Alanı | 25 GB SSD Depolama |
-| **Ekran Kartı** | KMS destekli herhangi bir GPU | Vulkan / OpenGL 4.5 destekli GPU |
+### Gereksinimler
+
+* **Rust:** `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+* **Node.js:** v18 veya v20
+* **Linux Kütüphaneleri (Debian/Devuan):**
+  ```bash
+  sudo apt-get install -y libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+  ```
+
+### Geliştirme Modunda Çalıştırma
+
+```bash
+cargo install tauri-cli --version "^1.5"
+cargo tauri dev
+```
+
+### Üretim `.deb` Paketini Derleme
+
+```bash
+cargo tauri build --bundles deb
+```
+Derlenen paket `src-tauri/target/release/bundle/deb/ayaz-de_2.0.0_amd64.deb` dizininde üretilir.
 
 ---
 
-## ⚡ Kurulum ve Kullanım Talimatları
+## 🚀 Sürüm Dağıtımı (Release)
 
-### 1. ISO İmajını Diske Yazdırma
-Linux ortamında terminal üzerinden `dd` komutunu kullanarak önyüklenebilir USB oluşturabilirsiniz:
+Bu depoda yeni bir etiket (tag) push edildiğinde:
+```bash
+git tag v2.0.1
+git push origin v2.0.1
+```
+GitHub Actions iş akışı (`release-de.yml`) otomatik olarak Ubuntu üzerinde derlemeyi tamamlar ve `.deb` paketini GitHub Releases sayfasına yükler. Ankora Linux kullanıcıları masaüstündeki **Ayaz Güncelleyici** ile yeni sürüme anında geçer.
 
+---
 
-sudo dd if=ankora-2.0-debian-x86_64.iso of=/dev/sdX bs=4M status=progress conv=fsync
+## 📄 Lisans
 
-
-## 🌐 Topluluk ve İletişim
-Bu proje tamamen açık kaynaklıdır ve topluluğun geri bildirimleriyle büyümektedir. Karşılaştığınız sorunlar, yeni özellik talepleri veya sadece selam vermek için bize katılın:
-
-* 💬 **Topluluk Forumu:** [Ankalab Flarum Cloud](https://ankalab.flarum.cloud)
-* 🌍 **Resmi Web Sitesi:** [Sitemiz](https://ankora-linux.github.io/#home) 
-* 🐞 **Hata Bildirimi:** GitHub üzerindeki [Issues](../../issues) sekmesini veya forumdan konu açarak kullanabilirsiniz.
-
-### License & Source Code
-Ankora OS is built on top of **Debian 12 (Bookworm)**. The base system, Linux Kernel, and upstream packages are distributed under the **GPL (GNU General Public License)** or their respective original licenses. You can find the source code for the base Debian packages in the official Debian repositories.
-
-All custom configurations, boot parameters (GRUB/ISOLinux), UI artwork, and build scripts specific to Ankora OS provided in this repository are licensed under the **MIT License**.
+Bu proje **MIT** lisansı ile lisanslanmıştır. Ankora Linux projesinin bir parçasıdır.
