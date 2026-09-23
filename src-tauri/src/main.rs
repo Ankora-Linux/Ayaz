@@ -75,9 +75,17 @@ const ALLOWED_AGENT_ACTIONS: &[&str] = &[
     "echo 3 > /proc/sys/vm/drop_caches",
 ];
 
-/// Ankora Office tarafından okunabilecek güvenli belge uzantıları
+/// Ankora Office tarafından okunabilecek güvenli belge uzantıları (.docx ikili dosya olduğundan metin/pdf listesinde yer almaz)
 const ALLOWED_DOC_EXTENSIONS: &[&str] = &[
-    "pdf", "md", "txt", "docx", "conf", "log",
+    "pdf", "md", "txt", "conf", "log", "json", "yaml", "yml", "ini",
+];
+
+/// Kesinlikle doğrudan veya dolaylı çalıştırılması yasaklanan tehlikeli sistem araçları (Kara Liste)
+const FORBIDDEN_LAUNCH_BINARIES: &[&str] = &[
+    "sudo", "su", "pkexec", "dd", "mkfs", "fdisk", "parted",
+    "sh", "bash", "zsh", "dash", "csh", "tcsh", "fish", "env",
+    "xargs", "passwd", "chpasswd", "chmod", "chown", "reboot",
+    "poweroff", "shutdown", "init", "systemctl", "telinit", "halt",
 ];
 
 /// Kesinlikle okunması engellenen hassas sistem dosyası ve dizin kalıpları
@@ -139,9 +147,22 @@ fn is_valid_disk_target(path: &str) -> bool {
     if dev.is_empty() || dev.len() > 16 {
         return false;
     }
+    // sd[a-z]+ : dev starts with "sd", remainder is all ASCII lowercase letters (no partition digits!)
     let is_sd = dev.starts_with("sd") && dev.len() >= 3 && dev[2..].chars().all(|c| c.is_ascii_lowercase());
+    // vd[a-z]+ : dev starts with "vd", remainder is all ASCII lowercase letters (no partition digits!)
     let is_vd = dev.starts_with("vd") && dev.len() >= 3 && dev[2..].chars().all(|c| c.is_ascii_lowercase());
-    let is_nvme = dev.starts_with("nvme") && dev.chars().all(|c| c.is_ascii_alphanumeric());
+    // nvme<ctrl>n<ns> : exactly digits for controller and namespace, no trailing 'p<part>' partition suffix
+    let is_nvme = if dev.starts_with("nvme") {
+        let rem = &dev[4..];
+        if let Some((ns_ctrl, ns_id)) = rem.split_once('n') {
+            !ns_ctrl.is_empty() && ns_ctrl.chars().all(|c| c.is_ascii_digit())
+                && !ns_id.is_empty() && ns_id.chars().all(|c| c.is_ascii_digit())
+        } else {
+            false
+        }
+    } else {
+        false
+    };
 
     is_sd || is_vd || is_nvme
 }
@@ -174,6 +195,8 @@ pub struct XdgApplication {
     pub comment: String,
     pub categories: Vec<String>,
     pub desktop_file: String,
+    #[serde(default)]
+    pub is_installed_by_user: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -227,6 +250,68 @@ fn get_ankora_config_dir() -> PathBuf {
     path.push("ankora");
     let _ = fs::create_dir_all(&path);
     path
+}
+
+// ----------------------------------------------------------------------------
+// GÜVENLİ KİMLİK BİLGİSİ YÖNETİMİ (SECURE CREDENTIAL STORAGE)
+// ----------------------------------------------------------------------------
+fn get_credentials_path() -> PathBuf {
+    get_ankora_config_dir().join("credentials.dat")
+}
+
+fn load_credentials() -> std::collections::HashMap<String, String> {
+    let path = get_credentials_path();
+    if let Ok(data) = fs::read(&path) {
+        if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(&data) {
+            if let Ok(json_str) = String::from_utf8(decoded) {
+                if let Ok(map) = serde_json::from_str::<std::collections::HashMap<String, String>>(&json_str) {
+                    return map;
+                }
+            }
+        }
+    }
+    std::collections::HashMap::new()
+}
+
+fn save_credentials(map: &std::collections::HashMap<String, String>) -> Result<(), String> {
+    let path = get_credentials_path();
+    let json_str = serde_json::to_string(map).map_err(|e| e.to_string())?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(json_str.as_bytes());
+    fs::write(&path, encoded).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn save_ai_credential(provider: String, api_key: String) -> Result<(), String> {
+    let clean_prov = provider.trim().to_lowercase();
+    let clean_key = api_key.trim().to_string();
+    let mut map = load_credentials();
+    if clean_key.is_empty() {
+        map.remove(&clean_prov);
+    } else {
+        map.insert(clean_prov, clean_key);
+    }
+    save_credentials(&map)
+}
+
+#[tauri::command]
+fn has_ai_credential(provider: String) -> Result<bool, String> {
+    let clean_prov = provider.trim().to_lowercase();
+    let map = load_credentials();
+    Ok(map.get(&clean_prov).map(|k| !k.is_empty()).unwrap_or(false))
+}
+
+#[tauri::command]
+fn delete_ai_credential(provider: String) -> Result<(), String> {
+    let clean_prov = provider.trim().to_lowercase();
+    let mut map = load_credentials();
+    map.remove(&clean_prov);
+    save_credentials(&map)
 }
 
 // ============================================================================
@@ -296,6 +381,7 @@ fn parse_desktop_entry(path: &Path) -> Option<XdgApplication> {
         comment,
         categories,
         desktop_file: path.to_string_lossy().to_string(),
+        is_installed_by_user: false,
     })
 }
 
@@ -380,7 +466,8 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
 
         // Kurulum sonrası XDG dizinini tara
         let apps = scan_xdg_applications().await?;
-        if let Some(app) = apps.into_iter().find(|a| a.id.contains(clean_pkg) || clean_pkg.contains(&a.id)) {
+        if let Some(mut app) = apps.into_iter().find(|a| a.id.contains(clean_pkg) || clean_pkg.contains(&a.id)) {
+            app.is_installed_by_user = true;
             Ok(app)
         } else {
             Ok(XdgApplication {
@@ -391,6 +478,7 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
                 comment: format!("{} paketi sisteme kuruldu.", clean_pkg),
                 categories: vec!["Utility".to_string()],
                 desktop_file: format!("/usr/share/applications/{}.desktop", clean_pkg),
+                is_installed_by_user: true,
             })
         }
     }
@@ -408,6 +496,7 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
             comment: "Yerel sisteme başarıyla kaydedildi.".to_string(),
             categories: vec!["System".to_string()],
             desktop_file: format!("/usr/share/applications/{}.desktop", clean_pkg),
+            is_installed_by_user: true,
         })
     }
 }
@@ -548,17 +637,17 @@ async fn read_document_file(file_path: String) -> Result<DocumentResult, String>
         return Err(format!("Güvenlik Hatası: '.{}' uzantılı dosyalar güvenlik nedeniyle okunamaz.", extension));
     }
 
-    // 3. Hassas dosya ve sistem dizini kalıp kontrolü
-    let lower_path = file_path.to_lowercase();
-    if SENSITIVE_FILE_PATTERNS.iter().any(|pat| lower_path.contains(pat)) {
-        return Err("Güvenlik Hatası: Hassas sistem dosyalarının okunması engellendi.".to_string());
-    }
-
-    // 4. Kanonik dosya yolunu çözümleme
+    // 3. Kanonik dosya yolunu çözümleme
     let canonical = match fs::canonicalize(raw_path) {
         Ok(p) => p,
         Err(_) => return Err(format!("Belge bulunamadı veya erişilemiyor: {}", file_path)),
     };
+
+    // 4. Kanonik dosya yolu üzerinde hassas sistem dosyası kalıp kontrolü
+    let canonical_lower = canonical.to_string_lossy().to_lowercase();
+    if SENSITIVE_FILE_PATTERNS.iter().any(|pat| canonical_lower.contains(pat)) {
+        return Err("Güvenlik Hatası: Hassas sistem dosyalarının okunması engellendi.".to_string());
+    }
 
     // 5. İzin verilen dizin sınırları denetimi
     let allowed_dirs: Vec<PathBuf> = vec![
@@ -581,8 +670,17 @@ async fn read_document_file(file_path: String) -> Result<DocumentResult, String>
         }
     }
 
-    // 6. Dosya boyutu sınırı (En fazla 50 MB)
+    // 6. Hard-link istismarı kontrolü (nlink > 1 reddedilir)
     let metadata = fs::metadata(&canonical).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if metadata.nlink() > 1 {
+            return Err("Güvenlik Hatası: Çoklu bağlantılı (hard link) dosyaların okunması güvenlik gerekçesiyle engellendi.".to_string());
+        }
+    }
+
+    // 7. Dosya boyutu sınırı (En fazla 50 MB)
     let file_size = metadata.len();
     if file_size > 50 * 1024 * 1024 {
         return Err("Dosya boyutu çok büyük (50 MB üstü kabul edilmez).".to_string());
@@ -689,7 +787,16 @@ async fn query_local_ai(
         }
     };
 
+    let resolved_key = match api_key {
+        Some(ref k) if !k.trim().is_empty() => k.trim().to_string(),
+        _ => {
+            let map = load_credentials();
+            map.get(&prov).cloned().unwrap_or_default()
+        }
+    };
+
     let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())?;
@@ -716,9 +823,12 @@ async fn query_local_ai(
         (text.to_string(), false, None, None)
     };
 
-    // 1. OLLAMA
+    // 1. OLLAMA (Yalnızca yerel IP / localhost)
     if prov == "ollama" {
         let url = endpoint.unwrap_or_else(|| "http://127.0.0.1:11434/api/generate".to_string());
+        if !url.starts_with("http://127.0.0.1:") && !url.starts_with("http://localhost:") {
+            return Err("Güvenlik Hatası: Ollama uç noktası yalnızca yerel adreslerde (127.0.0.1 veya localhost) çalışabilir.".to_string());
+        }
         let ai_model = model.unwrap_or_else(|| "qwen2.5:0.5b".to_string());
         let payload = serde_json::json!({
             "model": ai_model,
@@ -736,16 +846,15 @@ async fn query_local_ai(
             }
         }
     } 
-    // 2. GOOGLE GEMINI
+    // 2. GOOGLE GEMINI (Resmi Güvenli Endpoint)
     else if prov == "gemini" {
-        let key = api_key.unwrap_or_default();
-        if key.is_empty() {
-            return Err("Google Gemini API anahtarı girilmedi. Lütfen ayarlar panelinden API anahtarınızı girin.".to_string());
+        if resolved_key.is_empty() {
+            return Err("Google Gemini API anahtarı bulunamadı. Lütfen API Ayarları panelinden anahtarınızı kaydedin.".to_string());
         }
         let ai_model = model.unwrap_or_else(|| "gemini-2.0-flash".to_string());
         let url = format!(
             "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            ai_model, key
+            ai_model, resolved_key
         );
         let payload = serde_json::json!({
             "contents": [{
@@ -767,20 +876,30 @@ async fn query_local_ai(
             Err(e) => return Err(format!("Gemini bağlantı hatası: {}", e)),
         }
     }
-    // 3. OPENAI / GROQ / OPENROUTER / CUSTOM
+    // 3. OPENAI / GROQ / OPENROUTER / CUSTOM (SSRF ve Redirect Korumalı)
     else {
         let (url, default_model) = match prov.as_str() {
             "openai" => ("https://api.openai.com/v1/chat/completions".to_string(), "gpt-4o-mini".to_string()),
             "groq" => ("https://api.groq.com/openai/v1/chat/completions".to_string(), "llama-3.3-70b-versatile".to_string()),
             "openrouter" => ("https://openrouter.ai/api/v1/chat/completions".to_string(), "anthropic/claude-3.5-sonnet".to_string()),
-            _ => (endpoint.unwrap_or_else(|| "http://127.0.0.1:8000/v1/chat/completions".to_string()), "default".to_string())
+            _ => {
+                let custom_url = endpoint.unwrap_or_else(|| "http://127.0.0.1:8000/v1/chat/completions".to_string());
+                if custom_url.contains("169.254.169.254") || custom_url.contains("metadata.google.internal") {
+                    return Err("Güvenlik Hatası: Bulut meta veri uç noktalarına (SSRF) erişim yasaklanmıştır.".to_string());
+                }
+                if !custom_url.starts_with("https://") && !custom_url.starts_with("http://127.0.0.1:") && !custom_url.starts_with("http://localhost:") {
+                    return Err("Güvenlik Hatası: Özel AI uç noktaları HTTPS veya yerel (127.0.0.1/localhost) olmalıdır.".to_string());
+                }
+                (custom_url, "default".to_string())
+            }
         };
         let ai_model = model.unwrap_or(default_model);
-        let key = api_key.unwrap_or_default();
 
         let mut req = client.post(&url);
-        if !key.is_empty() {
-            req = req.header("Authorization", format!("Bearer {}", key));
+        if !resolved_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", resolved_key));
+        } else if prov != "custom" {
+            return Err(format!("{} API anahtarı tanımlanmadı. Lütfen API Ayarları panelinden anahtarınızı kaydedin.", prov.to_uppercase()));
         }
 
         let payload = serde_json::json!({
@@ -856,21 +975,40 @@ async fn execute_agent_confirmed_action(command: String) -> Result<String, Strin
 async fn get_storage_devices() -> Result<Vec<StorageDisk>, String> {
     #[cfg(target_os = "linux")]
     {
-        let output = Command::new("lsblk").args(["-d", "-b", "-n", "-o", "NAME,SIZE,MODEL,RM,TYPE"]).output();
+        let output = Command::new("lsblk").args(["-d", "-b", "-n", "-P", "-o", "NAME,SIZE,MODEL,RM,TYPE"]).output();
         if let Ok(out) = output {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let mut disks = Vec::new();
             for line in stdout.lines() {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3 && line.contains("disk") && !parts[0].starts_with("loop") {
-                    let size_bytes: u64 = parts[1].parse().unwrap_or(0);
+                if !line.contains("TYPE=\"disk\"") {
+                    continue;
+                }
+                let mut name = String::new();
+                let mut size_bytes: u64 = 0;
+                let mut model = "Sabit Disk".to_string();
+                let mut is_removable = false;
+
+                for part in line.split_whitespace() {
+                    if let Some((k, v)) = part.split_once('=') {
+                        let val = v.trim_matches('"');
+                        match k {
+                            "NAME" => name = val.to_string(),
+                            "SIZE" => size_bytes = val.parse().unwrap_or(0),
+                            "MODEL" => if !val.is_empty() { model = val.to_string(); },
+                            "RM" => is_removable = val == "1",
+                            _ => {}
+                        }
+                    }
+                }
+
+                if !name.is_empty() && !name.starts_with("loop") {
                     let size_gb = (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0);
                     disks.push(StorageDisk {
-                        name: parts[0].to_string(),
-                        path: format!("/dev/{}", parts[0]),
+                        path: format!("/dev/{}", name),
+                        name,
                         size_gb: (size_gb * 10.0).round() / 10.0,
-                        model: if parts.len() >= 5 { parts[2..parts.len() - 2].join(" ") } else { "Sabit Disk".to_string() },
-                        is_removable: line.contains(" 1 "),
+                        model,
+                        is_removable,
                     });
                 }
             }
@@ -902,7 +1040,7 @@ async fn get_storage_devices() -> Result<Vec<StorageDisk>, String> {
 async fn execute_system_installation(payload: InstallPayload) -> Result<String, String> {
     let target = payload.target_disk.trim();
     if !is_valid_disk_target(target) {
-        return Err("Geçersiz hedef disk seçimi (Örn: /dev/sda veya /dev/nvme0n1).".to_string());
+        return Err("Geçersiz hedef disk seçimi (Örn: /dev/sda veya /dev/nvme0n1, bölümler seçilemez).".to_string());
     }
 
     let username = payload.username.trim();
@@ -922,15 +1060,22 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
 
     #[cfg(target_os = "linux")]
     {
-        // 1. Bölümleme: Kabuk formatlama yerine doğrudan argüman dizisi
-        Command::new("parted").args(["-s", target, "mklabel", "gpt"]).output()
-            .map_err(|e| format!("parted mklabel hatası: {}", e))?;
-        Command::new("parted").args(["-s", target, "mkpart", "ESP", "fat32", "1MiB", "513MiB"]).output()
-            .map_err(|e| format!("parted ESP hatası: {}", e))?;
-        Command::new("parted").args(["-s", target, "set", "1", "esp", "on"]).output()
-            .map_err(|e| format!("parted esp on hatası: {}", e))?;
-        Command::new("parted").args(["-s", target, "mkpart", "primary", "ext4", "513MiB", "100%"]).output()
-            .map_err(|e| format!("parted root part hatası: {}", e))?;
+        let run_step = |prog: &str, args: &[&str]| -> Result<(), String> {
+            let res = Command::new(prog).args(args).output()
+                .map_err(|e| format!("'{}' süreci başlatılamadı: {}", prog, e))?;
+            if !res.status.success() {
+                let err = String::from_utf8_lossy(&res.stderr);
+                let _ = Command::new("umount").args(["-R", "/target"]).output();
+                return Err(format!("'{}' işlemi başarısız oldu (Çıkış Kodu {}): {}", prog, res.status.code().unwrap_or(-1), err.trim()));
+            }
+            Ok(())
+        };
+
+        // 1. Bölümleme: Sıkı hata denetimli doğrudan sistem çağrıları
+        run_step("parted", &["-s", target, "mklabel", "gpt"])?;
+        run_step("parted", &["-s", target, "mkpart", "ESP", "fat32", "1MiB", "513MiB"])?;
+        run_step("parted", &["-s", target, "set", "1", "esp", "on"])?;
+        run_step("parted", &["-s", target, "mkpart", "primary", "ext4", "513MiB", "100%"])?;
 
         let (efi_part, root_part) = if target.contains("nvme") {
             (format!("{}p1", target), format!("{}p2", target))
@@ -939,31 +1084,22 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         };
 
         // 2. Dosya Sistemleri
-        Command::new("mkfs.vfat").args(["-F32", &efi_part]).output()
-            .map_err(|e| format!("mkfs.vfat hatası: {}", e))?;
-        Command::new("mkfs.ext4").args(["-F", &root_part]).output()
-            .map_err(|e| format!("mkfs.ext4 hatası: {}", e))?;
+        run_step("mkfs.vfat", &["-F32", &efi_part])?;
+        run_step("mkfs.ext4", &["-F", &root_part])?;
 
         // 3. Bağlama Noktaları (Mounts)
         let _ = fs::create_dir_all("/target");
-        Command::new("mount").args([&root_part, "/target"]).output()
-            .map_err(|e| format!("mount /target hatası: {}", e))?;
+        run_step("mount", &[&root_part, "/target"])?;
         let _ = fs::create_dir_all("/target/boot/efi");
-        Command::new("mount").args([&efi_part, "/target/boot/efi"]).output()
-            .map_err(|e| format!("mount /target/boot/efi hatası: {}", e))?;
+        run_step("mount", &[&efi_part, "/target/boot/efi"])?;
 
         // 4. Kök Dosya Sistemini Rsync ile Kopyalama
-        let rsync_out = Command::new("rsync").args([
+        run_step("rsync", &[
             "-aAX", "--info=progress2", "/", "/target/",
             "--exclude=/proc/*", "--exclude=/sys/*", "--exclude=/dev/*",
             "--exclude=/tmp/*", "--exclude=/run/*", "--exclude=/mnt/*",
             "--exclude=/media/*", "--exclude=/target/*", "--exclude=/home/*"
-        ]).output().map_err(|e| format!("rsync hatası: {}", e))?;
-
-        if !rsync_out.status.success() {
-            let _ = Command::new("umount").args(["-R", "/target"]).output();
-            return Err("Dosya sistemi kopyalanırken hata oluştu.".to_string());
-        }
+        ])?;
 
         // 5. Hostname: Kabuk yönlendirmesi olmaksızın doğrudan dosya yazma
         if let Err(e) = fs::write("/target/etc/hostname", format!("{}\n", hostname)) {
@@ -972,11 +1108,9 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         }
 
         // 6. Kullanıcı Oluşturma: Argüman dizisi ile izole çalıştırma
-        let _ = Command::new("chroot")
-            .args(["/target", "useradd", "-m", "-s", "/bin/bash", "-G", "sudo,audio,video,plugdev", username])
-            .output();
+        run_step("chroot", &["/target", "useradd", "-m", "-s", "/bin/bash", "-G", "sudo,audio,video,plugdev", username])?;
 
-        // 7. Parola Belirleme: Parola ASLA argüman olarak aktarılmaz, doğrudan STDIN borusundan beslenir (BULGU #8)
+        // 7. Parola Belirleme: Parola doğrudan STDIN borusundan beslenir
         let mut chpasswd_child = Command::new("chroot")
             .args(["/target", "chpasswd"])
             .stdin(Stdio::piped())
@@ -997,8 +1131,13 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         }
 
         // 8. Grub & Temizlik
-        let _ = Command::new("chroot").args(["/target", "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=Ankora", "--recheck"]).output();
-        let _ = Command::new("chroot").args(["/target", "update-grub"]).output();
+        run_step("chroot", &["/target", "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=Ankora", "--recheck"])?;
+        run_step("chroot", &["/target", "update-grub"])?;
+
+        // 9. Sistem Temizliği: machine-id sıfırlama ve eski SSH anahtarlarının temizlenmesi
+        let _ = fs::write("/target/etc/machine-id", "");
+        let _ = Command::new("sh").args(["-c", "rm -f /target/etc/ssh/ssh_host_*"]).output();
+
         let _ = Command::new("umount").args(["-R", "/target"]).output();
 
         Ok("Ankora Linux başarıyla kuruldu.".to_string())
@@ -1037,15 +1176,38 @@ async fn launch_application(exec: String) -> Result<String, String> {
     let bin_name = parts[0];
     let args = &parts[1..];
 
-    // 3. Dizin geçişi ve izin verilen yol doğrulaması
+    // 3. Dizin geçişi ve kara liste doğrulaması
     if bin_name.contains("..") {
         return Err("Güvenlik Hatası: Dizin geçişine ('..') izin verilmez.".to_string());
+    }
+
+    let base_bin = Path::new(bin_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(bin_name);
+
+    if FORBIDDEN_LAUNCH_BINARIES.contains(&base_bin) {
+        return Err(format!(
+            "Güvenlik İlkesi İhlali: '{}' sistem aracı güvenlik nedeniyle doğrudan başlatılamaz.",
+            base_bin
+        ));
     }
 
     if bin_name.contains('/') {
         let allowed_prefixes = ["/usr/bin/", "/bin/", "/usr/local/bin/", "/usr/games/", "/opt/"];
         if !allowed_prefixes.iter().any(|prefix| bin_name.starts_with(prefix)) {
             return Err("Güvenlik Hatası: Uygulama yolu izin verilen sistem dizinlerinde değil.".to_string());
+        }
+
+        // Kanonik hedef kontrolü (symlink bypass önleme)
+        if let Ok(canonical) = fs::canonicalize(bin_name) {
+            let canon_base = canonical
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            if FORBIDDEN_LAUNCH_BINARIES.contains(&canon_base) {
+                return Err("Güvenlik İlkesi İhlali: Program kısayolu izin verilmeyen bir sistem aracına işaret ediyor.".to_string());
+            }
         }
     } else {
         if !bin_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.') {
@@ -1069,19 +1231,88 @@ async fn launch_application(exec: String) -> Result<String, String> {
 }
 
 // ============================================================================
-// 9. DİĞER SİSTEM AYARLARI VE TELEMETRİ
+// 9. DİĞER SİSTEM AYARLARI VE GERÇEK TELEMETRİ - BULGU #4
 // ============================================================================
 #[tauri::command]
 fn get_system_telemetry() -> Result<SystemTelemetry, String> {
-    Ok(SystemTelemetry {
-        os_name: "Devuan GNU/Linux 5 (daedalus)".to_string(),
-        kernel: "Linux 6.1.0-22-amd64 (Tauri Native Core)".to_string(),
-        init_system: "SysVinit (systemd-free)".to_string(),
-        memory_used_mb: 1140,
-        memory_total_mb: 8192,
-        cpu_cores: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
-        uptime_seconds: 7200,
-    })
+    #[cfg(target_os = "linux")]
+    {
+        // 1. Gerçek Bellek Tespiti (/proc/meminfo)
+        let mut mem_total_mb: u64 = 8192;
+        let mut mem_available_mb: u64 = 4096;
+
+        if let Ok(meminfo) = fs::read_to_string("/proc/meminfo") {
+            for line in meminfo.lines() {
+                if line.starts_with("MemTotal:") {
+                    if let Some(val) = line.split_whitespace().nth(1) {
+                        mem_total_mb = val.parse::<u64>().unwrap_or(8388608) / 1024;
+                    }
+                } else if line.starts_with("MemAvailable:") {
+                    if let Some(val) = line.split_whitespace().nth(1) {
+                        mem_available_mb = val.parse::<u64>().unwrap_or(4194304) / 1024;
+                    }
+                }
+            }
+        }
+        let memory_used_mb = mem_total_mb.saturating_sub(mem_available_mb);
+
+        // 2. Gerçek Çalışma Süresi (/proc/uptime)
+        let mut uptime_seconds: u64 = 0;
+        if let Ok(uptime_str) = fs::read_to_string("/proc/uptime") {
+            if let Some(first) = uptime_str.split_whitespace().next() {
+                uptime_seconds = first.parse::<f64>().unwrap_or(0.0) as u64;
+            }
+        }
+
+        // 3. Dağıtım / İşletim Sistemi (/etc/os-release)
+        let mut os_name = "Devuan GNU/Linux 5 (daedalus)".to_string();
+        if let Ok(os_rel) = fs::read_to_string("/etc/os-release") {
+            for line in os_rel.lines() {
+                if line.starts_with("PRETTY_NAME=") {
+                    os_name = line.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string();
+                    break;
+                }
+            }
+        }
+
+        // 4. Çekirdek Sürümü (/proc/version)
+        let kernel = if let Ok(proc_ver) = fs::read_to_string("/proc/version") {
+            proc_ver.split_whitespace().take(3).collect::<Vec<_>>().join(" ")
+        } else {
+            "Linux 6.1.0-22-amd64".to_string()
+        };
+
+        // 5. İnit Sistemi (/proc/1/comm)
+        let init_comm = fs::read_to_string("/proc/1/comm").unwrap_or_default().trim().to_string();
+        let init_system = if init_comm == "systemd" {
+            "systemd".to_string()
+        } else {
+            "SysVinit (systemd-free)".to_string()
+        };
+
+        Ok(SystemTelemetry {
+            os_name,
+            kernel,
+            init_system,
+            memory_used_mb,
+            memory_total_mb,
+            cpu_cores: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
+            uptime_seconds,
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok(SystemTelemetry {
+            os_name: "Ankora Linux (Simulated Host)".to_string(),
+            kernel: "Linux 6.1.0-22-amd64 (Dev Core)".to_string(),
+            init_system: "SysVinit (systemd-free)".to_string(),
+            memory_used_mb: 1140,
+            memory_total_mb: 8192,
+            cpu_cores: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
+            uptime_seconds: 7200,
+        })
+    }
 }
 
 #[tauri::command]
@@ -1140,6 +1371,275 @@ async fn set_system_keyboard(layout: String) -> Result<String, String> {
     Ok(format!("Klavye: {}", clean))
 }
 
+// ============================================================================
+// ANKORA GÜNCELLEYİCİ (ANKORA DE UPDATE MANAGER)
+// ============================================================================
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateReleaseInfo {
+    pub has_update: bool,
+    pub current_version: String,
+    pub latest_version: String,
+    pub release_name: String,
+    pub release_notes: String,
+    pub download_url: Option<String>,
+    pub published_at: String,
+    pub package_size_bytes: u64,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct UpdateProgressPayload {
+    pub percent: u8,
+    pub stage: String,
+    pub message: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct GitHubAsset {
+    name: String,
+    browser_download_url: String,
+    size: u64,
+}
+
+#[derive(Deserialize, Debug)]
+struct GitHubRelease {
+    tag_name: String,
+    name: Option<String>,
+    body: Option<String>,
+    published_at: Option<String>,
+    assets: Option<Vec<GitHubAsset>>,
+}
+
+pub fn parse_semver(v: &str) -> (u32, u32, u32) {
+    let clean = v.trim().trim_start_matches('v').trim_start_matches('V');
+    let mut parts = clean.split('.').filter_map(|s| s.parse::<u32>().ok());
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
+}
+
+pub fn is_newer_version(remote: &str, current: &str) -> bool {
+    let r = parse_semver(remote);
+    let c = parse_semver(current);
+    r > c
+}
+
+fn process_github_release(release: GitHubRelease, current_ver: &str) -> UpdateReleaseInfo {
+    let latest_tag = release.tag_name.trim();
+    let has_update = is_newer_version(latest_tag, current_ver);
+
+    let mut deb_url = None;
+    let mut deb_size = 0u64;
+
+    if let Some(assets) = release.assets {
+        for asset in assets {
+            if asset.name.ends_with(".deb") {
+                deb_url = Some(asset.browser_download_url);
+                deb_size = asset.size;
+                break;
+            }
+        }
+    }
+
+    UpdateReleaseInfo {
+        has_update,
+        current_version: current_ver.to_string(),
+        latest_version: latest_tag.to_string(),
+        release_name: release.name.unwrap_or_else(|| latest_tag.to_string()),
+        release_notes: release.body.unwrap_or_else(|| "Sürüm notu bulunamadı.".to_string()),
+        download_url: deb_url,
+        published_at: release.published_at.unwrap_or_default(),
+        package_size_bytes: deb_size,
+    }
+}
+
+#[tauri::command]
+async fn check_de_update(repo_override: Option<String>) -> Result<UpdateReleaseInfo, String> {
+    let current_ver = env!("CARGO_PKG_VERSION");
+    let target_repo = repo_override.unwrap_or_else(|| "Ankora-Linux/Ayaz".to_string());
+
+    let client = reqwest::Client::builder()
+        .user_agent(format!("ayaz-updater/{}", current_ver))
+        .timeout(std::time::Duration::from_secs(12))
+        .build()
+        .map_err(|e| format!("HTTP istemcisi başlatılamadı: {}", e))?;
+
+    let url = format!("https://api.github.com/repos/{}/releases/latest", target_repo);
+    let resp = client.get(&url).send().await;
+
+    match resp {
+        Ok(response) => {
+            if response.status() == reqwest::StatusCode::NOT_FOUND {
+                // Eğer Ankora-Linux/Ayaz reposunda henüz release yoksa, Ankora-Linux ana reposunu dene
+                if target_repo == "Ankora-Linux/Ayaz" {
+                    let fallback_url = "https://api.github.com/repos/Ankora-Linux/Ankora-Linux/releases/latest";
+                    if let Ok(fallback_resp) = client.get(fallback_url).send().await {
+                        if fallback_resp.status().is_success() {
+                            if let Ok(release) = fallback_resp.json::<GitHubRelease>().await {
+                                return Ok(process_github_release(release, current_ver));
+                            }
+                        }
+                    }
+                }
+
+                return Ok(UpdateReleaseInfo {
+                    has_update: false,
+                    current_version: current_ver.to_string(),
+                    latest_version: current_ver.to_string(),
+                    release_name: "En Son Kararlı Sürüm".to_string(),
+                    release_notes: format!(
+                        "Ayaz Masaüstü Ortamı v{} şu anda en güncel sürümdür. Henüz yeni bir sürüm yayını bulunamadı.",
+                        current_ver
+                    ),
+                    download_url: None,
+                    published_at: String::new(),
+                    package_size_bytes: 0,
+                });
+            }
+
+            if !response.status().is_success() {
+                return Err(format!(
+                    "GitHub API yanıt vermedi (HTTP {}). Lütfen internet bağlantınızı kontrol edin.",
+                    response.status()
+                ));
+            }
+
+            let release = response
+                .json::<GitHubRelease>()
+                .await
+                .map_err(|e| format!("Sürüm verisi çözümlenemedi: {}", e))?;
+
+            Ok(process_github_release(release, current_ver))
+        }
+        Err(e) => {
+            Err(format!(
+                "Güncelleme sunucusuna bağlanılamadı: {}. Lütfen internet bağlantınızı kontrol edin.",
+                e
+            ))
+        }
+    }
+}
+
+#[tauri::command]
+async fn download_and_apply_de_update(
+    window: tauri::Window,
+    download_url: String,
+) -> Result<String, String> {
+    // Güvenlik doğrulaması: Yalnızca GitHub releases alanından indirmeye izin ver
+    if !download_url.starts_with("https://github.com/")
+        && !download_url.starts_with("https://objects.githubusercontent.com/")
+    {
+        return Err("Güvenlik İlkesi İhlali: İndirme bağlantısı güvenilir GitHub sunucusuna ait değil.".to_string());
+    }
+
+    let _ = window.emit("update-progress", UpdateProgressPayload {
+        percent: 10,
+        stage: "connecting".to_string(),
+        message: "Ayaz DE paketine bağlanılıyor...".to_string(),
+    });
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("İstemci hatası: {}", e))?;
+
+    let res = client.get(&download_url).send().await
+        .map_err(|e| format!("İndirme bağlantısı kurulamadı: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Paket indirilemedi (HTTP {})", res.status()));
+    }
+
+    let total_size = res.content_length().unwrap_or(0);
+
+    let _ = window.emit("update-progress", UpdateProgressPayload {
+        percent: 30,
+        stage: "downloading".to_string(),
+        message: if total_size > 0 {
+            format!("Ayaz DE indiriliyor ({:.1} MB)...", total_size as f64 / 1_048_576.0)
+        } else {
+            "Ayaz DE paketi indiriliyor...".to_string()
+        },
+    });
+
+    let bytes = res.bytes().await.map_err(|e| format!("Paket verisi indirilirken hata: {}", e))?;
+
+    #[cfg(target_os = "linux")]
+    let deb_path = PathBuf::from("/tmp/ayaz-update.deb");
+
+    #[cfg(not(target_os = "linux"))]
+    let deb_path = std::env::temp_dir().join("ayaz-update.deb");
+
+    fs::write(&deb_path, &bytes)
+        .map_err(|e| format!("Geçici güncelleme dosyası diske kaydedilemedi: {}", e))?;
+
+    let _ = window.emit("update-progress", UpdateProgressPayload {
+        percent: 80,
+        stage: "installing".to_string(),
+        message: "Ayaz Masaüstü Ortamı sisteme kuruluyor (dpkg)...".to_string(),
+    });
+
+    #[cfg(target_os = "linux")]
+    {
+        let helper_path = Path::new("/usr/local/bin/ayaz-update-helper");
+        let fallback_helper = Path::new("/usr/local/bin/ankora-de-update-helper");
+
+        let install_status = if helper_path.exists() {
+            Command::new("sudo")
+                .args(["/usr/local/bin/ayaz-update-helper", "/tmp/ayaz-update.deb"])
+                .status()
+        } else if fallback_helper.exists() {
+            Command::new("sudo")
+                .args(["/usr/local/bin/ankora-de-update-helper", "/tmp/ayaz-update.deb"])
+                .status()
+        } else {
+            Command::new("sudo")
+                .args(["dpkg", "-i", "/tmp/ayaz-update.deb"])
+                .status()
+        };
+
+        match install_status {
+            Ok(status) if status.success() => {
+                let _ = window.emit("update-progress", UpdateProgressPayload {
+                    percent: 100,
+                    stage: "completed".to_string(),
+                    message: "Ayaz Masaüstü Ortamı başarıyla güncellendi! Masaüstünü şimdi yeniden başlatabilirsiniz.".to_string(),
+                });
+                Ok("Ayaz DE başarıyla güncellendi.".to_string())
+            }
+            Ok(status) => {
+                Err(format!("Kurulum başarısız oldu (Çıkış Kodu: {}).", status.code().unwrap_or(-1)))
+            }
+            Err(e) => {
+                Err(format!("Kurulum yardımcısı çalıştırılamadı: {}", e))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+        let _ = window.emit("update-progress", UpdateProgressPayload {
+            percent: 100,
+            stage: "completed".to_string(),
+            message: "Simülasyon: Ayaz Masaüstü Ortamı başarıyla doğrulandı ve kuruldu.".to_string(),
+        });
+        Ok("Simülasyon güncellemesi tamamlandı.".to_string())
+    }
+}
+
+#[tauri::command]
+fn restart_desktop_process() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("pkill").args(["-f", "ayaz"]).spawn();
+        let _ = Command::new("pkill").args(["-f", "ankora-de"]).spawn();
+    }
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -1151,6 +1651,9 @@ fn main() {
             list_available_documents,
             query_local_ai,
             execute_agent_confirmed_action,
+            save_ai_credential,
+            has_ai_credential,
+            delete_ai_credential,
             get_storage_devices,
             execute_system_installation,
             get_system_telemetry,
@@ -1158,14 +1661,90 @@ fn main() {
             launch_application,
             check_first_run,
             set_first_run_completed,
-            set_system_keyboard
+            set_system_keyboard,
+            check_de_update,
+            download_and_apply_de_update,
+            restart_desktop_process
         ])
-        .setup(|app| {
-            if let Some(win) = app.get_window("main") {
-                let _ = win.set_fullscreen(true);
-            }
-            Ok(())
-        })
         .run(tauri::generate_context!())
         .expect("Ankora DE başlatılırken hata oluştu");
+}
+
+// ============================================================================
+// BİRİM TESTLERİ (UNIT TESTS) - KOD KALİTESİ BULGUSU #9
+// ============================================================================
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_valid_disk_target() {
+        // Geçerli tüm diskler
+        assert!(is_valid_disk_target("/dev/sda"));
+        assert!(is_valid_disk_target("/dev/sdb"));
+        assert!(is_valid_disk_target("/dev/vda"));
+        assert!(is_valid_disk_target("/dev/nvme0n1"));
+        assert!(is_valid_disk_target("/dev/nvme1n1"));
+
+        // Kesinlikle reddedilmesi gereken bölümler (partitions)
+        assert!(!is_valid_disk_target("/dev/sda1"));
+        assert!(!is_valid_disk_target("/dev/sda2"));
+        assert!(!is_valid_disk_target("/dev/vda1"));
+        assert!(!is_valid_disk_target("/dev/nvme0n1p1"));
+        assert!(!is_valid_disk_target("/dev/nvme0n1p2"));
+
+        // Geçersiz yollar ve karakterler
+        assert!(!is_valid_disk_target("/dev/random"));
+        assert!(!is_valid_disk_target("/dev/null"));
+        assert!(!is_valid_disk_target("/etc/shadow"));
+        assert!(!is_valid_disk_target("sda"));
+    }
+
+    #[test]
+    fn test_is_valid_username() {
+        assert!(is_valid_username("pars"));
+        assert!(is_valid_username("ankora_user"));
+        assert!(is_valid_username("user-1"));
+
+        assert!(!is_valid_username(""));
+        assert!(!is_valid_username("1user")); // Rakamla başlayamaz
+        assert!(!is_valid_username("User"));  // Büyük harf içeremez
+        assert!(!is_valid_username("user;rm")); // Tehlikeli karakter
+    }
+
+    #[test]
+    fn test_is_valid_deb_package_name() {
+        assert!(is_valid_deb_package_name("firefox-esr"));
+        assert!(is_valid_deb_package_name("vlc"));
+        assert!(is_valid_deb_package_name("libgtk-3-0"));
+        assert!(is_valid_deb_package_name("g++"));
+
+        assert!(!is_valid_deb_package_name("a"));
+        assert!(!is_valid_deb_package_name("-firefox"));
+        assert!(!is_valid_deb_package_name("pkg;rm -rf"));
+    }
+
+    #[test]
+    fn test_forbidden_launch_binaries() {
+        assert!(FORBIDDEN_LAUNCH_BINARIES.contains(&"sudo"));
+        assert!(FORBIDDEN_LAUNCH_BINARIES.contains(&"su"));
+        assert!(FORBIDDEN_LAUNCH_BINARIES.contains(&"pkexec"));
+        assert!(FORBIDDEN_LAUNCH_BINARIES.contains(&"bash"));
+        assert!(FORBIDDEN_LAUNCH_BINARIES.contains(&"dd"));
+    }
+
+    #[test]
+    fn test_semver_and_updater() {
+        assert_eq!(parse_semver("v2.0.0"), (2, 0, 0));
+        assert_eq!(parse_semver("2.1.3"), (2, 1, 3));
+        assert_eq!(parse_semver("V1.9.0"), (1, 9, 0));
+
+        assert!(is_newer_version("v2.0.1", "2.0.0"));
+        assert!(is_newer_version("2.1.0", "2.0.9"));
+        assert!(is_newer_version("3.0.0", "2.9.9"));
+
+        assert!(!is_newer_version("2.0.0", "2.0.0"));
+        assert!(!is_newer_version("v2.0.0", "2.0.1"));
+        assert!(!is_newer_version("1.9.9", "2.0.0"));
+    }
 }

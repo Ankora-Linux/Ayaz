@@ -7,7 +7,7 @@
     "distDir": "../src"
   },
   "package": {
-    "productName": "Ankora DE",
+    "productName": "Ayaz DE",
     "version": "2.0.0"
   },
   "tauri": {
@@ -42,15 +42,15 @@
       "icon": [
         "icons/icon.png"
       ],
-      "identifier": "org.ankora.de",
+      "identifier": "org.ankora.ayaz",
       "targets": ["deb", "appimage"]
     },
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*;"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*; frame-src 'self' data: blob:; object-src 'self' data:;"
     },
     "windows": [
       {
-        "title": "Ankora Linux",
+        "title": "Ayaz — Ankora Linux",
         "fullscreen": true,
         "decorations": false,
         "resizable": false,

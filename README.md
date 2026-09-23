@@ -1,18 +1,18 @@
 <div align="center">
-  <img src="assets/logo.png" alt="Ankora OS Logo" width="240" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
+  <img src="assets/logo.png" alt="Ayaz DE Logo" width="220" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
   <br><br>
-  <h1>Ankora Linux (Ankora OS)</h1>
-  <p><b>Devuan Linux Tabanlı, Systemd-Free Hafif Çekirdekli, Modern Kiosk Masaüstü Ortamı (Tauri + Rust)</b></p>
+  <h1>Ayaz Masaüstü Ortamı (Ayaz DE)</h1>
+  <p><b>Ankora Linux İçin Devuan Tabanlı, Systemd-Free Hafif Çekirdekli, Modern Kiosk Masaüstü Ortamı (Tauri + Rust)</b></p>
 
   <p>
-    <img src="https://img.shields.io/badge/S%C3%9CR%C3%9CM-2.0_(DEVUAN)-ffffff?style=for-the-badge&labelColor=111111" alt="Sürüm">
+    <img src="https://img.shields.io/badge/S%C3%9CR%C3%9CM-2.0.0-ffffff?style=for-the-badge&labelColor=111111" alt="Sürüm">
+    <img src="https://img.shields.io/badge/DA%C4%9EITIM-ANKORA_LINUX-059669?style=for-the-badge&labelColor=111111" alt="Dağıtım">
     <img src="https://img.shields.io/badge/TABAN-DEVUAN_DAEDALUS-d1d1d1?style=for-the-badge&labelColor=111111" alt="Taban">
-    <img src="https://img.shields.io/badge/MASA%C3%9CST%C3%9C-ANKORA_DE_(TAURI)-ffffff?style=for-the-badge&labelColor=111111" alt="Masaüstü">
     <img src="https://img.shields.io/badge/L%C3%B0SANS-MIT-41a013?style=for-the-badge&labelColor=111111" alt="Lisans">
   </p>
 </div>
 
-Ankora OS; düşük donanım kaynaklarına sahip sistemlerde Chrome OS Flex kararlılığı ve yüksek tepkisellik sunmak üzere tasarlanmış, systemd kirliliğinden arındırılmış Devuan Linux tabanlı bağımsız bir dağıtımdır. Masaüstü ortamı (Ankora DE), Rust ve WebKitGTK (Tauri) üzerinde sıfır çökme ve ultra hafif bellek ayak izi ile çalışır.
+Ayaz Desktop Environment (Ayaz DE); Ankora Linux işletim sistemi için geliştirilmiş, ultra hafif, endüstriyel monokrom tasarım diline ve yerel yapay zeka entegrasyonuna sahip bağımsız bir Kiosk masaüstü ortamıdır. Rust ve WebKitGTK (Tauri 1.5) üzerinde sıfır çökme, minimal bellek ayak izi ve tek tıkla GUI üzerinden güncelleme (Ayaz Güncelleyici) yetenekleriyle çalışır.
 
 ---
 

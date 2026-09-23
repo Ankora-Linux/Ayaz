@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ankora Linux DE</title>
+  <title>Ayaz — Ankora Linux</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body class="desktop-body">
@@ -45,8 +45,8 @@
             <div class="welcome-brand">
               <img src="logo.svg" alt="Ankora Logo" class="welcome-logo">
               <div class="welcome-brand-text">
-                <strong>ANKORA LINUX</strong>
-                <span>Devuan Daedalus 2.0</span>
+                <strong>AYAZ DE</strong>
+                <span>Ankora Linux 2.0</span>
               </div>
             </div>
             <nav class="welcome-nav">
@@ -1112,30 +1112,110 @@
                 <img src="logo.svg" alt="Ankora Logo" class="about-hero-logo">
                 <div class="about-hero-text">
                   <h2>ANKORA LINUX 2.0</h2>
-                  <span class="hero-edition">Daedalus Edition • Systemd-Free Kiosk Platform</span>
-                  <p>Hafif WebKitGTK ve Rust Tauri çekirdeği ile güçlendirilmiş, bağımsız Devuan GNU/Linux dağıtımı.</p>
+                  <span class="hero-edition">Ayaz DE Edition • Systemd-Free Kiosk Platform</span>
+                  <p>Hafif WebKitGTK ve Rust Tauri çekirdeği ile güçlendirilmiş, Ayaz Masaüstü Ortamı (DE) barındıran bağımsız Devuan GNU/Linux dağıtımı.</p>
                 </div>
               </div>
 
               <div class="telemetry-grid">
                 <div class="telemetry-cell"><span>İşletim Sistemi:</span><strong id="tele-os">Devuan Daedalus 5.0</strong></div>
+                <div class="telemetry-cell"><span>Masaüstü Ortamı:</span><strong>Ayaz DE 2.0</strong></div>
                 <div class="telemetry-cell"><span>İnit Sistemi:</span><strong id="tele-init">SysVinit 3.06 (PID 1)</strong></div>
                 <div class="telemetry-cell"><span>Linux Çekirdeği:</span><strong id="tele-kernel">Linux 6.1.0-22-amd64</strong></div>
                 <div class="telemetry-cell"><span>Bellek (RAM):</span><strong id="tele-mem">1.2 / 8.0 GB (Aktif)</strong></div>
-                <div class="telemetry-cell"><span>Pencere Motoru:</span><strong>Tauri + WebKitGTK</strong></div>
                 <div class="telemetry-cell"><span>ISO İmaj Kimliği:</span><strong>ankora-2.0-daedalus.iso</strong></div>
               </div>
 
               <div class="about-update-banner">
                 <div class="update-status-text">
-                  <strong id="update-status-title">Paket Depoları: Güncel</strong>
-                  <span id="update-status-desc">Tüm Devuan resmi aynaları ve Ankora depoları senkronize.</span>
+                  <strong id="update-status-title">Ayaz Masaüstü & Sistem Güncellemeleri</strong>
+                  <span id="update-status-desc">GitHub Release ve Devuan paket depolarını denetleyin.</span>
                 </div>
                 <button class="btn-pkg" id="btn-check-updates">Güncellemeleri Denetle</button>
               </div>
             </div>
 
           </div>
+        </div>
+      </div>
+    <!-- ======================================================================= -->
+    <!-- 8. AYAZ GÜNCELLEYİCİ (AYAZ DE UPDATE MANAGER)                           -->
+    <!-- ======================================================================= -->
+    <section class="window" id="win-updater" style="top: 80px; left: 220px; width: 680px; height: 510px;" aria-labelledby="updater-header-title">
+      <div class="window-header" data-tauri-drag-region>
+        <div class="window-meta">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width: 14px; height: 14px; margin-right: 6px; display: inline-block; vertical-align: -2px;">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+          <span id="updater-header-title">Ayaz Güncelleyici — Masaüstü Ortamı (DE)</span>
+        </div>
+        <div class="window-controls">
+          <button class="ctrl-btn min" title="Küçült">−</button>
+          <button class="ctrl-btn max" title="Büyüt">□</button>
+          <button class="ctrl-btn close" title="Kapat">✕</button>
+        </div>
+      </div>
+      <div class="window-view">
+        <div class="updater-container">
+          
+          <!-- Üst Durum Kartı -->
+          <div class="updater-status-card">
+            <div class="updater-hero-icon" id="updater-hero-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg>
+            </div>
+            <div class="updater-hero-info">
+              <div class="updater-version-row">
+                <span class="updater-app-name">Ayaz Masaüstü Ortamı (DE)</span>
+                <span class="updater-badge" id="updater-status-badge">Kontrol Edilmedi</span>
+              </div>
+              <div class="updater-sub-meta">
+                <span>Mevcut: <strong id="updater-curr-ver">v2.0.0</strong></span>
+                <span class="dot-sep">•</span>
+                <span>En Son: <strong id="updater-latest-ver">—</strong></span>
+                <span class="dot-sep">•</span>
+                <span>Dağıtım: <strong>Ankora Linux</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sürüm Notları / Yenilikler Bölümü -->
+          <div class="updater-section-heading">
+            <span>Sürüm Notları & Değişiklikler (Changelog)</span>
+            <span class="updater-date" id="updater-release-date"></span>
+          </div>
+          <div class="updater-notes-box" id="updater-notes-box">
+            <div class="updater-notes-placeholder">
+              Ayaz DE güncellemelerini denetlemek ve yeni sürüm olup olmadığını öğrenmek için aşağıdaki <strong>"Güncellemeleri Denetle"</strong> butonuna tıklayın.
+            </div>
+          </div>
+
+          <!-- İlerleme Çubuğu Alanı (İndirme/Kurulum sırasında görünür) -->
+          <div class="updater-progress-section" id="updater-progress-section" style="display: none;">
+            <div class="updater-progress-header">
+              <span id="updater-progress-label">Güncelleme paketi indiriliyor...</span>
+              <span id="updater-progress-pct">0%</span>
+            </div>
+            <div class="progress-mono-track">
+              <div class="progress-mono-fill" id="updater-progress-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- Alt İşlem Butonları -->
+          <div class="updater-actions-bar">
+            <div class="updater-repo-hint">
+              <span>Depo: <code>github.com/Ankora-Linux/Ayaz</code></span>
+            </div>
+            <div class="updater-buttons">
+              <button class="btn-pkg" id="btn-updater-check">Güncellemeleri Denetle</button>
+              <button class="btn-pkg primary" id="btn-updater-apply" disabled style="display: none; background: var(--text-primary); color: var(--bg-deep);">Şimdi Güncelle</button>
+              <button class="btn-pkg" id="btn-updater-restart" style="display: none; background: #10b981; color: #fff;">Masaüstünü Yeniden Başlat</button>
+            </div>
+          </div>
+
         </div>
       </div>
     </section>
@@ -1289,6 +1369,19 @@
           <span class="app-desc">PDF & Not Düzenleyici</span>
         </div>
       </div>
+
+      <!-- GÜNCELLEYİCİ -->
+      <div class="pinned-app-card" data-open="win-updater" tabindex="0" role="button">
+        <div class="pinned-icon-box" style="background: rgba(37, 99, 235, 0.15); color: #3b82f6;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+          </svg>
+        </div>
+        <div class="pinned-app-meta">
+          <span class="app-title">Ayaz Güncelleyici</span>
+          <span class="app-desc">Masaüstü Sürümü</span>
+        </div>
+      </div>
     </div>
 
     <!-- 3. ALT BÖLÜM: 2 SÜTUNLU SON BELGELER VE HIZLI KISAYOLLAR -->
@@ -1329,6 +1422,10 @@
           <span>Hızlı Kısayollar</span>
         </div>
         <div class="start-shortcuts-list">
+          <div class="shortcut-action-row" data-action="open-updater" data-open="win-updater" tabindex="0" role="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+            <span>Sistem Güncelleme</span>
+          </div>
           <div class="shortcut-action-row" data-action="quick-clean" tabindex="0" role="button">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             <span>Önbelleği Temizle</span>
@@ -1372,10 +1469,10 @@
   <footer class="taskbar">
     <!-- Sol Bilgi / Widget Grubu -->
     <div class="taskbar-left-group">
-      <div class="taskbar-brand-capsule" title="Ankora Linux Live Kiosk Dağıtımı">
-        <img src="logo.svg" alt="Ankora" class="brand-capsule-logo">
-        <span class="brand-capsule-text">Ankora 2.0</span>
-        <span class="brand-capsule-tag">Live ISO</span>
+      <div class="taskbar-brand-capsule" title="Ayaz Masaüstü Ortamı — Ankora Linux">
+        <img src="logo.svg" alt="Ayaz" class="brand-capsule-logo">
+        <span class="brand-capsule-text">Ayaz DE</span>
+        <span class="brand-capsule-tag">Ankora Linux</span>
       </div>
     </div>
 
