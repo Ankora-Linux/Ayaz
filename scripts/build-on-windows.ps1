@@ -136,8 +136,9 @@ else {
     Write-Host ""
     Write-Host "  [Q] Çıkış" -ForegroundColor DarkGray
     Write-Host ""
+    Write-Host ">>> Lütfen seçiminizi yapıp (1, 2 veya 3) klavyeden ENTER tuşuna basınız: " -ForegroundColor Yellow -NoNewline
 
-    $choice = Read-Host "Seçiminiz [1, 2, 3 veya Q]"
+    $choice = Read-Host
 
     switch ($choice) {
         "1" {
@@ -156,13 +157,11 @@ else {
             Write-Host "======================================================================" -ForegroundColor Cyan
             Write-Host "     GITHUB ACTIONS BULUTTA ISO DERLEME ADIMLARI                      " -ForegroundColor Yellow
             Write-Host "======================================================================" -ForegroundColor Cyan
-            Write-Host "1. Değişiklikleri GitHub deponuza gönderin (git push)." -ForegroundColor White
-            Write-Host "2. GitHub deponuza gidin: https://github.com/Ankora-Linux/Ayaz" -ForegroundColor White
-            Write-Host "3. 'Actions' sekmesine tıklayın." -ForegroundColor White
-            Write-Host "4. Sol menüden 'Ankora Linux Canlı ISO Derleme' iş akışını seçin." -ForegroundColor White
-            Write-Host "5. 'Run workflow' butonuna basarak derlemeyi başlatın." -ForegroundColor Green
-            Write-Host "6. 10-15 dakika içinde tamamlanan 'ankora-linux-2.0-ayaz-amd64.iso' dosyasını" -ForegroundColor White
-            Write-Host "   Artifacts veya Releases bölümünden tek tıkla Windows'unuza indirin!" -ForegroundColor Green
+            Write-Host "Tarayıcınızda GitHub Actions sayfası açılıyor..." -ForegroundColor Green
+            Start-Process "https://github.com/Ankora-Linux/Ayaz/actions"
+            Write-Host "1. Açılan sayfada 'Ankora Linux Canlı ISO Derleme' iş akışını seçin." -ForegroundColor White
+            Write-Host "2. Sağ üstteki 'Run workflow' butonuna basarak derlemeyi başlatın." -ForegroundColor Green
+            Write-Host "3. 10-15 dakika içinde üretilen 'ankora-linux-2.0-ayaz-amd64.iso' kalıbı hazır olacaktır." -ForegroundColor White
             Write-Host "======================================================================" -ForegroundColor Cyan
         }
         "3" {
