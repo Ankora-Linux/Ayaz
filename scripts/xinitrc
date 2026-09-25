@@ -1,0 +1,18 @@
+#!/bin/sh
+# Ankora Linux Minimalist X11 Kiosk Başlatıcı (.xinitrc)
+# Devuan GNU/Linux 5 (Daedalus) SysVinit
+
+# X11 donanım imleci ve arka plan temizliği
+xsetroot -solid "#0b0c10"
+xset -dpms
+xset s off
+xset s noblank
+
+# Ayaz DE Masaüstü Ortamını çalıştır
+if [ -x /usr/bin/ayaz ]; then
+    exec /usr/bin/ayaz
+elif [ -x /usr/local/bin/ayaz ]; then
+    exec /usr/local/bin/ayaz
+else
+    exec xterm -e "echo Ayaz ikili dosyasi bulunamadi!; sh"
+fi

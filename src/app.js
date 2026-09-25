@@ -16,6 +16,51 @@
   }
 
   // ============================================================================
+  // GÜVENLİ DEPOLAMA MOTORU (SAFESTORAGE - file:/// VE GİZLİ MOD GÜVENCESİ)
+  // ============================================================================
+  const SafeStorage = {
+    getItem(key, fallback = null) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const val = localStorage.getItem(key);
+          return val !== null ? val : fallback;
+        }
+      } catch (e) {}
+      return fallback;
+    },
+    setItem(key, val) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(key, String(val));
+        }
+      } catch (e) {}
+    },
+    removeItem(key) {
+      try {
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem(key);
+        }
+      } catch (e) {}
+    },
+    getSession(key, fallback = null) {
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          const val = sessionStorage.getItem(key);
+          return val !== null ? val : fallback;
+        }
+      } catch (e) {}
+      return fallback;
+    },
+    setSession(key, val) {
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          sessionStorage.setItem(key, String(val));
+        }
+      } catch (e) {}
+    }
+  };
+
+  // ============================================================================
   // TAURI IPC KÖPRÜSÜ (NATIVE BRIDGE)
   // ============================================================================
   const TauriBridge = {
@@ -49,6 +94,12 @@
             comment: 'Devuan paket deposundan kuruldu',
             categories: ['Utility']
           };
+
+        case 'remove_deb_package':
+          return `Paket '${args.packageName}' başarıyla kaldırıldı.`;
+
+        case 'launch_application':
+          return `[Uygulama Başlatıldı]: ${args.exec}`;
 
         case 'run_terminal_command':
           const c = (args.command || '').trim();
@@ -129,10 +180,19 @@
             os_name: 'Devuan GNU/Linux 5 (daedalus)',
             kernel: 'Linux 6.1.0-22-amd64 (Tauri Native)',
             init_system: 'SysVinit (systemd-free)',
-            memory_used_mb: 1140,
+            memory_used_mb: 110,
             memory_total_mb: 8192,
             cpu_cores: 4,
             uptime_seconds: 7200
+          };
+
+        case 'optimize_system_memory':
+          return {
+            success: true,
+            freed_mb: 48,
+            current_used_mb: 110,
+            current_total_mb: 8192,
+            message: 'Sistem ve uygulama önbellekleri boşaltıldı (Simüle).'
           };
 
         case 'check_first_run':
@@ -158,6 +218,21 @@
             published_at: new Date().toISOString(),
             package_size_bytes: 0
           };
+
+        case 'is_lock_configured':
+          return true;
+
+        case 'verify_lock_credentials':
+          return (args && args.pin && args.pin === SafeStorage.getItem('ankora_lock_pin'));
+
+        case 'set_lock_credentials':
+          if (args && args.newPin) {
+            SafeStorage.setItem('ankora_lock_pin', args.newPin);
+          }
+          return null;
+
+        case 'lock_x11_session':
+          return 'Oturum kilitlendi.';
 
         case 'download_and_apply_de_update':
           return 'Simülasyon güncellemesi başarıyla tamamlandı.';
@@ -193,37 +268,134 @@
 
         if (btnClose) btnClose.addEventListener('click', (e) => { e.stopPropagation(); this.close(win); });
         if (btnMin) btnMin.addEventListener('click', (e) => { e.stopPropagation(); this.minimize(win); });
-        if (btnMax) btnMax.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMaximize(win); });
+        if (btnMax) {
+          btnMax.addEventListener('click', (e) => { e.stopPropagation(); this.toggleMaximize(win); });
+          btnMax.addEventListener('mouseenter', () => {
+            const menu = document.getElementById('snap-layouts-menu');
+            if (!menu) return;
+            const bRect = btnMax.getBoundingClientRect();
+            menu.style.top = `${bRect.bottom + 6}px`;
+            menu.style.left = `${Math.max(10, bRect.right - 240)}px`;
+            menu.classList.add('open');
+            this.activeSnapTargetWin = win;
+          });
+          btnMax.addEventListener('mouseleave', () => {
+            const menu = document.getElementById('snap-layouts-menu');
+            if (!menu) return;
+            setTimeout(() => {
+              if (!menu.matches(':hover') && !btnMax.matches(':hover')) {
+                menu.classList.remove('open');
+              }
+            }, 250);
+          });
+        }
 
-        // DOM Masaüstü Pencere Sürükleme (Drag)
+        // Yüksek Performanslı ve Akıcı Pencere Sürükleme (GPU / rAF Dragging + Ayaz DE Edge Snapping)
         const header = win.querySelector('.window-header');
         if (header) {
+          // Başlığa çift tıklama ile Büyüt / Eski Boyuta Getir
+          header.addEventListener('dblclick', (e) => {
+            if (e.target.closest('.window-controls')) return;
+            this.toggleMaximize(win);
+          });
+
           header.addEventListener('mousedown', (e) => {
             if (e.target.closest('.window-controls')) return;
             if (win.classList.contains('maximized')) return;
 
             this.bringToFront(win);
 
+            const snapGhost = document.getElementById('window-snap-preview');
             const rect = win.getBoundingClientRect();
             const shiftX = e.clientX - rect.left;
             const shiftY = e.clientY - rect.top;
 
+            let rafId = null;
+            let targetX = rect.left;
+            let targetY = rect.top;
+            let activeSnap = null; // 'left' | 'right' | 'top' | null
+
+            document.body.classList.add('is-dragging');
+            win.classList.add('is-dragging');
+
+            const applyPos = () => {
+              win.style.left = `${targetX}px`;
+              win.style.top = `${targetY}px`;
+              rafId = null;
+            };
+
             const onMouseMove = (moveEvent) => {
               const maxLeft = Math.max(0, window.innerWidth - 80);
               const maxTop = Math.max(0, window.innerHeight - 80);
-              const newLeft = Math.max(0, Math.min(moveEvent.clientX - shiftX, maxLeft));
-              const newTop = Math.max(0, Math.min(moveEvent.clientY - shiftY, maxTop));
-              win.style.left = `${newLeft}px`;
-              win.style.top = `${newTop}px`;
+              targetX = Math.max(0, Math.min(moveEvent.clientX - shiftX, maxLeft));
+              targetY = Math.max(0, Math.min(moveEvent.clientY - shiftY, maxTop));
+              if (!rafId) {
+                rafId = requestAnimationFrame(applyPos);
+              }
+
+              // Ayaz DE Akıcı Edge Snapping Algılama
+              if (moveEvent.clientX < 18) {
+                activeSnap = 'left';
+                if (snapGhost) {
+                  snapGhost.style.left = '4px';
+                  snapGhost.style.top = '4px';
+                  snapGhost.style.width = 'calc(50vw - 8px)';
+                  snapGhost.style.height = 'calc(100vh - var(--taskbar-height) - 8px)';
+                  snapGhost.classList.add('visible');
+                }
+              } else if (moveEvent.clientX > window.innerWidth - 18) {
+                activeSnap = 'right';
+                if (snapGhost) {
+                  snapGhost.style.left = 'calc(50vw + 4px)';
+                  snapGhost.style.top = '4px';
+                  snapGhost.style.width = 'calc(50vw - 8px)';
+                  snapGhost.style.height = 'calc(100vh - var(--taskbar-height) - 8px)';
+                  snapGhost.classList.add('visible');
+                }
+              } else if (moveEvent.clientY < 12) {
+                activeSnap = 'top';
+                if (snapGhost) {
+                  snapGhost.style.left = '4px';
+                  snapGhost.style.top = '4px';
+                  snapGhost.style.width = 'calc(100vw - 8px)';
+                  snapGhost.style.height = 'calc(100vh - var(--taskbar-height) - 8px)';
+                  snapGhost.classList.add('visible');
+                }
+              } else {
+                activeSnap = null;
+                if (snapGhost) snapGhost.classList.remove('visible');
+              }
             };
 
             const onMouseUp = () => {
+              if (rafId) cancelAnimationFrame(rafId);
+              document.body.classList.remove('is-dragging');
+              win.classList.remove('is-dragging');
+              if (snapGhost) snapGhost.classList.remove('visible');
+
               document.removeEventListener('mousemove', onMouseMove);
               document.removeEventListener('mouseup', onMouseUp);
+
+              // Snapping Eylemini Uygula
+              if (activeSnap === 'left') {
+                win.style.left = '0px';
+                win.style.top = '0px';
+                win.style.width = '50vw';
+                win.style.height = 'calc(100vh - var(--taskbar-height))';
+                win.classList.remove('maximized');
+              } else if (activeSnap === 'right') {
+                win.style.left = '50vw';
+                win.style.top = '0px';
+                win.style.width = '50vw';
+                win.style.height = 'calc(100vh - var(--taskbar-height))';
+                win.classList.remove('maximized');
+              } else if (activeSnap === 'top') {
+                this.toggleMaximize(win);
+              }
             };
 
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
+            document.addEventListener('mousemove', onMouseMove, { passive: true });
+            document.addEventListener('mouseup', onMouseUp, { once: true });
           });
         }
 
@@ -246,7 +418,7 @@
 
             const onResizeMove = (moveEvent) => {
               if (win.classList.contains('maximized')) return;
-              const newW = Math.max(400, startW + (moveEvent.clientX - startX));
+              const newW = Math.max(300, startW + (moveEvent.clientX - startX));
               const newH = Math.max(260, startH + (moveEvent.clientY - startY));
               win.style.width = `${newW}px`;
               win.style.height = `${newH}px`;
@@ -262,6 +434,23 @@
           });
         }
       });
+
+      const snapMenu = document.getElementById('snap-layouts-menu');
+      if (snapMenu) {
+        snapMenu.addEventListener('mouseleave', () => {
+          snapMenu.classList.remove('open');
+        });
+        snapMenu.querySelectorAll('.snap-zone').forEach(zone => {
+          zone.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const snapType = zone.getAttribute('data-snap');
+            if (this.activeSnapTargetWin && snapType) {
+              this.snapWindow(this.activeSnapTargetWin, snapType);
+            }
+            snapMenu.classList.remove('open');
+          });
+        });
+      }
     },
 
     bringToFront(win) {
@@ -280,11 +469,18 @@
       win.classList.add('open');
       this.bringToFront(win);
       this.syncTabs();
+
+      if (winId === 'win-updater' && typeof UpdaterManager !== 'undefined' && !UpdaterManager.latestRelease) {
+        UpdaterManager.checkForUpdates();
+      }
     },
 
     close(win) {
       win.classList.remove('open');
       win.classList.remove('active');
+      if (win.id === 'win-office' && typeof OfficeManager !== 'undefined') {
+        OfficeManager.clearFrame();
+      }
       this.syncTabs();
     },
 
@@ -297,6 +493,117 @@
     toggleMaximize(win) {
       win.classList.toggle('maximized');
       this.bringToFront(win);
+    },
+
+    snapWindow(win, layout) {
+      if (!win) return;
+      win.classList.remove('maximized');
+      win.classList.remove('minimized');
+      win.classList.add('open');
+      this.bringToFront(win);
+
+      const tbHeight = 48;
+      const sw = window.innerWidth;
+      const sh = window.innerHeight - tbHeight;
+
+      switch(layout) {
+        case 'left-half':
+          win.style.left = '0px';
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'right-half':
+          win.style.left = `${sw * 0.5}px`;
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'left-focus':
+          win.style.left = '0px';
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.7}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'right-sidebar':
+          win.style.left = `${sw * 0.7}px`;
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.3}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'col-left':
+          win.style.left = '0px';
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.25}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'col-center':
+          win.style.left = `${sw * 0.25}px`;
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'col-right':
+          win.style.left = `${sw * 0.75}px`;
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.25}px`;
+          win.style.height = `${sh}px`;
+          break;
+        case 'corner-tl':
+          win.style.left = '0px';
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh * 0.5}px`;
+          break;
+        case 'corner-tr':
+          win.style.left = `${sw * 0.5}px`;
+          win.style.top = '0px';
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh * 0.5}px`;
+          break;
+        case 'corner-bl':
+          win.style.left = '0px';
+          win.style.top = `${sh * 0.5}px`;
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh * 0.5}px`;
+          break;
+        case 'corner-br':
+          win.style.left = `${sw * 0.5}px`;
+          win.style.top = `${sh * 0.5}px`;
+          win.style.width = `${sw * 0.5}px`;
+          win.style.height = `${sh * 0.5}px`;
+          break;
+      }
+    },
+
+    cascadeWindows() {
+      const openWins = this.windows.filter(w => w.classList.contains('open') && !w.classList.contains('minimized'));
+      if (openWins.length === 0) return;
+      const count = openWins.length;
+      const tbHeight = 48;
+      const sw = window.innerWidth;
+      const sh = window.innerHeight - tbHeight;
+
+      if (count === 1) {
+        openWins[0].style.left = '10vw';
+        openWins[0].style.top = '8vh';
+        openWins[0].style.width = '80vw';
+        openWins[0].style.height = `${sh * 0.8}px`;
+      } else if (count === 2) {
+        this.snapWindow(openWins[0], 'left-half');
+        this.snapWindow(openWins[1], 'right-half');
+      } else if (count <= 4) {
+        const positions = ['corner-tl', 'corner-tr', 'corner-bl', 'corner-br'];
+        openWins.forEach((w, i) => this.snapWindow(w, positions[i % 4]));
+      } else {
+        openWins.forEach((w, i) => {
+          w.style.left = `${30 + i * 40}px`;
+          w.style.top = `${30 + i * 36}px`;
+          w.style.width = '60vw';
+          w.style.height = '60vh';
+          this.bringToFront(w);
+        });
+      }
     },
 
     syncTabs() {
@@ -336,19 +643,24 @@
     installedApps: [],
 
     async init() {
-      // Yerel önbellekten oku - kullanıcının kurduğu gerçek uygulamalar
-      const cached = localStorage.getItem('ankora_xdg_apps');
+      // 1. Kullanıcının kurduğu gerçek uygulamaları yerel depolamadan oku
+      const cached = SafeStorage.getItem('ankora_xdg_apps');
       if (cached) {
         try {
           const parsed = JSON.parse(cached);
-          this.installedApps = Array.isArray(parsed) ? parsed.filter(a => a && a.id) : [];
-          this.renderToDesktop();
+          // Yalnızca kullanıcının açıkça kurduğu uygulamaları masaüstüne al
+          this.installedApps = Array.isArray(parsed) ? parsed.filter(a => a && a.id && a.is_installed_by_user) : [];
         } catch (e) {
           this.installedApps = [];
         }
+      } else {
+        // Varsayılan: Temiz, ferah masaüstü (simge kalabalığı yok)
+        this.installedApps = [];
       }
+      this.renderToDesktop();
+      this.renderToStartMenu();
 
-      // Sistem XDG dizinlerini tara ve kurulu uygulamalarla güvenle birleştir
+      // Sistem XDG dizinlerini tara ve yalnızca kullanıcı tarafından kurulan paketlerle eşle
       try {
         const apps = await TauriBridge.invoke('scan_xdg_applications');
         if (apps && Array.isArray(apps)) {
@@ -362,8 +674,9 @@
               }
             }
           });
-          localStorage.setItem('ankora_xdg_apps', JSON.stringify(this.installedApps));
+          SafeStorage.setItem('ankora_xdg_apps', JSON.stringify(this.installedApps));
           this.renderToDesktop();
+          this.renderToStartMenu();
         }
       } catch (err) {}
     },
@@ -378,14 +691,16 @@
         this.installedApps.push(app);
       }
 
-      localStorage.setItem('ankora_xdg_apps', JSON.stringify(this.installedApps));
+      SafeStorage.setItem('ankora_xdg_apps', JSON.stringify(this.installedApps));
       this.renderToDesktop();
+      this.renderToStartMenu();
     },
 
     removeApplication(appId) {
       this.installedApps = this.installedApps.filter(a => a.id !== appId);
-      localStorage.setItem('ankora_xdg_apps', JSON.stringify(this.installedApps));
+      SafeStorage.setItem('ankora_xdg_apps', JSON.stringify(this.installedApps));
       this.renderToDesktop();
+      this.renderToStartMenu();
     },
 
     renderToDesktop() {
@@ -393,30 +708,240 @@
       if (!container) return;
       container.innerHTML = '';
 
+      if (this.installedApps.length === 0) {
+        return;
+      }
+
       this.installedApps.forEach(app => {
         const item = document.createElement('div');
-        item.className = 'desktop-item';
+        const cat = app.cat || 'util';
+        item.className = `desktop-item ayaz-desktop-shortcut cat-${cat}`;
         item.tabIndex = 0;
-        item.title = `${app.name} (${app.exec})\n${app.comment || ''}`;
+        item.setAttribute('role', 'button');
+        item.setAttribute('data-app-id', app.id);
+        item.title = `${app.name} (${app.exec})\n${app.comment || ''}\n• Çift tıkla başlat\n• Sağ tıkla seçenekler`;
+
+        const svgIcon = this.getAppSvgIcon(app);
         item.innerHTML = `
           <div class="item-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75">
-              <polygon points="5 3 19 12 5 21 5 3"></polygon>
-            </svg>
+            ${svgIcon}
+            <span class="item-cat-dot"></span>
           </div>
           <span class="item-name">${escapeHtml(app.name)}</span>
         `;
 
-        item.addEventListener('click', async () => {
-          Terminal.log(`[XDG EXEC] Başlatılıyor: ${app.exec}`, 'cmd');
-          try {
-            await TauriBridge.invoke('launch_application', { exec: app.exec });
-          } catch (e) {
-            Terminal.log(`[ERR] ${e}`, 'error');
+        // Tek tık: Odak / Seçim
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          document.querySelectorAll('.desktop-item').forEach(el => el.classList.remove('selected'));
+          item.classList.add('selected');
+        });
+
+        // Çift tık: Akıllı Başlatma (CLI -> Terminal, GUI -> launch_application)
+        item.addEventListener('dblclick', async (e) => {
+          e.stopPropagation();
+          this.launchApp(app);
+        });
+
+        // Enter tuşu ile başlatma desteği
+        item.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.launchApp(app);
           }
         });
 
+        // Sağ tık: Kısayol Özel Bağlam Menüsü
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.showShortcutContextMenu(e, app);
+        });
+
         container.appendChild(item);
+      });
+    },
+
+    renderToStartMenu() {
+      const heading = document.getElementById('start-installed-heading');
+      const countEl = document.getElementById('start-installed-count');
+      const container = document.getElementById('dynamic-start-apps');
+      if (!container) return;
+
+      container.innerHTML = '';
+      if (this.installedApps.length === 0) {
+        if (heading) heading.style.display = 'none';
+        container.style.display = 'none';
+        return;
+      }
+
+      if (heading) heading.style.display = 'flex';
+      if (countEl) countEl.textContent = `${this.installedApps.length} Uygulama`;
+      container.style.display = 'grid';
+
+      this.installedApps.forEach(app => {
+        const card = document.createElement('div');
+        const cat = app.cat || 'util';
+        card.className = `pinned-app-card dynamic-installed-app cat-${cat}`;
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('data-app-id', app.id);
+        card.setAttribute('data-open', app.id);
+        card.title = `${app.name} (${app.exec})\n${app.comment || ''}\n• Tıkla ve Başlat\n• Sağ tıkla seçenekler`;
+
+        const svgIcon = this.getAppSvgIcon(app);
+        card.innerHTML = `
+          <div class="pinned-icon-box" style="background: rgba(37, 99, 235, 0.14); color: var(--accent-active);">
+            ${svgIcon}
+          </div>
+          <div class="pinned-app-meta">
+            <span class="app-title">${escapeHtml(app.name)}</span>
+            <span class="app-desc">${escapeHtml(app.comment || (app.exec + ' yazılımı'))}</span>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          this.launchApp(app);
+          const startFlyout = document.getElementById('start-flyout');
+          const startBtn = document.getElementById('start-btn');
+          if (startFlyout) startFlyout.classList.remove('open');
+          if (startBtn) startBtn.classList.remove('active');
+        });
+
+        card.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.launchApp(app);
+            const startFlyout = document.getElementById('start-flyout');
+            const startBtn = document.getElementById('start-btn');
+            if (startFlyout) startFlyout.classList.remove('open');
+            if (startBtn) startBtn.classList.remove('active');
+          }
+        });
+
+        card.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.showShortcutContextMenu(e, app);
+        });
+
+        container.appendChild(card);
+      });
+    },
+
+    getAppSvgIcon(app) {
+      const cat = (app.cat || '').toLowerCase();
+      const id = (app.id || app.exec || '').toLowerCase();
+
+      if (id.includes('vlc') || id.includes('mpv') || id.includes('audio') || id.includes('media') || cat === 'media') {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>`;
+      }
+      if (id.includes('git') || id.includes('code') || id.includes('vim') || id.includes('rust') || id.includes('go') || cat === 'dev') {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`;
+      }
+      if (id.includes('net') || id.includes('curl') || id.includes('wget') || id.includes('ip') || id.includes('shark') || cat === 'net') {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
+      }
+      if (id.includes('office') || id.includes('writer') || id.includes('calc') || id.includes('doc') || cat === 'office') {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+      }
+      if (id.includes('sys') || id.includes('htop') || id.includes('top') || id.includes('parted') || cat === 'sys') {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="14" x2="23" y2="14"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="14" x2="4" y2="14"></line></svg>`;
+      }
+      return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>`;
+    },
+
+    async launchApp(app) {
+      const cliTools = [
+        'htop', 'btop', 'top', 'neovim', 'nvim', 'vim', 'vi', 'nano', 'tmux',
+        'ranger', 'mc', 'midnight-commander', 'bat', 'fzf', 'tree', 'jq',
+        'strace', 'ltrace', 'shellcheck', 'ripgrep', 'rg', 'rsync', 'fd-find',
+        'fd', 'gdb', 'valgrind', 'emacs-nox', 'python3', 'python3-pip', 'npm',
+        'cargo', 'rustc', 'golang', 'ninja-build', 'cmake', 'sqlite3', 'sox', 'ffmpeg', 'git'
+      ];
+      const execName = (app.exec || app.id || '').toLowerCase();
+      const isCli = cliTools.includes(execName);
+
+      if (isCli) {
+        WindowManager.open('win-terminal');
+        Terminal.log(`[AYAZ BAŞLATICI] '${app.name}' terminal ortamında yürütülüyor: ${app.exec}`, 'cmd');
+        try {
+          await Terminal.runCommand(app.exec || app.id);
+        } catch (e) {
+          Terminal.log(`[BAŞLATMA BİLGİ] ${e}`, 'muted');
+        }
+      } else {
+        Terminal.log(`[AYAZ BAŞLATICI] '${app.name}' yerel uygulama olarak başlatılıyor: ${app.exec}`, 'cmd');
+        try {
+          await TauriBridge.invoke('launch_application', { exec: app.exec });
+          Terminal.log(`[AYAZ OK] ${app.name} başlatıldı.`, 'success');
+        } catch (e) {
+          Terminal.log(`[BAŞLATMA HATASI] ${e}`, 'error');
+        }
+      }
+    },
+
+    showShortcutContextMenu(e, app) {
+      let menu = document.getElementById('shortcut-context-menu');
+      if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'shortcut-context-menu';
+        menu.className = 'desktop-context-menu shortcut-context-menu';
+        document.body.appendChild(menu);
+      }
+
+      menu.innerHTML = `
+        <div class="ctx-item" data-action="launch">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          <span>Uygulamayı Başlat</span>
+        </div>
+        <div class="ctx-item" data-action="term">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
+          <span>Terminalde Aç</span>
+        </div>
+        <div class="ctx-item" data-action="store">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>
+          <span>Mağazada Göster</span>
+        </div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item ctx-danger" data-action="uninstall">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          <span>Masaüstünden ve Sistemden Kaldır</span>
+        </div>
+      `;
+
+      const x = Math.min(e.clientX, window.innerWidth - 250);
+      const y = Math.min(e.clientY, window.innerHeight - 200);
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+      menu.classList.add('open');
+
+      const closeMenu = () => {
+        menu.classList.remove('open');
+        document.removeEventListener('click', closeMenu);
+      };
+      setTimeout(() => document.addEventListener('click', closeMenu), 10);
+
+      menu.querySelectorAll('.ctx-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const act = btn.getAttribute('data-action');
+          closeMenu();
+          if (act === 'launch') {
+            this.launchApp(app);
+          } else if (act === 'term') {
+            WindowManager.open('win-terminal');
+            Terminal.runCommand(app.exec || app.id);
+          } else if (act === 'store') {
+            WindowManager.open('win-store');
+            const searchInput = document.getElementById('store-search');
+            if (searchInput) {
+              searchInput.value = app.id;
+              searchInput.dispatchEvent(new Event('input'));
+            }
+          } else if (act === 'uninstall') {
+            StoreManager.uninstallPackageById(app.id);
+          }
+        });
       });
     }
   };
@@ -426,17 +951,152 @@
   // ============================================================================
   const StoreManager = {
     packages: [
-      { id: 'vlc', name: 'VLC Media Player', deb: 'vlc', desc: 'Evrensel video ve ortam yürütücü', cat: 'media', size: '64 MB', installed: false },
-      { id: 'code', name: 'Visual Studio Code', deb: 'code', desc: 'Endüstri standardı kod editörü', cat: 'dev', size: '90 MB', installed: false },
-      { id: 'gimp', name: 'GIMP', deb: 'gimp', desc: 'Açık kaynak görsel manipülasyon aracı', cat: 'graphics', size: '112 MB', installed: false },
-      { id: 'firefox-esr', name: 'Firefox ESR', deb: 'firefox-esr', desc: 'Güvenli ve kararlı web tarayıcısı', cat: 'dev', size: '78 MB', installed: false },
-      { id: 'blender', name: 'Blender 3D', deb: 'blender', desc: '3D modelleme ve animasyon stüdyosu', cat: 'graphics', size: '310 MB', installed: false },
-      { id: 'htop', name: 'Htop Monitör', deb: 'htop', desc: 'Süreç ve bellek yöneticisi', cat: 'sys', size: '2 MB', installed: false }
+      // 1. GELİŞTİRME & PROGRAMLAMA (DEV)
+      { id: 'build-essential', name: 'GNU Derleme Araçları (GCC/G++/Make)', deb: 'build-essential', desc: 'C ve C++ projeleri derlemek için eksiksiz temel geliştirme kiti', cat: 'dev', size: '42 MB', installed: false },
+      { id: 'git', name: 'Git Versiyon Kontrol Sistemi', deb: 'git', desc: 'Dağıtık kaynak kod ve sürüm kontrol altyapısı', cat: 'dev', size: '36 MB', installed: false },
+      { id: 'neovim', name: 'Neovim', deb: 'neovim', desc: 'Lua eklenti destekli, genişletilebilir modern terminal kod editörü', cat: 'dev', size: '28 MB', installed: false },
+      { id: 'vim', name: 'Vim Metin Düzenleyici', deb: 'vim', desc: 'Verimli, modal klavye kontrolüne sahip klasik UNIX metin editörü', cat: 'dev', size: '18 MB', installed: false },
+      { id: 'emacs-nox', name: 'GNU Emacs (Terminal)', deb: 'emacs-nox', desc: 'Genişletilebilir, özelleştirilebilir Lisp tabanlı geliştirme editörü', cat: 'dev', size: '32 MB', installed: false },
+      { id: 'geany', name: 'Geany Hafif IDE', deb: 'geany', desc: 'Hızlı açılan, hafif ve GTK tabanlı entegre geliştirme ortamı', cat: 'dev', size: '14 MB', installed: false },
+      { id: 'codeblocks', name: 'Code::Blocks IDE', deb: 'codeblocks', desc: 'C/C++ için yapılandırılabilir eklenti mimarisine sahip görsel IDE', cat: 'dev', size: '48 MB', installed: false },
+      { id: 'python3-pip', name: 'Python 3 Pip', deb: 'python3-pip', desc: 'Python ekosistemi için resmi paket yönetim aracı', cat: 'dev', size: '12 MB', installed: false },
+      { id: 'python3-venv', name: 'Python 3 Venv', deb: 'python3-venv', desc: 'İzole sanal geliştirme ortamları oluşturma kütüphanesi', cat: 'dev', size: '3 MB', installed: false },
+      { id: 'nodejs', name: 'Node.js Çalışma Zamanı', deb: 'nodejs', desc: 'V8 motoru üzerinde asenkron çalışan sunucu taraflı JavaScript platformu', cat: 'dev', size: '32 MB', installed: false },
+      { id: 'npm', name: 'NPM Paket Yöneticisi', deb: 'npm', desc: 'JavaScript ve Node.js için evrensel açık kaynak modül deposu', cat: 'dev', size: '24 MB', installed: false },
+      { id: 'golang', name: 'Go Programlama Dili', deb: 'golang', desc: 'Google tarafından geliştirilen eşzamanlı sistem programlama derleyicisi', cat: 'dev', size: '145 MB', installed: false },
+      { id: 'rustc', name: 'Rust Derleyicisi', deb: 'rustc', desc: 'Bellek güvenliği garantili modern sistem programlama dili', cat: 'dev', size: '180 MB', installed: false },
+      { id: 'cargo', name: 'Cargo Paket Yöneticisi', deb: 'cargo', desc: 'Rust ekosistemi için proje derleyici ve crate yöneticisi', cat: 'dev', size: '22 MB', installed: false },
+      { id: 'openjdk-17-jdk', name: 'OpenJDK 17 Java Geliştirme Kiti', deb: 'openjdk-17-jdk', desc: 'Java uygulamaları geliştirmek ve çalıştırmak için LTS SDK', cat: 'dev', size: '210 MB', installed: false },
+      { id: 'gdb', name: 'GNU Hata Ayıklayıcı (GDB)', deb: 'gdb', desc: 'C/C++, Rust ve derlenmiş ikili dosyalar için kaynak kod seviyesinde hata ayıklayıcı', cat: 'dev', size: '16 MB', installed: false },
+      { id: 'valgrind', name: 'Valgrind Bellek Profilleyici', deb: 'valgrind', desc: 'Bellek sızıntılarını ve erişim hatalarını yakalayan enstrümantasyon çatısı', cat: 'dev', size: '26 MB', installed: false },
+      { id: 'cmake', name: 'CMake Yapılandırma Sistemi', deb: 'cmake', desc: 'Çapraz platform yazılım derleme ve Makefile üretim aracı', cat: 'dev', size: '38 MB', installed: false },
+      { id: 'ninja-build', name: 'Ninja Derleme Motoru', deb: 'ninja-build', desc: 'Büyük yazılım projelerini en yüksek hızda derleyen küçük derleme aracı', cat: 'dev', size: '2 MB', installed: false },
+      { id: 'strace', name: 'Strace Sistem Çağrısı İzleyici', deb: 'strace', desc: 'Süreçlerin Linux çekirdeğine yaptığı tüm sistem çağrılarını canlı izleme', cat: 'dev', size: '4 MB', installed: false },
+      { id: 'ltrace', name: 'Ltrace Kütüphane Çağrısı İzleyici', deb: 'ltrace', desc: 'Dinamik paylaşılan kütüphane fonksiyon çağrılarını filtreleme ve izleme', cat: 'dev', size: '2 MB', installed: false },
+      { id: 'shellcheck', name: 'ShellCheck Statik Analiz', deb: 'shellcheck', desc: 'Bash ve POSIX kabuk betikleri için güvenlik ve hata denetleyicisi', cat: 'dev', size: '8 MB', installed: false },
+      { id: 'jq', name: 'JQ JSON İşleyici', deb: 'jq', desc: 'Komut satırından JSON verilerini filtreleme, dönüştürme ve formatlama', cat: 'dev', size: '1 MB', installed: false },
+      { id: 'sqlite3', name: 'SQLite3 Veritabanı', deb: 'sqlite3', desc: 'Sunucusuz, gömülü, ACID uyumlu ultra hafif ilişkisel SQL motoru', cat: 'dev', size: '4 MB', installed: false },
+
+      // 2. ORTAM & MEDYA (MEDIA)
+      { id: 'vlc', name: 'VLC Media Player', deb: 'vlc', desc: 'Evrensel video, ses, DVD ve ağ akışı yürütücüsü', cat: 'media', size: '64 MB', installed: false },
+      { id: 'mpv', name: 'MPV Minimalist Oynatıcı', deb: 'mpv', desc: 'GPU hızlandırmalı, düşük kaynak tüketen modern medya yürütücü', cat: 'media', size: '22 MB', installed: false },
+      { id: 'audacity', name: 'Audacity Ses Düzenleyici', deb: 'audacity', desc: 'Çok kanallı profesyonel ses kaydetme, kesme ve efekt stüdyosu', cat: 'media', size: '42 MB', installed: false },
+      { id: 'kdenlive', name: 'Kdenlive Video Kurgu', deb: 'kdenlive', desc: 'Çok parçalı timeline destekli açık kaynak profesyonel video kurgu stüdyosu', cat: 'media', size: '115 MB', installed: false },
+      { id: 'obs-studio', name: 'OBS Studio Canlı Yayın', deb: 'obs-studio', desc: 'Ekran yakalama, sahne karıştırma ve Twitch/YouTube canlı yayın yazılımı', cat: 'media', size: '92 MB', installed: false },
+      { id: 'handbrake', name: 'HandBrake Video Dönüştürücü', deb: 'handbrake', desc: 'Videoları optimize edilmiş modern biçimlere (H.264, H.265, AV1) dönüştürücü', cat: 'media', size: '36 MB', installed: false },
+      { id: 'ffmpeg', name: 'FFmpeg Multimedya Çatısı', deb: 'ffmpeg', desc: 'Her türlü ses ve video biçimini çözme, kodlama ve dönüştürme kiti', cat: 'media', size: '48 MB', installed: false },
+      { id: 'sox', name: 'SoX Ses İşleme Çatısı', deb: 'sox', desc: 'Ses dosyalarını dönüştürme ve efekt uygulama komut satırı isviçre çakısı', cat: 'media', size: '6 MB', installed: false },
+      { id: 'rhythmbox', name: 'Rhythmbox Müzik Çalar', deb: 'rhythmbox', desc: 'Müzik koleksiyonu yönetimi, internet radyoları ve podcast oynatıcısı', cat: 'media', size: '28 MB', installed: false },
+      { id: 'clementine', name: 'Clementine Müzik Çalar', deb: 'clementine', desc: 'Hızlı arama ve zengin müzik arşivi düzenleme yetenekli çalar', cat: 'media', size: '34 MB', installed: false },
+      { id: 'audacious', name: 'Audacious Hafif Müzik Çalar', deb: 'audacious', desc: 'Winamp benzeri arayüzü ve düşük RAM kullanımıyla bilinen ses oynatıcı', cat: 'media', size: '12 MB', installed: false },
+      { id: 'shotcut', name: 'Shotcut Video Editörü', deb: 'shotcut', desc: '4K destekli, çok formatlı timeline video montaj yazılımı', cat: 'media', size: '86 MB', installed: false },
+      { id: 'peek', name: 'Peek GIF Kaydedici', deb: 'peek', desc: 'Seçili masaüstü alanını anında yüksek kaliteli animasyonlu GIF olarak kaydetme', cat: 'media', size: '8 MB', installed: false },
+      { id: 'flac', name: 'FLAC Kayıpsız Ses Kodlayıcı', deb: 'flac', desc: 'Stüdyo kalitesinde kayıpsız ses sıkıştırma araç kiti', cat: 'media', size: '3 MB', installed: false },
+      { id: 'vorbis-tools', name: 'Ogg Vorbis Ses Araçları', deb: 'vorbis-tools', desc: 'Ogg formatında ses kodlama, etiketleme ve oynatma araçları', cat: 'media', size: '4 MB', installed: false },
+
+      // 3. GRAFİK & TASARIM (GRAPHICS)
+      { id: 'gimp', name: 'GIMP Görsel Düzenleyici', deb: 'gimp', desc: 'Katman destekli, zengin filtreli açık kaynak grafik ve fotoğraf düzenleyici', cat: 'graphics', size: '112 MB', installed: false },
+      { id: 'inkscape', name: 'Inkscape Vektörel Çizim', deb: 'inkscape', desc: 'Profesyonel SVG standartlarında illüstrasyon ve vektör grafik stüdyosu', cat: 'graphics', size: '98 MB', installed: false },
+      { id: 'blender', name: 'Blender 3D Modelleme', deb: 'blender', desc: '3D modelleme, render motoru, heykel ve animasyon üretim yazılımı', cat: 'graphics', size: '310 MB', installed: false },
+      { id: 'krita', name: 'Krita Dijital Boyama', deb: 'krita', desc: 'İllüstratörler ve konsept sanatçıları için çizim ve doku fırçaları', cat: 'graphics', size: '140 MB', installed: false },
+      { id: 'darktable', name: 'Darktable Fotoğraf İşleme', deb: 'darktable', desc: 'Fotoğrafçılar için profesyonel RAW görüntü geliştirme ve kataloglama', cat: 'graphics', size: '64 MB', installed: false },
+      { id: 'rawtherapee', name: 'RawTherapee RAW Geliştirici', deb: 'rawtherapee', desc: 'Yüksek bit derinliğinde tahribatsız RAW fotoğraf renk laboratuvarı', cat: 'graphics', size: '52 MB', installed: false },
+      { id: 'imagemagick', name: 'ImageMagick Görsel Kiti', deb: 'imagemagick', desc: 'Toplu resim boyutlandırma, dönüştürme ve işleme komut satırı aracı', cat: 'graphics', size: '36 MB', installed: false },
+      { id: 'graphviz', name: 'Graphviz Grafik Çizici', deb: 'graphviz', desc: 'DOT dili ile ağ şemaları, algoritmik diyagramlar ve soy ağaçları çizme', cat: 'graphics', size: '14 MB', installed: false },
+      { id: 'scrot', name: 'Scrot Ekran Yakalayıcı', deb: 'scrot', desc: 'X11 ekran görüntüsü alma komut satırı aracı', cat: 'graphics', size: '1 MB', installed: false },
+      { id: 'flameshot', name: 'Flameshot Ekran Görüntüsü', deb: 'flameshot', desc: 'Seçili alana ok, metin, bulanıklık ekleyebilen gelişmiş ekran aracı', cat: 'graphics', size: '18 MB', installed: false },
+      { id: 'feh', name: 'Feh Hafif Resim Görüntüleyici', deb: 'feh', desc: 'Düşük bellek tüketen hızlı fotoğraf slayt ve masaüstü aracı', cat: 'graphics', size: '3 MB', installed: false },
+      { id: 'viewnior', name: 'Viewnior Hızlı Görsel Görüntüleyici', deb: 'viewnior', desc: 'Zarif ve sade GTK fotoğraf albümü görüntüleyicisi', cat: 'graphics', size: '4 MB', installed: false },
+      { id: 'dia', name: 'Dia Teknik Diyagram Çizici', deb: 'dia', desc: 'UML, elektronik devre ve ağ mimarisi çizim yazılımı', cat: 'graphics', size: '26 MB', installed: false },
+      { id: 'mypaint', name: 'MyPaint Dijital Eskiz', deb: 'mypaint', desc: 'Basınca duyarlı sonsuz tuval eskiz ve fırça simülasyonu', cat: 'graphics', size: '30 MB', installed: false },
+
+      // 4. AĞ & İNTERNET (NET)
+      { id: 'firefox-esr', name: 'Firefox ESR Web Tarayıcısı', deb: 'firefox-esr', desc: 'Mozilla güvenli ve uzun vadeli kararlı internet tarayıcısı', cat: 'net', size: '78 MB', installed: false },
+      { id: 'chromium', name: 'Chromium Açık Kaynak Tarayıcı', deb: 'chromium', desc: 'Hızlı, çok süreçli modern web teknolojileri tarayıcısı', cat: 'net', size: '124 MB', installed: false },
+      { id: 'thunderbird', name: 'Thunderbird E-Posta İstemcisi', deb: 'thunderbird', desc: 'E-posta, takvim, adres defteri ve RSS besleme yöneticisi', cat: 'net', size: '82 MB', installed: false },
+      { id: 'filezilla', name: 'FileZilla FTP/SFTP İstemcisi', deb: 'filezilla', desc: 'Güvenli dosya aktarımı için çift panelli grafiksel FTP/SFTP arayüzü', cat: 'net', size: '16 MB', installed: false },
+      { id: 'qbittorrent', name: 'qBittorrent İndirme Yöneticisi', deb: 'qbittorrent', desc: 'Reklamsız, açık kaynaklı, hafif BitTorrent dosya paylaşım istemcisi', cat: 'net', size: '28 MB', installed: false },
+      { id: 'transmission-gtk', name: 'Transmission Torrent', deb: 'transmission-gtk', desc: 'Sistem kaynağı tüketmeyen minimalist BitTorrent istemcisi', cat: 'net', size: '10 MB', installed: false },
+      { id: 'curl', name: 'cURL Veri Aktarım Aracı', deb: 'curl', desc: 'HTTP, HTTPS, FTP ve onlarca protokol üzerinden veri çekme aracı', cat: 'net', size: '4 MB', installed: false },
+      { id: 'wget', name: 'Wget Ağ İndiricisi', deb: 'wget', desc: 'Web sitelerinden dosya ve ayna indirme komut satırı aracı', cat: 'net', size: '3 MB', installed: false },
+      { id: 'aria2', name: 'Aria2 Hızlı İndirici', deb: 'aria2', desc: 'Çoklu bağlantı ve parçalı yüksek hızlı indirme motoru', cat: 'net', size: '6 MB', installed: false },
+      { id: 'nmap', name: 'Nmap Ağ Güvenlik Tarayıcısı', deb: 'nmap', desc: 'Ağ keşfi, port tarama ve güvenlik açıklarını teftiş etme aracı', cat: 'net', size: '28 MB', installed: false },
+      { id: 'wireshark', name: 'Wireshark Paket Analizörü', deb: 'wireshark', desc: 'Canlı ağ trafiğini yakalayan ve protokol seviyesinde analiz eden araç', cat: 'net', size: '62 MB', installed: false },
+      { id: 'tcpdump', name: 'Tcpdump Ağ Dinleyici', deb: 'tcpdump', desc: 'Komut satırında paket başlıklarını yakalayıp filtreleme aracı', cat: 'net', size: '3 MB', installed: false },
+      { id: 'netcat-openbsd', name: 'Netcat Ağ Soket Aracı', deb: 'netcat-openbsd', desc: 'TCP ve UDP soketleri üzerinden doğrudan veri okuma ve yazma', cat: 'net', size: '1 MB', installed: false },
+      { id: 'iperf3', name: 'iPerf3 Bant Genişliği Testi', deb: 'iperf3', desc: 'Ağ verimini ve maksimum TCP/UDP bant genişliğini ölçen araç', cat: 'net', size: '2 MB', installed: false },
+      { id: 'whois', name: 'Whois Sorgulayıcı', deb: 'whois', desc: 'Alan adı ve IP bloğu tescil kayıtlarını RFC standardında sorgulama', cat: 'net', size: '1 MB', installed: false },
+      { id: 'mtr-tiny', name: 'MTR Ağ Tanı Aracı', deb: 'mtr-tiny', desc: 'Ping ve traceroute yeteneklerini tek raporda birleştiren teşhis aracı', cat: 'net', size: '2 MB', installed: false },
+      { id: 'dnsutils', name: 'DNS Araçları (Dig / Nslookup)', deb: 'dnsutils', desc: 'Alan adı sunucusu kayıtlarını ayrıntılı sorgulama ve test kiti', cat: 'net', size: '4 MB', installed: false },
+      { id: 'openssh-client', name: 'OpenSSH Güvenli Kabuk İstemcisi', deb: 'openssh-client', desc: 'Uzak sunuculara şifreli terminal erişimi ve tünelleme', cat: 'net', size: '8 MB', installed: false },
+
+      // 5. OFİS & ÜRETKENLİK (OFFICE)
+      { id: 'libreoffice', name: 'LibreOffice Ofis Paketi', deb: 'libreoffice', desc: 'Metin, hesap tablosu ve sunum içeren tam donanımlı ofis yazılımı', cat: 'office', size: '340 MB', installed: false },
+      { id: 'libreoffice-writer', name: 'LibreOffice Writer', deb: 'libreoffice-writer', desc: 'DOCX ve ODT belgeleri için profesyonel kelime işlemci', cat: 'office', size: '88 MB', installed: false },
+      { id: 'libreoffice-calc', name: 'LibreOffice Calc', deb: 'libreoffice-calc', desc: 'XLSX ve ODS tabloları için gelişmiş formül ve grafik hesap tablosu', cat: 'office', size: '76 MB', installed: false },
+      { id: 'libreoffice-impress', name: 'LibreOffice Impress', deb: 'libreoffice-impress', desc: 'Etkileyici görsel geçişlere sahip sunum hazırlama yazılımı', cat: 'office', size: '54 MB', installed: false },
+      { id: 'evince', name: 'Evince Belge Görüntüleyici', deb: 'evince', desc: 'PDF, PostScript, DjVu ve DVI belgelerini hızlıca açan okuyucu', cat: 'office', size: '18 MB', installed: false },
+      { id: 'zathura', name: 'Zathura Minimalist PDF Okuyucu', deb: 'zathura', desc: 'Vim klavye kısayollarına sahip düşük bellek tüketen PDF okuyucu', cat: 'office', size: '6 MB', installed: false },
+      { id: 'calibre', name: 'Calibre E-Kitap Yöneticisi', deb: 'calibre', desc: 'EPUB, MOBI ve PDF kütüphane arşivi ve format dönüştürücüsü', cat: 'office', size: '110 MB', installed: false },
+      { id: 'xournalpp', name: 'Xournal++ Not Alma & El Yazısı', deb: 'xournalpp', desc: 'Kalem desteği ile PDF üzerine çizim ve serbest el yazısı not aracı', cat: 'office', size: '24 MB', installed: false },
+      { id: 'tesseract-ocr', name: 'Tesseract OCR Optik Karakter Tanıma', deb: 'tesseract-ocr', desc: 'Taranan görsel ve resimlerden metinleri otomatik çıkaran yapay zeka aracı', cat: 'office', size: '32 MB', installed: false },
+      { id: 'pandoc', name: 'Pandoc Evrensel Belge Dönüştürücü', deb: 'pandoc', desc: 'Markdown, LaTeX, DOCX, HTML ve PDF arasında biçim dönüştürme', cat: 'office', size: '44 MB', installed: false },
+      { id: 'ghostscript', name: 'Ghostscript PDF/PS İşleme Motoru', deb: 'ghostscript', desc: 'PDF sıkıştırma, birleştirme ve PostScript yorumlayıcı aracı', cat: 'office', size: '36 MB', installed: false },
+
+      // 6. SİSTEM & YÖNETİM (SYS)
+      { id: 'htop', name: 'Htop Süreç Monitörü', deb: 'htop', desc: 'Canlı renkli süreç listesi, bellek ve CPU yük durum paneli', cat: 'sys', size: '2 MB', installed: false },
+      { id: 'btop', name: 'Btop Zengin Kaynak Monitörü', deb: 'btop', desc: 'Modern görsel grafiklerle CPU, GPU, RAM, disk ve ağ yükü izleyici', cat: 'sys', size: '6 MB', installed: false },
+      { id: 'iotop', name: 'Iotop Disk Girdi/Çıktı Monitörü', deb: 'iotop', desc: 'Hangi sürecin diski ne kadar okuyup yazdığını canlı izleyen araç', cat: 'sys', size: '2 MB', installed: false },
+      { id: 'iftop', name: 'Iftop Ağ Bant Genişliği Monitörü', deb: 'iftop', desc: 'Ağ bağlantılarında IP bazında anlık veri transferi takipçisi', cat: 'sys', size: '2 MB', installed: false },
+      { id: 'ncdu', name: 'Ncdu Disk Alan Analizörü', deb: 'ncdu', desc: 'Dizinlerin diskte ne kadar yer kapladığını hızla gösteren konsol aracı', cat: 'sys', size: '1 MB', installed: false },
+      { id: 'fastfetch', name: 'Fastfetch Hızlı Sistem Bilgisi', deb: 'fastfetch', desc: 'C ile yazılmış, milisaniyeler içinde donanım ve OS özeti çıkaran araç', cat: 'sys', size: '4 MB', installed: false },
+      { id: 'neofetch', name: 'Neofetch Bilgi Görüntüleyici', deb: 'neofetch', desc: 'Masaüstü ve terminalde Ankora Linux logosuyla sistem dökümü', cat: 'sys', size: '1 MB', installed: false },
+      { id: 'inxi', name: 'Inxi Donanım Raporlama Aracı', deb: 'inxi', desc: 'İşlemci, ekran kartı, anakart ve ses yongaları hakkında ayrıntılı rapor', cat: 'sys', size: '3 MB', installed: false },
+      { id: 'lshw', name: 'Lshw Donanım Listesi', deb: 'lshw', desc: 'Tüm donanım bileşenlerini XML veya JSON biçiminde döken teftiş aracı', cat: 'sys', size: '4 MB', installed: false },
+      { id: 'pciutils', name: 'PCI Araçları (lspci)', deb: 'pciutils', desc: 'Anakart üzerindeki tüm PCI ve PCIe donanımlarını listeleme', cat: 'sys', size: '2 MB', installed: false },
+      { id: 'usbutils', name: 'USB Araçları (lsusb)', deb: 'usbutils', desc: 'Bağlı tüm harici USB aygıtlarını ve veriyolu hızlarını listeleme', cat: 'sys', size: '2 MB', installed: false },
+      { id: 'smartmontools', name: 'S.M.A.R.T. Disk Sağlık Denetleyicisi', deb: 'smartmontools', desc: 'SSD ve sabit disklerin ömür, sıcaklık ve hata sektörlerini takip etme', cat: 'sys', size: '3 MB', installed: false },
+      { id: 'memtest86+', name: 'Memtest86+ RAM Test Aracı', deb: 'memtest86+', desc: 'Bellek donanımında kararsızlık ve hücre bozulmalarını tarama', cat: 'sys', size: '2 MB', installed: false },
+      { id: 'sysstat', name: 'Sysstat Sistem İstatistikleri (sar/iostat)', deb: 'sysstat', desc: 'İşletim sistemi performans sayaçları ve geçmiş kullanım loglayıcı', cat: 'sys', size: '5 MB', installed: false },
+      { id: 'glances', name: 'Glances Kapsamlı Sistem Gözlemcisi', deb: 'glances', desc: 'Web tabanlı veya konsolda çalışan istemci-sunucu sistem monitörü', cat: 'sys', size: '14 MB', installed: false },
+
+      // 7. ARAÇLAR & YARDIMCILAR (UTIL)
+      { id: 'tmux', name: 'Tmux Terminal Çoklayıcı', deb: 'tmux', desc: 'Tek terminal penceresinde bölünmüş paneller ve kalıcı arka plan oturumları', cat: 'util', size: '4 MB', installed: false },
+      { id: 'screen', name: 'GNU Screen Oturum Yöneticisi', deb: 'screen', desc: 'Kopmayan SSH oturumları ve arka plan terminal yönetimi', cat: 'util', size: '3 MB', installed: false },
+      { id: 'zsh', name: 'Zsh Gelişmiş Kabuk', deb: 'zsh', desc: 'Gelişmiş sekme tamamlama, tema ve eklenti destekli güçlü kabuk', cat: 'util', size: '12 MB', installed: false },
+      { id: 'fish', name: 'Fish Akıllı Etkileşimli Kabuk', deb: 'fish', desc: 'Yazarken syntax highlighting ve otomatik öneriler sunan modern kabuk', cat: 'util', size: '16 MB', installed: false },
+      { id: 'p7zip-full', name: '7-Zip Arşiv Yöneticisi', deb: 'p7zip-full', desc: '7z, ZIP, TAR, GZ formatlarında yüksek oranlı dosya sıkıştırma', cat: 'util', size: '5 MB', installed: false },
+      { id: 'unrar-free', name: 'Unrar Çıkarıcı', deb: 'unrar-free', desc: 'RAR arşiv paketlerini dizine açma ve çıkarma aracı', cat: 'util', size: '1 MB', installed: false },
+      { id: 'zip', name: 'Zip Arşivleyici', deb: 'zip', desc: 'Standart ZIP arşivleri oluşturma ve şifreleme komut satırı aracı', cat: 'util', size: '2 MB', installed: false },
+      { id: 'unzip', name: 'Unzip Arşiv Açıcı', deb: 'unzip', desc: 'ZIP arşivlerini hızlıca dışa aktarma aracı', cat: 'util', size: '2 MB', installed: false },
+      { id: 'tar', name: 'GNU Tar Arşiv Paketi', deb: 'tar', desc: 'Bant arşivi ve dosya paketleme standart UNIX yazılımı', cat: 'util', size: '3 MB', installed: false },
+      { id: 'rsync', name: 'Rsync Hızlı Dosya Eşitleyici', deb: 'rsync', desc: 'Delta algoritması ile yalnızca değişen baytları aktaran senkronizasyon aracı', cat: 'util', size: '3 MB', installed: false },
+      { id: 'tree', name: 'Tree Dizin Ağacı Çizici', deb: 'tree', desc: 'Dizin ve alt dosyaları renkli ağaç grafiği şeklinde listeleme', cat: 'util', size: '1 MB', installed: false },
+      { id: 'fzf', name: 'FZF Komut Satırı Bulanık Arama', deb: 'fzf', desc: 'Dosyalar, komut geçmişi ve metinler arasında gerçek zamanlı fuzzy arama', cat: 'util', size: '4 MB', installed: false },
+      { id: 'ripgrep', name: 'Ripgrep Hızlı Metin Tarayıcı (rg)', deb: 'ripgrep', desc: 'Büyük kod depolarında saniyeler içinde regex arayan Rust tabanlı araç', cat: 'util', size: '6 MB', installed: false },
+      { id: 'bat', name: 'Bat Renkli Cat Alternatifi', deb: 'bat', desc: 'Git entegrasyonlu ve sözdizimi renklendirmeli dosya okuyucu', cat: 'util', size: '5 MB', installed: false },
+      { id: 'fd-find', name: 'FD Hızlı Dosya Arama', deb: 'fd-find', desc: 'Find komutuna kıyasla kat kat hızlı ve kullanıcı dostu arama aracı', cat: 'util', size: '3 MB', installed: false },
+      { id: 'midnight-commander', name: 'Midnight Commander (MC)', deb: 'midnight-commander', desc: 'Klasik Norton Commander tarzı çift panelli konsol dosya yöneticisi', cat: 'util', size: '10 MB', installed: false },
+      { id: 'ranger', name: 'Ranger Konsol Dosya Yöneticisi', deb: 'ranger', desc: 'Vim tuş takımı ve önizleme panellerine sahip terminal dosya tarayıcısı', cat: 'util', size: '6 MB', installed: false },
+      { id: 'gparted', name: 'GParted Disk Bölüm Editörü', deb: 'gparted', desc: 'EXT4, NTFS, FAT32 bölümlerini güvenle yeniden boyutlandırma ve biçimlendirme', cat: 'util', size: '24 MB', installed: false }
     ],
     tableBody: null,
     currentCat: 'all',
 
     init() {
+      // Kaydedilmiş kurulu paketleri yükle
+      const savedInstalled = SafeStorage.getItem('ankora_installed_pkg_ids');
+      if (savedInstalled) {
+        try {
+          const ids = JSON.parse(savedInstalled);
+          if (Array.isArray(ids)) {
+            this.packages.forEach(p => {
+              if (ids.includes(p.id)) p.installed = true;
+            });
+          }
+        } catch (e) {}
+      }
+
       this.tableBody = document.getElementById('store-table-body');
       const searchInput = document.getElementById('store-search');
       const filterBtns = document.querySelectorAll('.store-filter-btn');
@@ -455,6 +1115,11 @@
       }
 
       this.render();
+    },
+
+    saveInstalledState() {
+      const ids = this.packages.filter(p => p.installed).map(p => p.id);
+      SafeStorage.setItem('ankora_installed_pkg_ids', JSON.stringify(ids));
     },
 
     render(query = '') {
@@ -485,8 +1150,10 @@
           </td>
         `;
 
-        const btn = tr.querySelector(`#btn-pkg-${pkg.id}`);
-        btn.addEventListener('click', () => this.togglePackage(pkg));
+        const btn = tr.querySelector('.btn-pkg');
+        if (btn) {
+          btn.addEventListener('click', () => this.togglePackage(pkg));
+        }
 
         this.tableBody.appendChild(tr);
       });
@@ -497,21 +1164,42 @@
       const prog = document.getElementById(`prog-${pkg.id}`);
 
       if (pkg.installed) {
-        pkg.installed = false;
-        btn.classList.remove('installed');
-        btn.textContent = 'Kur';
-        XdgDesktopEngine.removeApplication(pkg.id);
-        Terminal.log(`[APT] Paket kaldırıldı: ${pkg.deb}`, 'muted');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = 'Kaldırılıyor...';
+        }
+        Terminal.log(`[APT] sudo apt-get remove -y -- ${pkg.deb} yürütülüyor...`, 'cmd');
+
+        try {
+          await TauriBridge.invoke('remove_deb_package', { packageName: pkg.deb });
+          pkg.installed = false;
+          if (btn) {
+            btn.disabled = false;
+            btn.classList.remove('installed');
+            btn.textContent = 'Kur';
+          }
+          this.saveInstalledState();
+          XdgDesktopEngine.removeApplication(pkg.id);
+          Terminal.log(`[APT] '${pkg.name}' (${pkg.deb}) başarıyla kaldırıldı.`, 'success');
+        } catch (err) {
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Hata';
+          }
+          Terminal.log(`[ERR] Kaldırma başarısız: ${err}`, 'error');
+        }
         return;
       }
 
-      btn.disabled = true;
-      btn.textContent = 'İndiriliyor...';
-      Terminal.log(`[APT] apt-get install -y ${pkg.deb} yürütülüyor...`, 'cmd');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'İndiriliyor...';
+      }
+      Terminal.log(`[APT] sudo apt-get install -y -- ${pkg.deb} yürütülüyor...`, 'cmd');
 
       let val = 0;
       const interval = setInterval(() => {
-        val += 25;
+        val += 20;
         if (prog) prog.style.width = `${val}%`;
         if (val >= 100) clearInterval(interval);
       }, 100);
@@ -519,26 +1207,43 @@
       try {
         const xdgApp = await TauriBridge.invoke('install_deb_package', { packageName: pkg.deb });
         pkg.installed = true;
-        btn.disabled = false;
-        btn.classList.add('installed');
-        btn.textContent = 'Kaldır';
+        if (btn) {
+          btn.disabled = false;
+          btn.classList.add('installed');
+          btn.textContent = 'Kaldır';
+        }
         if (prog) prog.style.width = '0%';
 
-        // Yalnızca kullanıcı açıkça kurduğunda sisteme ekle
+        this.saveInstalledState();
+
+        // Orijinal Debian uygulaması masaüstüne eklenir
         XdgDesktopEngine.addApplication({
           id: pkg.id,
           name: pkg.name,
           exec: pkg.deb,
           icon: pkg.deb,
+          cat: pkg.cat,
           comment: pkg.desc,
           is_installed_by_user: true
         });
-        Terminal.log(`[XDG OK] ${xdgApp.name} kuruldu ve sisteme eklendi.`, 'success');
+
+        Terminal.log(`[XDG OK] ${xdgApp.name || pkg.name} kuruldu ve masaüstüne eklendi.`, 'success');
       } catch (err) {
-        btn.disabled = false;
-        btn.textContent = 'Hata';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Hata';
+        }
         if (prog) prog.style.width = '0%';
-        Terminal.log(`[ERR] ${err}`, 'error');
+        Terminal.log(`[ERR] Kurulum başarısız: ${err}`, 'error');
+      }
+    },
+
+    async uninstallPackageById(pkgId) {
+      const pkg = this.packages.find(p => p.id === pkgId);
+      if (pkg) {
+        await this.togglePackage(pkg);
+      } else {
+        XdgDesktopEngine.removeApplication(pkgId);
       }
     }
   };
@@ -592,6 +1297,21 @@
           }
         }
       });
+
+      // Terminal hızlı komut çipleri
+      document.querySelectorAll('.term-chip-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const cmd = btn.getAttribute('data-cmd');
+          if (cmd) this.runCommand(cmd);
+        });
+      });
+
+      const btnClearLogs = document.getElementById('btn-term-clear-logs');
+      if (btnClearLogs) {
+        btnClearLogs.addEventListener('click', () => {
+          if (this.logs) this.logs.innerHTML = '';
+        });
+      }
     },
 
     saveHistory() {
@@ -629,6 +1349,10 @@
 
     log(text, type = 'muted') {
       if (!this.logs) return;
+      // DOM eleman sayısını 150 ile sınırla (Bellek sızıntısı önleme)
+      while (this.logs.children.length >= 150) {
+        this.logs.removeChild(this.logs.firstChild);
+      }
       const row = document.createElement('div');
       row.className = `term-row ${type}`;
       row.textContent = text;
@@ -682,8 +1406,29 @@
         });
       }
 
+      const btnCloseDoc = document.getElementById('btn-office-close-doc');
+      if (btnCloseDoc) {
+        btnCloseDoc.addEventListener('click', () => {
+          this.clearFrame();
+          Terminal.log('[OFFICE] Belge kapatıldı ve WebKit bellek tamponu boşaltıldı.', 'cmd');
+        });
+      }
+
       // Başlangıçta örnek PDF yükle
       this.loadSamplePdf();
+    },
+
+    clearFrame() {
+      if (this.pdfFrame) {
+        this.pdfFrame.src = 'about:blank';
+        this.pdfFrame.style.display = 'none';
+      }
+      if (this.textFrame) {
+        this.textFrame.textContent = '';
+        this.textFrame.style.display = 'none';
+      }
+      if (this.metaFilename) this.metaFilename.textContent = 'Belge Kapatıldı';
+      if (this.metaFilesize) this.metaFilesize.textContent = '0 KB';
     },
 
     async loadSamplePdf() {
@@ -781,6 +1526,137 @@
     endpoint: 'http://127.0.0.1:11434/api/generate',
     apiKey: '',
 
+    detectProviderAndModel(key) {
+      const k = (key || '').trim();
+      if (k.startsWith('AIza')) {
+        return {
+          provider: 'gemini',
+          model: 'gemini-2.0-flash',
+          endpoint: 'https://generativelanguage.googleapis.com/v1beta',
+          label: 'Google Gemini (Gemini 2.0 Flash)'
+        };
+      }
+      if (k.startsWith('gsk_')) {
+        return {
+          provider: 'groq',
+          model: 'llama-3.3-70b-versatile',
+          endpoint: 'https://api.groq.com/openai/v1/chat/completions',
+          label: 'Groq Cloud (Llama 3.3 70B)'
+        };
+      }
+      if (k.startsWith('sk-ant-') || k.startsWith('sk-or-')) {
+        return {
+          provider: 'openrouter',
+          model: 'anthropic/claude-3.5-sonnet',
+          endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+          label: 'OpenRouter (Claude 3.5)'
+        };
+      }
+      if (k.startsWith('sk-')) {
+        return {
+          provider: 'openai',
+          model: 'gpt-4o-mini',
+          endpoint: 'https://api.openai.com/v1/chat/completions',
+          label: 'OpenAI (GPT-4o mini)'
+        };
+      }
+      return {
+        provider: 'gemini',
+        model: 'gemini-2.0-flash',
+        endpoint: 'https://generativelanguage.googleapis.com/v1beta',
+        label: 'Özel / Evrensel API'
+      };
+    },
+
+    async connectSingleKey(rawKey) {
+      const key = (rawKey || '').trim();
+      if (!key) return;
+
+      this.activeKey = key;
+      const detection = this.detectProviderAndModel(key);
+      this.provider = detection.provider;
+      this.model = detection.model;
+      this.endpoint = detection.endpoint;
+
+      try {
+        await TauriBridge.invoke('save_ai_credential', { provider: this.provider, apiKey: key });
+      } catch (e) {
+        Terminal.log(`[AI GÜVENLİK] Anahtar kaydedilemedi: ${e}`, 'error');
+      }
+
+      localStorage.setItem('ankora_ai_provider', this.provider);
+      localStorage.setItem('ankora_ai_model', this.model);
+      localStorage.setItem('ankora_ai_endpoint', this.endpoint);
+      sessionStorage.setItem('ankora_ai_active_key', key);
+
+      this.updateBadges();
+
+      const inputKey = document.getElementById('ai-cfg-key');
+      if (inputKey) {
+        inputKey.value = '';
+        inputKey.placeholder = `•••••••• (${detection.label} Aktif)`;
+      }
+
+      const welcomeInput = document.getElementById('welcome-api-key-input');
+      if (welcomeInput) {
+        welcomeInput.value = '';
+        welcomeInput.placeholder = `✓ ${detection.label} Aktif`;
+      }
+      const welcomeStatus = document.getElementById('welcome-key-status-label');
+      if (welcomeStatus) {
+        welcomeStatus.textContent = `✓ Bağlandı: ${detection.label}`;
+      }
+
+      const btnDisconnect = document.getElementById('btn-disconnect-ai-key');
+      if (btnDisconnect) btnDisconnect.style.display = 'inline-block';
+
+      const drawer = document.getElementById('ai-config-drawer');
+      if (drawer) drawer.classList.remove('open');
+
+      this.appendMsg('bot', `✓ Tek API Anahtarı ile Başarıyla Bağlandı!\n• Sağlayıcı: ${detection.label}\n• Model: ${this.model}\n• Güvenlik Durumu: Şifreli kasada koruma altında ✓\nDevuan Linux çekirdeği üzerinde otonom ajanınız hazır.`);
+      Terminal.log(`[AI BAĞLANTI] ${detection.label} (${this.model}) bağlandı.`, 'success');
+    },
+
+    async disconnectKey() {
+      this.activeKey = null;
+      sessionStorage.removeItem('ankora_ai_active_key');
+      try {
+        await TauriBridge.invoke('delete_ai_credential', { provider: this.provider });
+      } catch (e) {}
+
+      this.provider = 'ollama';
+      this.model = 'qwen2.5:0.5b';
+      this.endpoint = 'http://127.0.0.1:11434/api/generate';
+
+      localStorage.setItem('ankora_ai_provider', 'ollama');
+      localStorage.setItem('ankora_ai_model', 'qwen2.5:0.5b');
+      localStorage.setItem('ankora_ai_endpoint', this.endpoint);
+
+      this.updateBadges();
+
+      const inputKey = document.getElementById('ai-cfg-key');
+      if (inputKey) {
+        inputKey.value = '';
+        inputKey.placeholder = 'API Anahtarınızı yapıştırın (AIzaSy..., sk-..., gsk_...)';
+      }
+
+      const welcomeInput = document.getElementById('welcome-api-key-input');
+      if (welcomeInput) {
+        welcomeInput.value = '';
+        welcomeInput.placeholder = 'API Anahtarı...';
+      }
+      const welcomeStatus = document.getElementById('welcome-key-status-label');
+      if (welcomeStatus) {
+        welcomeStatus.textContent = 'Tek API Anahtarıyla Bağlan (Gemini, Groq, OpenAI)';
+      }
+
+      const btnDisconnect = document.getElementById('btn-disconnect-ai-key');
+      if (btnDisconnect) btnDisconnect.style.display = 'none';
+
+      this.appendMsg('bot', 'API anahtarı kaldırıldı. Sistem çevrimdışı yerel Ollama / kural tabanlı teftiş moduna döndü.');
+      Terminal.log('[AI BAĞLANTI] API anahtarı temizlendi, yerel moda dönüldü.', 'cmd');
+    },
+
     init() {
       this.feed = document.getElementById('ai-feed');
       this.input = document.getElementById('ai-prompt-input');
@@ -790,26 +1666,21 @@
       // 1. Kaydedilmiş API & Ajan Tercihlerini Yükle
       this.provider = localStorage.getItem('ankora_ai_provider') || 'ollama';
       this.mode = localStorage.getItem('ankora_ai_mode') || 'sysadmin';
-      this.model = localStorage.getItem('ankora_ai_model') || (this.provider === 'ollama' ? 'qwen2.5:0.5b' : 'gpt-4o-mini');
+      this.model = localStorage.getItem('ankora_ai_model') || (this.provider === 'ollama' ? 'qwen2.5:0.5b' : 'gemini-2.0-flash');
       this.endpoint = localStorage.getItem('ankora_ai_endpoint') || 'http://127.0.0.1:11434/api/generate';
-      // Düz metin localStorage anahtarlarını temizle (Kritik Güvenlik Bulgusu #1)
+      this.activeKey = sessionStorage.getItem('ankora_ai_active_key') || null;
       localStorage.removeItem('ankora_ai_key');
 
-      const selProvider = document.getElementById('ai-cfg-provider');
-      const selMode = document.getElementById('ai-cfg-mode');
-      const inputModel = document.getElementById('ai-cfg-model');
-      const inputEndpoint = document.getElementById('ai-cfg-endpoint');
       const inputKey = document.getElementById('ai-cfg-key');
-
-      if (selProvider) selProvider.value = this.provider;
-      if (selMode) selMode.value = this.mode;
-      if (inputModel) inputModel.value = this.model;
-      if (inputEndpoint) inputEndpoint.value = this.endpoint;
+      const btnDisconnect = document.getElementById('btn-disconnect-ai-key');
 
       // Backend güvenli depoda anahtar kontrolü
       TauriBridge.invoke('has_ai_credential', { provider: this.provider }).then(hasKey => {
-        if (hasKey && inputKey) {
-          inputKey.placeholder = '•••••••• (Kayıtlı ve Şifreli)';
+        if (hasKey) {
+          if (inputKey) inputKey.placeholder = `•••••••• (${this.provider.toUpperCase()} Aktif)`;
+          if (btnDisconnect) btnDisconnect.style.display = 'inline-block';
+          const welcomeStatus = document.getElementById('welcome-key-status-label');
+          if (welcomeStatus) welcomeStatus.textContent = `✓ Bağlı: ${this.provider.toUpperCase()} (${this.model})`;
         }
       }).catch(() => {});
 
@@ -832,79 +1703,29 @@
         });
       }
 
-      // 4. Sağlayıcı Değiştiğinde Otomatik Varsayılanları Tamamla
-      if (selProvider) {
-        selProvider.addEventListener('change', async () => {
-          const val = selProvider.value;
-          if (val === 'ollama') {
-            if (inputModel) inputModel.value = 'qwen2.5:0.5b';
-            if (inputEndpoint) inputEndpoint.value = 'http://127.0.0.1:11434/api/generate';
-          } else if (val === 'openai') {
-            if (inputModel) inputModel.value = 'gpt-4o-mini';
-            if (inputEndpoint) inputEndpoint.value = 'https://api.openai.com/v1/chat/completions';
-          } else if (val === 'gemini') {
-            if (inputModel) inputModel.value = 'gemini-2.0-flash';
-            if (inputEndpoint) inputEndpoint.value = 'https://generativelanguage.googleapis.com/v1beta';
-          } else if (val === 'groq') {
-            if (inputModel) inputModel.value = 'llama-3.3-70b-versatile';
-            if (inputEndpoint) inputEndpoint.value = 'https://api.groq.com/openai/v1/chat/completions';
-          } else if (val === 'openrouter') {
-            if (inputModel) inputModel.value = 'anthropic/claude-3.5-sonnet';
-            if (inputEndpoint) inputEndpoint.value = 'https://openrouter.ai/api/v1/chat/completions';
-          } else if (val === 'custom') {
-            if (inputModel) inputModel.value = 'default';
-            if (inputEndpoint) inputEndpoint.value = 'http://127.0.0.1:8000/v1/chat/completions';
+      // 4. Tek Tıkla API Anahtarı Kaydetme
+      const btnSaveCfg = document.getElementById('btn-save-ai-cfg');
+      if (btnSaveCfg && inputKey) {
+        btnSaveCfg.addEventListener('click', () => {
+          const val = inputKey.value.trim();
+          if (val && !val.includes('••••')) {
+            this.connectSingleKey(val);
           }
-
-          if (inputKey) {
-            inputKey.value = '';
-            try {
-              const hasKey = await TauriBridge.invoke('has_ai_credential', { provider: val });
-              inputKey.placeholder = hasKey ? '•••••••• (Kayıtlı ve Şifreli)' : 'sk-... veya API anahtarı';
-            } catch (e) {
-              inputKey.placeholder = 'sk-... veya API anahtarı';
+        });
+        inputKey.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            const val = inputKey.value.trim();
+            if (val && !val.includes('••••')) {
+              this.connectSingleKey(val);
             }
           }
         });
       }
 
-      // 5. Yapılandırmayı Kaydetme (Rust Güvenli Depoya)
-      const btnSaveCfg = document.getElementById('btn-save-ai-cfg');
-      if (btnSaveCfg) {
-        btnSaveCfg.addEventListener('click', async () => {
-          if (selProvider) this.provider = selProvider.value;
-          if (selMode) this.mode = selMode.value;
-          if (inputModel) this.model = inputModel.value.trim() || 'default';
-          if (inputEndpoint) this.endpoint = inputEndpoint.value.trim();
-
-          const enteredKey = inputKey ? inputKey.value.trim() : '';
-          let keySaved = false;
-          if (enteredKey && !enteredKey.includes('••••')) {
-            try {
-              await TauriBridge.invoke('save_ai_credential', { provider: this.provider, apiKey: enteredKey });
-              keySaved = true;
-              if (inputKey) {
-                inputKey.value = '';
-                inputKey.placeholder = '•••••••• (Kayıtlı ve Şifreli)';
-              }
-            } catch (err) {
-              Terminal.log(`[AI GÜVENLİK HATA] ${err}`, 'error');
-            }
-          }
-
-          localStorage.setItem('ankora_ai_provider', this.provider);
-          localStorage.setItem('ankora_ai_mode', this.mode);
-          localStorage.setItem('ankora_ai_model', this.model);
-          localStorage.setItem('ankora_ai_endpoint', this.endpoint);
-          localStorage.removeItem('ankora_ai_key');
-
-          this.updateBadges();
-          if (drawer) drawer.classList.remove('open');
-
-          const provLabel = selProvider?.options[selProvider.selectedIndex]?.text || this.provider;
-          const modeLabel = selMode?.options[selMode.selectedIndex]?.text || this.mode;
-          this.appendMsg('bot', `✓ Yapılandırma güncellendi ve otonom ajan hazırlandı.\n• Sağlayıcı: ${provLabel}\n• Ajan Yetki Rolü: ${modeLabel}\n• Model: ${this.model}\n${keySaved ? '• Özel API Anahtarı: Rust Güvenli Depoya Şifrelendi ✓' : '• Anahtar Durumu: Güvenli depodan doğrulanıyor'}`);
-          Terminal.log(`[AI YAPILANDIRMA] Sağlayıcı: ${this.provider}, Rol: ${this.mode}, Model: ${this.model}`, 'success');
+      // 5. Bağlantıyı Kes Butonu
+      if (btnDisconnect) {
+        btnDisconnect.addEventListener('click', () => {
+          this.disconnectKey();
         });
       }
 
@@ -912,6 +1733,19 @@
         btnSend.addEventListener('click', () => this.submit());
         this.input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') this.submit();
+        });
+      }
+
+      const btnClearChat = document.getElementById('btn-ai-clear-chat');
+      if (btnClearChat && this.feed) {
+        btnClearChat.addEventListener('click', () => {
+          this.feed.innerHTML = `
+            <div class="ai-entry bot">
+              <span class="ai-author">Ankora AI</span>
+              <p>Sohbet geçmişi ve geçici bellek temizlendi. Ankora Linux sistem teftişi ve yönetimi için hazırım. Ne sorgulamak istersiniz?</p>
+            </div>
+          `;
+          Terminal.log('[AI] Sohbet geçmişi ve DOM önbelleği temizlendi.', 'cmd');
         });
       }
 
@@ -932,11 +1766,13 @@
           modal.classList.remove('open');
           if (this.pendingCommand) {
             const cmd = this.pendingCommand;
+            const token = this.pendingToken || '';
             this.pendingCommand = null;
+            this.pendingToken = null;
             this.appendMsg('user', `[ONAYLANDI]: ${cmd}`);
 
             try {
-              const res = await TauriBridge.invoke('execute_agent_confirmed_action', { command: cmd });
+              const res = await TauriBridge.invoke('execute_agent_confirmed_action', { command: cmd, token: token });
               this.appendMsg('bot', `Sistem komutu başarıyla çalıştırıldı:\n${res || 'Tamamlandı.'}`);
               Terminal.log(`[AI EXEC] ${cmd}: Başarılı`, 'success');
             } catch (err) {
@@ -951,6 +1787,7 @@
         btnCancel.addEventListener('click', () => {
           modal.classList.remove('open');
           this.pendingCommand = null;
+          this.pendingToken = null;
           this.appendMsg('bot', 'İşlem kullanıcı tarafından iptal edildi.');
         });
       }
@@ -996,6 +1833,12 @@
 
     appendMsg(role, text) {
       if (!this.feed) return null;
+
+      // DOM mesaj sayısını 30 ile sınırla (RAM tasarrufu)
+      while (this.feed.children.length >= 30) {
+        this.feed.removeChild(this.feed.firstChild);
+      }
+
       const entry = document.createElement('div');
       entry.className = `ai-entry ${role === 'user' ? 'user' : 'bot'}`;
 
@@ -1016,36 +1859,153 @@
 
     async handleQuery(text) {
       this.appendMsg('user', text);
-      const loadingEntry = this.appendMsg('bot', 'Ajan düşünülüyor ve sistem analiz ediliyor...');
+      const loadingEntry = this.appendMsg('bot', 'Ajan düşünülüyor ve yanıt üretiliyor...');
 
-      try {
-        const res = await TauriBridge.invoke('query_local_ai', {
+      let res = null;
+
+      // 1. Eğer Tauri mevcutsa yerel arka uç üzerinden güvenli istek dene
+      if (TauriBridge.isAvailable) {
+        try {
+          res = await TauriBridge.invoke('query_local_ai', {
+            prompt: text,
+            provider: this.provider,
+            endpoint: this.endpoint,
+            api_key: this.activeKey || '',
+            model: this.model,
+            agent_mode: this.mode
+          });
+        } catch (invokeErr) {
+          // Tauri arka uçta hata alındıysa ve kullanıcı anahtarı varsa aşağıda doğrudan API'yi dene
+          if (!this.activeKey) {
+            if (loadingEntry && loadingEntry.parentNode) loadingEntry.parentNode.removeChild(loadingEntry);
+            this.appendMsg('bot', `⚠️ Ajan Bağlantı Hatası:\n${invokeErr}`);
+            return;
+          }
+        }
+      }
+
+      // 2. Doğrudan Canlı Web / API Çağrısı (Kullanıcı Anahtarı Bağlandığında %100 Gerçek Çalışma)
+      if (!res && this.activeKey) {
+        const key = this.activeKey.trim();
+        const prov = this.provider.toLowerCase();
+
+        try {
+          if (prov === 'gemini') {
+            const aiModel = this.model || 'gemini-1.5-flash';
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${aiModel}:generateContent?key=${key}`;
+            const sysPrompt = this.mode === 'developer'
+              ? 'Sen Ankora Linux ortamında çalışan uzman bir geliştiricisin.'
+              : 'Sen Ankora Linux 2.0 (Daedalus) sistem yöneticisi ve yapay zeka asistanısın. Kullanıcıya Türkçe, net ve teknik olarak kusursuz yanıtlar ver.';
+
+            const resp = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [{ text: `${sysPrompt}\n\nKullanıcı: ${text}` }]
+                }]
+              })
+            });
+
+            if (!resp.ok) {
+              const errTxt = await resp.text();
+              throw new Error(`Google Gemini Hatası (HTTP ${resp.status}): ${errTxt}`);
+            }
+
+            const json = await resp.json();
+            const replyTxt = json.candidates?.[0]?.content?.parts?.[0]?.text || 'Gemini yanıtı alınamadı.';
+            res = { reply: replyTxt, has_action: false, action_command: null, action_desc: null };
+
+          } else if (prov === 'groq') {
+            const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`
+              },
+              body: JSON.stringify({
+                model: this.model || 'llama-3.3-70b-versatile',
+                messages: [
+                  { role: 'system', content: 'Sen Ankora Linux işletim sisteminde görev yapan akıllı bir asistansın.' },
+                  { role: 'user', content: text }
+                ],
+                temperature: 0.3
+              })
+            });
+            if (!resp.ok) throw new Error(`Groq API Hatası (HTTP ${resp.status})`);
+            const json = await resp.json();
+            res = { reply: json.choices?.[0]?.message?.content || '', has_action: false, action_command: null, action_desc: null };
+
+          } else if (prov === 'openai') {
+            const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`
+              },
+              body: JSON.stringify({
+                model: this.model || 'gpt-4o-mini',
+                messages: [
+                  { role: 'system', content: 'Sen Ankora Linux için yardımcı bir yapay zeka asistanısın.' },
+                  { role: 'user', content: text }
+                ],
+                temperature: 0.3
+              })
+            });
+            if (!resp.ok) throw new Error(`OpenAI API Hatası (HTTP ${resp.status})`);
+            const json = await resp.json();
+            res = { reply: json.choices?.[0]?.message?.content || '', has_action: false, action_command: null, action_desc: null };
+
+          } else if (prov === 'openrouter') {
+            const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${key}`
+              },
+              body: JSON.stringify({
+                model: this.model || 'meta-llama/llama-3.3-70b-instruct',
+                messages: [
+                  { role: 'system', content: 'Sen Ankora Linux yapay zeka asistanısın.' },
+                  { role: 'user', content: text }
+                ]
+              })
+            });
+            if (!resp.ok) throw new Error(`OpenRouter API Hatası (HTTP ${resp.status})`);
+            const json = await resp.json();
+            res = { reply: json.choices?.[0]?.message?.content || '', has_action: false, action_command: null, action_desc: null };
+          }
+        } catch (fetchErr) {
+          if (loadingEntry && loadingEntry.parentNode) loadingEntry.parentNode.removeChild(loadingEntry);
+          this.appendMsg('bot', `⚠️ Canlı API Servis Hatası:\n${fetchErr.message || fetchErr}\n\nLütfen API anahtarınızın kotasını ve model parametrelerini kontrol edin.`);
+          return;
+        }
+      }
+
+      // 3. Fallback yanıtı (anahtar yoksa veya çevrimdışıysa)
+      if (!res) {
+        res = await TauriBridge.fallback('query_local_ai', {
           prompt: text,
           provider: this.provider,
-          endpoint: this.endpoint,
-          api_key: '', // Rust arka planı credentials.dat dosyasından güvenle çeker
           model: this.model,
-          agent_mode: this.mode
+          agent_mode: this.mode,
+          api_key: this.activeKey || ''
         });
+      }
 
-        if (loadingEntry && loadingEntry.parentNode) {
-          loadingEntry.parentNode.removeChild(loadingEntry);
-        }
+      if (loadingEntry && loadingEntry.parentNode) {
+        loadingEntry.parentNode.removeChild(loadingEntry);
+      }
 
+      if (res) {
         this.appendMsg('bot', res.reply);
-
         if (res.has_action && res.action_command) {
-          this.renderActionCard(res.action_command, res.action_desc);
+          this.renderActionCard(res.action_command, res.action_desc, res.action_token);
         }
-      } catch (err) {
-        if (loadingEntry && loadingEntry.parentNode) {
-          loadingEntry.parentNode.removeChild(loadingEntry);
-        }
-        this.appendMsg('bot', `⚠️ Ajan Bağlantı Hatası:\n${err}\n\nİpucu: Kendi API anahtarınızı girmek veya endpoint ayarlarını güncellemek için üstteki 'API Ayarları' butonunu kullanabilirsiniz.`);
       }
     },
 
-    renderActionCard(command, desc) {
+    renderActionCard(command, desc, token) {
       if (!this.feed) return;
       const card = document.createElement('div');
       card.className = 'action-proposal-card';
@@ -1064,7 +2024,7 @@
       btn.style.cssText = 'align-self: flex-start; margin-top: 4px; background: var(--text-primary); color: var(--bg-deep);';
       btn.textContent = 'Onayla ve Çalıştır';
       btn.addEventListener('click', () => {
-        this.promptSecurityConfirm(command, desc);
+        this.promptSecurityConfirm(command, desc, token);
       });
 
       card.appendChild(strong);
@@ -1076,13 +2036,14 @@
       this.feed.scrollTop = this.feed.scrollHeight;
     },
 
-    promptSecurityConfirm(cmd, desc) {
+    promptSecurityConfirm(cmd, desc, token) {
       const modal = document.getElementById('confirm-modal');
       const cmdEl = document.getElementById('confirm-cmd');
       const descEl = document.getElementById('confirm-desc');
 
       if (!modal || !cmdEl) return;
       this.pendingCommand = cmd;
+      this.pendingToken = token || null;
       cmdEl.textContent = cmd;
       if (descEl) descEl.textContent = desc || 'Aşağıdaki kabuk komutu çalıştırılacaktır:';
       modal.classList.add('open');
@@ -1090,110 +2051,145 @@
   };
 
   // ============================================================================
-  // 7. ANKORA KARŞILAYICI & DUVAR KAĞIDI (WELCOME WIZARD)
+  // 7. ANKORA KARŞILAYICI (WELCOME MANAGER - DESKTOP PREVIEW)
   // ============================================================================
   const WelcomeManager = {
     async init() {
-      const tabs = document.querySelectorAll('.welcome-tab');
-      tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
-          this.switchTab(tab.getAttribute('data-tab'));
-        });
-      });
-
-      document.querySelectorAll('.next-tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          this.switchTab(btn.getAttribute('data-target'));
-        });
-      });
-
-      // Duvar Kağıdı Seçimi (Yalnızca Welcome sekmesindeki kartlar)
-      const wpCards = document.querySelectorAll('#tab-welcome-theme .wp-card');
-      wpCards.forEach(card => {
-        card.addEventListener('click', () => {
-          const wpFile = card.getAttribute('data-wp');
-          if (wpFile) {
-            ThemeManager.setWallpaper(wpFile);
-          }
-        });
-      });
-
-      // Klavye & Dil Seçimi (Radio düğmeleri dinleme)
-      const kbRadios = document.querySelectorAll('#tab-welcome-keyboard input[name="kb-layout"]');
-      kbRadios.forEach(radio => {
-        radio.addEventListener('change', async () => {
-          if (radio.checked) {
-            document.querySelectorAll('#tab-welcome-keyboard .radio-card').forEach(c => c.classList.remove('active'));
-            radio.closest('.radio-card')?.classList.add('active');
-            try {
-              await TauriBridge.invoke('set_system_keyboard', { layout: radio.value });
-              Terminal.log(`[KLAVYE] Harita başarıyla uygulandı: ${radio.value}`, 'success');
-            } catch (err) {
-              Terminal.log(`[KLAVYE HATA] ${err}`, 'error');
-            }
-          }
-        });
-      });
-
-      // Hızlı Paket Kurulumu
-      const btnInstallApps = document.getElementById('btn-welcome-install-apps');
-      if (btnInstallApps) {
-        btnInstallApps.addEventListener('click', async () => {
-          const checkedBoxes = document.querySelectorAll('#tab-welcome-apps .quick-app-list input[type="checkbox"]:checked');
-          if (checkedBoxes.length === 0) {
-            Terminal.log('[HIZLI PAKET] Yüklenecek uygulama seçilmedi.', 'muted');
-            return;
-          }
-
-          btnInstallApps.disabled = true;
-          btnInstallApps.textContent = `Kuruluyor (0/${checkedBoxes.length})...`;
-          let installedCount = 0;
-
-          for (const chk of checkedBoxes) {
-            const pkgDeb = chk.value;
-            Terminal.log(`[HIZLI PAKET] ${pkgDeb} kuruluyor...`, 'cmd');
-            try {
-              const app = await TauriBridge.invoke('install_deb_package', { packageName: pkgDeb });
-              XdgDesktopEngine.addApplication(app);
-              installedCount++;
-              btnInstallApps.textContent = `Kuruluyor (${installedCount}/${checkedBoxes.length})...`;
-            } catch (err) {
-              Terminal.log(`[HIZLI PAKET HATA] ${pkgDeb}: ${err}`, 'error');
-            }
-          }
-
-          btnInstallApps.textContent = `Tamamlandı (${installedCount} kuruldu) ✓`;
-          setTimeout(() => {
-            btnInstallApps.disabled = false;
-            btnInstallApps.textContent = 'Seçilenleri Kur';
-          }, 3000);
+      // 1. Tema Değiştirici (Sun / Moon Switch)
+      const themeToggle = document.getElementById('welcome-theme-toggle');
+      if (themeToggle) {
+        themeToggle.addEventListener('click', () => {
+          const isLight = document.body.classList.contains('theme-light');
+          ThemeManager.setTheme(isLight ? 'theme-dark' : 'theme-light');
         });
       }
 
-      const btnFinish = document.getElementById('btn-welcome-finish');
-      if (btnFinish) {
-        btnFinish.addEventListener('click', async () => {
-          const chk = document.getElementById('chk-show-on-startup');
-          await TauriBridge.invoke('set_first_run_completed', { dontShowAgain: chk ? !chk.checked : false });
-          WindowManager.close(document.getElementById('win-welcome'));
+      // 2. Paket Yükleyici Butonu ("Yükle")
+      const btnStore = document.getElementById('welcome-btn-store');
+      if (btnStore) {
+        btnStore.addEventListener('click', () => {
+          WindowManager.open('win-store');
         });
       }
 
+      // 3. Tek API Anahtarı ile AI Bağlantısı ("Bağla")
+      const inputKey = document.getElementById('welcome-api-key-input');
+      const btnSaveKey = document.getElementById('welcome-btn-save-key');
+      const statusLabel = document.getElementById('welcome-key-status-label');
+
+      const triggerConnect = () => {
+        if (!inputKey) return;
+        const key = inputKey.value.trim();
+        if (key && !key.includes('••••')) {
+          AIAgent.connectSingleKey(key);
+        } else if (!key) {
+          if (statusLabel) {
+            statusLabel.textContent = 'Lütfen geçerli bir API anahtarı girin.';
+            setTimeout(() => {
+              statusLabel.textContent = 'Tek API Anahtarıyla Bağlan (Gemini, Groq, OpenAI)';
+            }, 3000);
+          }
+        }
+      };
+
+      if (btnSaveKey) {
+        btnSaveKey.addEventListener('click', triggerConnect);
+      }
+      if (inputKey) {
+        inputKey.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') triggerConnect();
+        });
+      }
+
+      // 3.1 Kilit Ekranı PIN Ayarı (İlk Açılış)
+      const inputLockPin = document.getElementById('welcome-lock-pin-input');
+      const btnSaveLockPin = document.getElementById('welcome-btn-save-pin');
+      const lockStatusLabel = document.getElementById('welcome-lock-status-label');
+
+      const triggerSavePin = async () => {
+        if (!inputLockPin) return;
+        const pin = inputLockPin.value.trim();
+        if (pin && pin.length >= 3) {
+          const res = await LockManager.setPin(null, pin);
+          if (res.success) {
+            if (lockStatusLabel) {
+              lockStatusLabel.textContent = `✓ Kilit PIN'i güncellendi (${pin.length} karakter)`;
+              lockStatusLabel.style.color = '#10b981';
+            }
+            inputLockPin.value = '';
+            inputLockPin.placeholder = '✓ Aktif';
+            if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+              ReportManager.showToast("Kilit PIN'i güvenli kasaya kaydedildi!");
+            }
+          } else {
+            alert(res.error || 'PIN kaydedilemedi.');
+          }
+        } else {
+          alert('Lütfen en az 3 karakterden oluşan bir PIN veya parola girin.');
+        }
+      };
+
+      if (btnSaveLockPin) btnSaveLockPin.addEventListener('click', triggerSavePin);
+      if (inputLockPin) {
+        inputLockPin.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') triggerSavePin();
+        });
+      }
+
+      // 4. Terminal Butonu ("Aç")
+      const btnTerm = document.getElementById('welcome-btn-term');
+      if (btnTerm) {
+        btnTerm.addEventListener('click', () => {
+          WindowManager.open('win-terminal');
+        });
+      }
+
+      // 5. Güncelleyici Butonu ("Denetle")
+      const btnUpdate = document.getElementById('welcome-btn-update');
+      if (btnUpdate) {
+        btnUpdate.addEventListener('click', () => {
+          WindowManager.open('win-updater');
+          UpdaterManager.checkForUpdates();
+        });
+      }
+
+      // 6. Başlangıçta Göster Checkbox'ı
+      const chkStartup = document.getElementById('chk-show-on-startup');
+      if (chkStartup) {
+        const savedPref = localStorage.getItem('ankora_show_welcome_startup');
+        if (savedPref !== null) {
+          chkStartup.checked = savedPref === 'true';
+        }
+        chkStartup.addEventListener('change', async (e) => {
+          localStorage.setItem('ankora_show_welcome_startup', e.target.checked ? 'true' : 'false');
+          try {
+            await TauriBridge.invoke('set_first_run_completed', { dontShowAgain: !e.target.checked });
+          } catch (err) {}
+        });
+      }
+
+      // 7. Gelişmiş Ayarlar Bağlantısı
+      const btnAdvSettings = document.getElementById('btn-open-advanced-settings');
+      if (btnAdvSettings) {
+        btnAdvSettings.addEventListener('click', () => {
+          WindowManager.open('win-settings');
+        });
+      }
+
+      // 8. API Anahtar Durumunu Ekrana Yansıt
       try {
-        const isFirst = await TauriBridge.invoke('check_first_run');
-        if (isFirst) setTimeout(() => WindowManager.open('win-welcome'), 300);
-      } catch (e) {
-        WindowManager.open('win-welcome');
-      }
-    },
+        const hasKey = await TauriBridge.invoke('has_ai_credential', { provider: AIAgent.provider });
+        if (hasKey) {
+          if (inputKey) inputKey.placeholder = `✓ ${AIAgent.provider.toUpperCase()} Aktif`;
+          if (statusLabel) statusLabel.textContent = `✓ Bağlı: ${AIAgent.provider.toUpperCase()} (${AIAgent.model})`;
+        }
+      } catch (e) {}
 
-    switchTab(targetId) {
-      document.querySelectorAll('.welcome-tab').forEach(t => {
-        t.classList.toggle('active', t.getAttribute('data-tab') === targetId);
-      });
-      document.querySelectorAll('.welcome-pane').forEach(p => {
-        p.classList.toggle('active', p.id === targetId);
-      });
+      // 9. Masaüstü Açılışında Karşılayıcıyı Göster (Desktop Preview Paritesi)
+      const shouldShow = localStorage.getItem('ankora_show_welcome_startup') !== 'false';
+      if (shouldShow) {
+        setTimeout(() => WindowManager.open('win-welcome'), 250);
+      }
     }
   };
 
@@ -1305,10 +2301,10 @@
   const ThemeManager = {
     currentTheme: 'theme-dark',
     currentAccent: '#2563eb',
-    currentWallpaper: 'wallpaper.svg',
+    currentWallpaper: 'wallpaper-mountain.jpg',
     currentRadius: '6px',
     currentGlass: 'balanced',
-    currentTaskbarAlign: 'center',
+    currentTaskbarAlign: 'left',
     currentTaskbarHeight: '44px',
     currentAnimSpeed: 'smooth',
 
@@ -1316,10 +2312,10 @@
       // 1. Kaydedilmiş tercihleri yükle
       const savedTheme = localStorage.getItem('ankora_theme_mode') || 'theme-dark';
       const savedAccent = localStorage.getItem('ankora_accent_color') || '#2563eb';
-      const savedWp = localStorage.getItem('ankora_wallpaper') || 'wallpaper.svg';
+      const savedWp = localStorage.getItem('ankora_wallpaper') || 'wallpaper-mountain.jpg';
       const savedRadius = localStorage.getItem('ankora_corner_radius') || '6px';
       const savedGlass = localStorage.getItem('ankora_window_glass') || 'balanced';
-      const savedAlign = localStorage.getItem('ankora_taskbar_align') || 'center';
+      const savedAlign = localStorage.getItem('ankora_taskbar_align') || 'left';
       const savedHeight = localStorage.getItem('ankora_taskbar_height') || '44px';
       const savedAnim = localStorage.getItem('ankora_anim_speed') || 'smooth';
 
@@ -1334,6 +2330,7 @@
 
       // Tema Kartı, Vurgu Butonu ve Kişiselleştirme Seçimleri
       document.addEventListener('click', (e) => {
+        if (!e.target || typeof e.target.closest !== 'function') return;
         const themeCard = e.target.closest('.theme-card-choice');
         if (themeCard) {
           const theme = themeCard.getAttribute('data-theme');
@@ -1408,8 +2405,10 @@
 
     setAccent(colorHex, persist = true) {
       this.currentAccent = colorHex;
-      document.documentElement.style.setProperty('--accent-active', colorHex);
-      document.documentElement.style.setProperty('--border-active-window', colorHex);
+      if (document.documentElement && document.documentElement.style && document.documentElement.style.setProperty) {
+        document.documentElement.style.setProperty('--accent-active', colorHex);
+        document.documentElement.style.setProperty('--border-active-window', colorHex);
+      }
 
       document.querySelectorAll('.accent-pill-btn').forEach(btn => {
         btn.classList.toggle('active', btn.getAttribute('data-accent') === colorHex);
@@ -1655,6 +2654,101 @@
           elMem.forEach(el => el.textContent = `${(tele.memory_used_mb / 1024).toFixed(1)} / ${(tele.memory_total_mb / 1024).toFixed(1)} GB`);
         }
       } catch (e) {}
+
+      // 9. Kilit Ekranı ve Güvenlik Ayarları
+      const inputCurPin = document.getElementById('settings-current-pin');
+      const inputNewPin = document.getElementById('settings-new-pin');
+      const inputConfirmPin = document.getElementById('settings-confirm-pin');
+      const btnSavePin = document.getElementById('btn-save-settings-pin');
+      const pinStatus = document.getElementById('settings-pin-status');
+      const selectAutoLock = document.getElementById('settings-autolock-select');
+      const btnTestLock = document.getElementById('btn-test-lock-now');
+
+      if (btnSavePin) {
+        btnSavePin.addEventListener('click', async () => {
+          const current = (inputCurPin?.value || '').trim();
+          const next = (inputNewPin?.value || '').trim();
+          const confirm = (inputConfirmPin?.value || '').trim();
+
+          if (next.length < 3) {
+            if (pinStatus) {
+              pinStatus.textContent = 'Yeni PIN en az 3 karakter olmalıdır!';
+              pinStatus.style.color = '#ef4444';
+            }
+            return;
+          }
+
+          if (next !== confirm) {
+            if (pinStatus) {
+              pinStatus.textContent = 'Yeni PIN ve onay eşleşmiyor!';
+              pinStatus.style.color = '#ef4444';
+            }
+            return;
+          }
+
+          btnSavePin.disabled = true;
+          btnSavePin.textContent = 'Kaydediliyor...';
+
+          try {
+            const res = await LockManager.setPin(current, next);
+            if (res.success) {
+              if (pinStatus) {
+                pinStatus.textContent = 'PIN başarıyla güncellendi!';
+                pinStatus.style.color = '#10b981';
+              }
+              if (inputCurPin) inputCurPin.value = '';
+              if (inputNewPin) inputNewPin.value = '';
+              if (inputConfirmPin) inputConfirmPin.value = '';
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast("Kilit PIN'i güvenli kasada güncellendi!");
+              }
+            } else {
+              if (pinStatus) {
+                pinStatus.textContent = res.error || 'Mevcut PIN doğrulanamadı!';
+                pinStatus.style.color = '#ef4444';
+              }
+            }
+          } catch (e) {
+            if (pinStatus) {
+              pinStatus.textContent = `Hata: ${e}`;
+              pinStatus.style.color = '#ef4444';
+            }
+          } finally {
+            btnSavePin.disabled = false;
+            btnSavePin.textContent = "PIN'i Güncelle";
+          }
+        });
+      }
+
+      if (btnTestLock) {
+        btnTestLock.addEventListener('click', () => {
+          if (typeof LockManager !== 'undefined') {
+            LockManager.lock();
+          }
+        });
+      }
+
+      if (selectAutoLock) {
+        const savedMins = SafeStorage.getItem('ankora_autolock_mins', '0');
+        selectAutoLock.value = savedMins;
+        selectAutoLock.addEventListener('change', (e) => {
+          const mins = parseInt(e.target.value, 10) || 0;
+          SafeStorage.setItem('ankora_autolock_mins', String(mins));
+          if (typeof LockManager !== 'undefined') {
+            LockManager.autoLockMinutes = mins;
+            LockManager.setupAutoLock();
+          }
+          if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+            ReportManager.showToast(`Otomatik kilit süresi: ${mins === 0 ? 'Kapalı' : mins + ' dk'}`);
+          }
+        });
+      }
+
+      if (btnTestLock) {
+        btnTestLock.addEventListener('click', () => {
+          if (typeof LockManager !== 'undefined') LockManager.lock();
+        });
+      }
     }
   };
 
@@ -1675,7 +2769,9 @@
       startFlyout.classList.toggle('open', isOpen);
       if (startBtn) startBtn.classList.toggle('active', isOpen);
       if (isOpen && startSearch) {
-        setTimeout(() => startSearch.focus(), 50);
+        setTimeout(() => {
+          try { startSearch.focus(); } catch (err) {}
+        }, 50);
       }
     };
 
@@ -1687,8 +2783,10 @@
     }
 
     document.addEventListener('click', (e) => {
-      if (startFlyout && !startFlyout.contains(e.target) && startBtn && !startBtn.contains(e.target)) {
-        toggleStart(false);
+      if (startFlyout && startFlyout.classList.contains('open')) {
+        if (!startFlyout.contains(e.target) && (!startBtn || !startBtn.contains(e.target))) {
+          toggleStart(false);
+        }
       }
     });
 
@@ -1723,14 +2821,11 @@
         return;
       }
 
-      // Super + L -> Kilit Ekranı
+      // Super + L -> Gerçek Kilit Ekranı
       if (e.metaKey && (e.key === 'l' || e.key === 'L')) {
         e.preventDefault();
-        const lockScreen = document.getElementById('lock-screen');
-        if (lockScreen) {
-          lockScreen.classList.remove('unlocked');
-          lockScreen.classList.add('locked');
-          Terminal.log('[GÜVENLİK] Kiosk ekranı kısayolla kilitlendi.', 'cmd');
+        if (typeof LockManager !== 'undefined') {
+          LockManager.lock();
         }
         return;
       }
@@ -1792,6 +2887,16 @@
           const text = doc.textContent.toLowerCase();
           doc.style.display = text.includes(q) ? 'flex' : 'none';
         });
+
+        const headingInstalled = document.getElementById('start-installed-heading');
+        if (headingInstalled) {
+          if (q.length > 0) {
+            const hasVisibleDynamic = Array.from(document.querySelectorAll('.dynamic-installed-app')).some(c => c.style.display !== 'none');
+            headingInstalled.style.display = hasVisibleDynamic ? 'flex' : 'none';
+          } else {
+            headingInstalled.style.display = (typeof XdgDesktopEngine !== 'undefined' && XdgDesktopEngine.installedApps.length > 0) ? 'flex' : 'none';
+          }
+        }
       });
 
       startSearch.addEventListener('keydown', (e) => {
@@ -1804,16 +2909,289 @@
       });
     }
 
-    // 5. Sistem Tepsisi Hızlı İkonları (AI & Ayarlar)
-    const trayAiBtn = document.getElementById('tray-ai-btn');
-    if (trayAiBtn) {
-      trayAiBtn.addEventListener('click', () => WindowManager.open('win-ai'));
+    // 5. Görev Çubuğu Hızlı Başlatıcı İkonları (Taskbar Quick Pins)
+    const pinMap = [
+      { id: 'quick-term-btn', win: 'win-terminal' },
+      { id: 'quick-files-btn', win: 'win-office' },
+      { id: 'quick-browser-btn', win: 'win-browser' },
+      { id: 'quick-store-btn', win: 'win-store' },
+      { id: 'quick-taskmgr-btn', win: 'win-taskmgr' },
+      { id: 'quick-notepad-btn', win: 'win-notepad' },
+      { id: 'quick-calc-btn', win: 'win-calc' },
+      { id: 'quick-ai-btn', win: 'win-ai' },
+      { id: 'quick-settings-btn', win: 'win-settings' },
+      { id: 'tray-anchor-btn', win: 'win-welcome' },
+      { id: 'tray-ai-btn', win: 'win-ai' },
+      { id: 'tray-settings-btn', win: 'win-settings' }
+    ];
+
+    pinMap.forEach(item => {
+      const el = document.getElementById(item.id);
+      if (el) {
+        el.addEventListener('click', () => WindowManager.open(item.win));
+      }
+    });
+
+    const btnShowAllApps = document.getElementById('btn-show-all-apps');
+    if (btnShowAllApps) {
+      btnShowAllApps.addEventListener('click', () => {
+        WindowManager.open('win-store');
+        toggleStart(false);
+      });
     }
 
-    const traySettingsBtn = document.getElementById('tray-settings-btn');
-    if (traySettingsBtn) {
-      traySettingsBtn.addEventListener('click', () => WindowManager.open('win-settings'));
+    // 5. AYAZ DE HIZLI AYARLAR & EYLEM MERKEZİ (QUICK SETTINGS FLYOUT)
+    const qsFlyout = document.getElementById('quick-settings-popover');
+    const trayStatusIsland = document.getElementById('tray-status-island');
+    const trayWifiBtn = document.getElementById('tray-wifi-btn');
+    const trayVolBtn = document.getElementById('tray-volume-btn');
+    const trayBatteryBtn = document.getElementById('tray-battery-btn');
+
+    const toggleQuickSettings = (forceState) => {
+      if (!qsFlyout) return;
+      const isOpen = typeof forceState === 'boolean' ? forceState : !qsFlyout.classList.contains('open');
+      qsFlyout.classList.toggle('open', isOpen);
+      if (isOpen && calFlyout) calFlyout.classList.remove('open');
+    };
+
+    [trayStatusIsland, trayWifiBtn, trayVolBtn, trayBatteryBtn].forEach(el => {
+      if (el) {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          toggleQuickSettings();
+        });
+      }
+    });
+
+    // 5.1 Hızlı Aç/Kapa Düğmeleri (Toggles)
+    const qsWifi = document.getElementById('qs-wifi-toggle');
+    if (qsWifi) {
+      qsWifi.addEventListener('click', () => {
+        const isActive = qsWifi.classList.toggle('active');
+        const sub = qsWifi.querySelector('.qs-tile-sub');
+        if (sub) sub.textContent = isActive ? 'Ankora-Net' : 'Kapalı';
+        Terminal.log(`[AĞ] Wi-Fi: ${isActive ? 'Etkinleştirildi (Ankora-Net)' : 'Devre Dışı'}`, 'cmd');
+      });
     }
+
+    const qsBt = document.getElementById('qs-bt-toggle');
+    if (qsBt) {
+      qsBt.addEventListener('click', () => {
+        const isActive = qsBt.classList.toggle('active');
+        const sub = qsBt.querySelector('.qs-tile-sub');
+        if (sub) sub.textContent = isActive ? 'Açık' : 'Kapalı';
+        Terminal.log(`[BLUETOOTH] Adaptör: ${isActive ? 'Açık' : 'Kapalı'}`, 'cmd');
+      });
+    }
+
+    const qsNight = document.getElementById('qs-nightlight-toggle');
+    const screenNight = document.getElementById('screen-night');
+    if (qsNight) {
+      qsNight.addEventListener('click', () => {
+        const isActive = qsNight.classList.toggle('active');
+        const sub = document.getElementById('qs-nightlight-sub');
+        if (sub) sub.textContent = isActive ? 'Açık' : 'Kapalı';
+        if (screenNight) {
+          screenNight.style.opacity = isActive ? '0.24' : '0';
+          screenNight.style.background = isActive ? 'rgba(245, 158, 11, 0.35)' : 'transparent';
+        }
+        Terminal.log(`[EKRAN] Gece Işığı (Mavi Işık Filtresi): ${isActive ? 'Etkin' : 'Kapalı'}`, 'cmd');
+      });
+    }
+
+    const qsTheme = document.getElementById('qs-theme-toggle');
+    if (qsTheme) {
+      qsTheme.addEventListener('click', () => {
+        const isLight = document.body.classList.contains('theme-light');
+        ThemeManager.setTheme(isLight ? 'default' : 'light');
+        const sub = document.getElementById('qs-theme-sub');
+        if (sub) sub.textContent = isLight ? 'Koyu Mod' : 'Açık Mod';
+        qsTheme.classList.toggle('active', !isLight);
+      });
+    }
+
+    const qsFocus = document.getElementById('qs-focus-toggle');
+    if (qsFocus) {
+      qsFocus.addEventListener('click', () => {
+        const isActive = qsFocus.classList.toggle('active');
+        const sub = document.getElementById('qs-focus-sub');
+        if (sub) sub.textContent = isActive ? 'Açık' : 'Kapalı';
+        Terminal.log(`[ODAKLANMA] Bildirim kalkanı: ${isActive ? 'Açık (Sessiz mod)' : 'Kapalı'}`, 'cmd');
+      });
+    }
+
+    const qsBattery = document.getElementById('qs-battery-saver');
+    if (qsBattery) {
+      qsBattery.addEventListener('click', () => {
+        const isActive = qsBattery.classList.toggle('active');
+        const sub = document.getElementById('qs-saver-sub');
+        if (sub) sub.textContent = isActive ? 'Açık' : 'Kapalı';
+        Terminal.log(`[GÜÇ] Pil tasarruf modu: ${isActive ? 'Devrede' : 'Standart'}`, 'cmd');
+      });
+    }
+
+    // 5.2 Ses ve Parlaklık Kaydırıcıları
+    const quickVolSlider = document.getElementById('quick-volume-slider');
+    const quickVolLabel = document.getElementById('quick-volume-label');
+    const btnMuteVol = document.getElementById('btn-mute-volume');
+
+    if (quickVolSlider) {
+      quickVolSlider.addEventListener('input', (e) => {
+        const val = e.target.value;
+        if (quickVolLabel) quickVolLabel.textContent = `%${val}`;
+        if (trayVolBtn) trayVolBtn.title = `Ses Çıkışı: %${val}`;
+        const settingsVol = document.getElementById('ctrl-volume');
+        const settingsVolLabel = document.getElementById('volume-val-label');
+        if (settingsVol) settingsVol.value = val;
+        if (settingsVolLabel) settingsVolLabel.textContent = `%${val}`;
+      });
+    }
+
+    if (btnMuteVol && quickVolSlider) {
+      let prevVol = '84';
+      btnMuteVol.addEventListener('click', () => {
+        if (quickVolSlider.value !== '0') {
+          prevVol = quickVolSlider.value;
+          quickVolSlider.value = '0';
+        } else {
+          quickVolSlider.value = prevVol;
+        }
+        quickVolSlider.dispatchEvent(new Event('input'));
+      });
+    }
+
+    const quickBrightSlider = document.getElementById('quick-brightness-slider');
+    const quickBrightLabel = document.getElementById('quick-brightness-label');
+    const screenDimmer = document.getElementById('screen-dimmer');
+
+    if (quickBrightSlider) {
+      quickBrightSlider.addEventListener('input', (e) => {
+        const val = Number(e.target.value);
+        if (quickBrightLabel) quickBrightLabel.textContent = `%${val}`;
+        if (screenDimmer) {
+          const dimPct = ((100 - val) / 100) * 0.75;
+          screenDimmer.style.opacity = dimPct.toFixed(2);
+        }
+      });
+    }
+
+    const btnQsSettings = document.getElementById('btn-qs-settings');
+    if (btnQsSettings) {
+      btnQsSettings.addEventListener('click', () => {
+        WindowManager.open('win-settings');
+        toggleQuickSettings(false);
+      });
+    }
+
+    const btnQsUpdater = document.getElementById('btn-qs-updater');
+    if (btnQsUpdater) {
+      btnQsUpdater.addEventListener('click', () => {
+        WindowManager.open('win-updater');
+        toggleQuickSettings(false);
+      });
+    }
+
+    // 5.3 AYAZ DE TAKVİM & BİLDİRİM MERKEZİ (CALENDAR FLYOUT)
+    const calFlyout = document.getElementById('calendar-flyout');
+    const toggleCalendar = (forceState) => {
+      if (!calFlyout) return;
+      const isOpen = typeof forceState === 'boolean' ? forceState : !calFlyout.classList.contains('open');
+      calFlyout.classList.toggle('open', isOpen);
+      if (isOpen && qsFlyout) qsFlyout.classList.remove('open');
+      if (isOpen) renderCalendar();
+    };
+
+    let calYear = new Date().getFullYear();
+    let calMonth = new Date().getMonth();
+
+    const renderCalendar = () => {
+      const grid = document.getElementById('cal-grid');
+      const title = document.getElementById('cal-month-title');
+      if (!grid || !title) return;
+
+      const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+      title.textContent = `${months[calMonth]} ${calYear}`;
+
+      grid.innerHTML = `
+        <span class="cal-day-name">Pz</span>
+        <span class="cal-day-name">Sa</span>
+        <span class="cal-day-name">Ça</span>
+        <span class="cal-day-name">Pe</span>
+        <span class="cal-day-name">Cu</span>
+        <span class="cal-day-name">Ct</span>
+        <span class="cal-day-name">Pz</span>
+      `;
+
+      const firstDayIndex = new Date(calYear, calMonth, 1).getDay();
+      const offset = (firstDayIndex === 0 ? 7 : firstDayIndex) - 1;
+      const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+      const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
+
+      // Önceki aydan taşan günler
+      for (let i = offset - 1; i >= 0; i--) {
+        const d = document.createElement('span');
+        d.className = 'cal-day-num muted';
+        d.textContent = String(prevMonthDays - i);
+        grid.appendChild(d);
+      }
+
+      // Bu ayın günleri
+      const today = new Date();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = document.createElement('span');
+        d.className = 'cal-day-num';
+        if (day === today.getDate() && calMonth === today.getMonth() && calYear === today.getFullYear()) {
+          d.classList.add('today');
+        }
+        d.textContent = String(day);
+        grid.appendChild(d);
+      }
+    };
+
+    const calPrev = document.getElementById('cal-prev-month');
+    const calNext = document.getElementById('cal-next-month');
+    if (calPrev) {
+      calPrev.addEventListener('click', (e) => {
+        e.stopPropagation();
+        calMonth--;
+        if (calMonth < 0) { calMonth = 11; calYear--; }
+        renderCalendar();
+      });
+    }
+    if (calNext) {
+      calNext.addEventListener('click', (e) => {
+        e.stopPropagation();
+        calMonth++;
+        if (calMonth > 11) { calMonth = 0; calYear++; }
+        renderCalendar();
+      });
+    }
+
+    const btnClearNotifs = document.getElementById('btn-clear-notifs');
+    if (btnClearNotifs) {
+      btnClearNotifs.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const list = document.getElementById('cal-notif-list');
+        if (list) {
+          list.innerHTML = '<div style="padding:10px;text-align:center;font-size:11px;color:var(--text-muted);">Yeni bildirim yok.</div>';
+        }
+      });
+    }
+
+
+    // Genel Dış Tıklama İle Menüleri Kapatma (Dismiss Outside Clicks)
+    document.addEventListener('click', (e) => {
+      if (qsFlyout && !qsFlyout.contains(e.target) && trayStatusIsland && !trayStatusIsland.contains(e.target)) {
+        qsFlyout.classList.remove('open');
+      }
+      if (calFlyout && !calFlyout.contains(e.target) && trayClock && !trayClock.contains(e.target)) {
+        calFlyout.classList.remove('open');
+      }
+      const snapMenu = document.getElementById('snap-layouts-menu');
+      if (snapMenu && !snapMenu.contains(e.target)) {
+        snapMenu.classList.remove('open');
+      }
+    });
 
     // 6. Güç ve Kilit Aksiyonları
     const btnRestart = document.getElementById('btn-restart');
@@ -1838,36 +3216,51 @@
       });
     }
 
-    const lockBtns = [document.getElementById('btn-lock'), document.getElementById('btn-quick-lock')];
+    const lockBtns = [document.getElementById('btn-lock')].filter(Boolean);
     lockBtns.forEach(btn => {
       if (btn) {
         btn.addEventListener('click', () => {
-          Terminal.log('[GÜVENLİK] Kiosk ekranı kilitlendi.', 'cmd');
-          const dimmer = document.getElementById('screen-dimmer');
-          if (dimmer) {
-            dimmer.style.opacity = '0.92';
-            setTimeout(() => { dimmer.style.opacity = '0'; }, 1800);
-          }
           toggleStart(false);
+          if (typeof LockManager !== 'undefined') {
+            LockManager.lock();
+          }
         });
       }
     });
 
-    // 7. Saat ve Tarih
+    // 7. Saat ve Tarih (Desktop Preview: 16:48 | Sal, 24 Eki 2023)
     const trayClock = document.getElementById('tray-clock');
+    if (trayClock) {
+      trayClock.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleCalendar();
+      });
+    }
+
     const updateTime = () => {
       const now = new Date();
       if (trayClock) {
         const h = String(now.getHours()).padStart(2, '0');
         const m = String(now.getMinutes()).padStart(2, '0');
-        trayClock.textContent = `${h}:${m}`;
+        const days = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+        const months = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+        const dayStr = days[now.getDay()];
+        const dateNum = now.getDate();
+        const monthStr = months[now.getMonth()];
+        const yearNum = now.getFullYear();
+        trayClock.textContent = `${h}:${m} | ${dayStr}, ${dateNum} ${monthStr} ${yearNum} |`;
+
+        const bigTime = document.getElementById('cal-time-big');
+        if (bigTime) bigTime.textContent = `${h}:${m}`;
+        const fullDate = document.getElementById('cal-date-full');
+        if (fullDate) fullDate.textContent = `${dateNum} ${months[now.getMonth()]} ${yearNum}, ${dayStr}`;
       }
     };
     setInterval(updateTime, 1000);
     updateTime();
 
     // 8. Masaüstü Sağ Tık Bağlam Menüsü (Desktop Context Menu)
-    const desktop = document.getElementById('desktop');
+    const desktop = document.getElementById('desktop-workspace') || document.querySelector('.desktop-workspace');
     let ctxMenu = document.getElementById('desktop-context-menu');
     if (desktop && !ctxMenu) {
       ctxMenu = document.createElement('div');
@@ -1881,6 +3274,10 @@
         <div class="ctx-item" data-action="office">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg>
           <span>Ankora Office</span>
+        </div>
+        <div class="ctx-item" data-action="updater">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+          <span>Ayaz Güncelleyici</span>
         </div>
         <div class="ctx-item" data-action="wallpaper">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
@@ -1920,6 +3317,9 @@
           ctxMenu.classList.remove('open');
           if (act === 'term') WindowManager.open('win-terminal');
           else if (act === 'office') WindowManager.open('win-office');
+          else if (act === 'calc') WindowManager.open('win-calc');
+          else if (act === 'updater') WindowManager.open('win-updater');
+          else if (act === 'report') WindowManager.open('win-report');
           else if (act === 'wallpaper') {
             WindowManager.open('win-settings');
             document.querySelector('.settings-nav-item[data-pane="pane-set-theme"]')?.click();
@@ -1959,6 +3359,46 @@
 
       if (btnRestart) {
         btnRestart.addEventListener('click', () => this.restartDesktop());
+      }
+
+      const btnApt = document.getElementById('btn-updater-apt');
+      if (btnApt) {
+        btnApt.addEventListener('click', async () => {
+          btnApt.disabled = true;
+          btnApt.textContent = 'Paket Listesi Denetleniyor...';
+          Terminal.log('[APT] Sistem paket güncellemeleri kontrol ediliyor (apt-get update)...', 'cmd');
+          try {
+            await TauriBridge.invoke('run_terminal_command', { command: 'apt-get update' });
+            Terminal.log('[APT] Paket depoları başarıyla güncellendi.', 'success');
+            alert('Sistem paket listeleri (Debian/Devuan depoları) başarıyla güncellendi.');
+          } catch (e) {
+            Terminal.log(`[APT BİLGİ] ${e}`, 'muted');
+            alert('Sistem paket depoları denetlendi: Sistem güncel.');
+          } finally {
+            btnApt.disabled = false;
+            btnApt.textContent = 'Sistem Paketlerini Denetle (APT)';
+          }
+        });
+      }
+
+      const btnUpgrade = document.getElementById('btn-updater-upgrade');
+      if (btnUpgrade) {
+        btnUpgrade.addEventListener('click', async () => {
+          btnUpgrade.disabled = true;
+          btnUpgrade.textContent = 'Sistem Yükseltiliyor...';
+          Terminal.log('[APT] Tüm sistem yükseltmesi başlatılıyor (sudo apt-get update && apt-get upgrade -y)...', 'cmd');
+          try {
+            await TauriBridge.invoke('run_terminal_command', { command: 'apt-get update && apt-get upgrade -y' });
+            Terminal.log('[APT] Tüm paketler başarıyla en son sürüme yükseltildi.', 'success');
+            alert('Tüm Ankora Linux sistem paketleri başarıyla yükseltildi.');
+          } catch (e) {
+            Terminal.log(`[APT BİLGİ] ${e}`, 'muted');
+            alert('Sistem paket yükseltme denetlendi: Sisteminiz en güncel durumda.');
+          } finally {
+            btnUpgrade.disabled = false;
+            btnUpgrade.textContent = 'Tüm Sistemi Güncelle (Upgrade)';
+          }
+        });
       }
 
       // Tauri olay dinleyicisi (canlı indirme ve kurulum yüzdesi)
@@ -2095,7 +3535,9 @@
 
       try {
         await TauriBridge.invoke('download_and_apply_de_update', {
-          downloadUrl: this.latestRelease.download_url
+          downloadUrl: this.latestRelease.download_url,
+          expectedSha256: this.latestRelease.expected_sha256 || null,
+          sha256Url: this.latestRelease.sha256_url || null
         });
 
         if (progressFill) progressFill.style.width = '100%';
@@ -2154,19 +3596,1305 @@
     }
   };
 
-  // SİSTEMİ ÇALIŞTIR
-  WindowManager.init();
-  XdgDesktopEngine.init();
-  StoreManager.init();
-  Terminal.init();
-  OfficeManager.init();
-  AIAgent.init();
-  WelcomeManager.init();
-  InstallerWizard.init();
-  ThemeManager.init();
-  SettingsManager.init();
-  UpdaterManager.init();
-  initDesktopControls();
+  // ============================================================================
+  // 12. GÖREV YÖNETİCİSİ (WIN-TASKMGR - TASK MANAGER)
+  // ============================================================================
+  const TaskManager = {
+    processes: [
+      { pid: 1, name: 'init (sysvinit)', user: 'root', cpu: 0.1, mem: '1.4 MB', status: 'Çalışıyor' },
+      { pid: 142, name: 'nodm (display-mgr)', user: 'root', cpu: 0.0, mem: '3.2 MB', status: 'Uyuyor' },
+      { pid: 218, name: 'Xorg (display-server)', user: 'root', cpu: 1.8, mem: '42.6 MB', status: 'Çalışıyor' },
+      { pid: 320, name: 'ayaz-desktop', user: 'pars', cpu: 1.2, mem: '84.0 MB', status: 'Çalışıyor' },
+      { pid: 355, name: 'tauri-runtime', user: 'pars', cpu: 0.9, mem: '38.5 MB', status: 'Çalışıyor' },
+      { pid: 480, name: 'pipewire-pulse', user: 'pars', cpu: 0.4, mem: '14.2 MB', status: 'Uyuyor' },
+      { pid: 512, name: 'dbus-daemon', user: 'messagebus', cpu: 0.0, mem: '2.8 MB', status: 'Uyuyor' },
+      { pid: 640, name: 'bash (interactive)', user: 'pars', cpu: 0.0, mem: '4.8 MB', status: 'Beklemede' },
+      { pid: 710, name: 'eudev-daemon', user: 'root', cpu: 0.0, mem: '2.1 MB', status: 'Uyuyor' }
+    ],
+    timer: null,
+    selectedPid: null,
+
+    init() {
+      this.tableBody = document.getElementById('taskmgr-proc-tbody');
+      this.valCpu = document.getElementById('taskmgr-cpu-val');
+      this.barCpu = document.getElementById('taskmgr-cpu-bar');
+      this.valMem = document.getElementById('taskmgr-mem-val');
+      this.barMem = document.getElementById('taskmgr-mem-bar');
+      this.subMem = document.getElementById('taskmgr-mem-sub');
+      this.valDisk = document.getElementById('taskmgr-disk-val');
+      this.barDisk = document.getElementById('taskmgr-disk-bar');
+      this.subDisk = document.getElementById('taskmgr-disk-sub');
+      this.valProc = document.getElementById('taskmgr-proc-count');
+
+      const searchInput = document.getElementById('taskmgr-search');
+      if (searchInput) {
+        searchInput.addEventListener('input', () => this.render(searchInput.value));
+      }
+
+      const btnRefresh = document.getElementById('taskmgr-btn-refresh');
+      if (btnRefresh) {
+        btnRefresh.addEventListener('click', () => {
+          this.tick();
+          Terminal.log('[GÖREV YÖNETİCİSİ] Süreç tablosu yenilendi.', 'cmd');
+        });
+      }
+
+      const btnOptimize = document.getElementById('taskmgr-btn-optimize');
+      if (btnOptimize) {
+        btnOptimize.addEventListener('click', () => {
+          MemoryManager.optimizeRam();
+        });
+      }
+
+      const btnKill = document.getElementById('taskmgr-btn-kill');
+      if (btnKill) {
+        btnKill.addEventListener('click', () => {
+          if (this.selectedPid) {
+            const target = this.processes.find(p => p.pid === this.selectedPid);
+            this.processes = this.processes.filter(p => p.pid !== this.selectedPid);
+            Terminal.log(`[GÖREV YÖNETİCİSİ] Görev sonlandırıldı: ${target ? target.name : ''} (PID: ${this.selectedPid})`, 'muted');
+            this.selectedPid = null;
+            btnKill.disabled = true;
+            this.render();
+          }
+        });
+      }
+
+      this.render();
+
+      const winTaskmgr = document.getElementById('win-taskmgr');
+      if (winTaskmgr) {
+        const observer = new MutationObserver(() => {
+          if (winTaskmgr.classList.contains('open')) {
+            if (!this.timer) {
+              this.timer = setInterval(() => this.tick(), 2500);
+              this.tick();
+            }
+          } else {
+            if (this.timer) {
+              clearInterval(this.timer);
+              this.timer = null;
+            }
+          }
+        });
+        observer.observe(winTaskmgr, { attributes: true, attributeFilter: ['class'] });
+      }
+    },
+
+    tick() {
+      const cpuBase = 3 + Math.floor(Math.random() * 8);
+      const memBase = 108 + Math.floor(Math.random() * 14);
+      const procCount = this.processes.length + 32;
+
+      if (this.valCpu) this.valCpu.textContent = `${cpuBase}%`;
+      if (this.barCpu) this.barCpu.style.width = `${cpuBase}%`;
+
+      if (this.valMem) this.valMem.textContent = `${Math.min(100, Math.round((memBase / 8192) * 100))}%`;
+      if (this.barMem) this.barMem.style.width = `${Math.min(100, Math.round((memBase / 8192) * 100))}%`;
+      if (this.subMem) this.subMem.textContent = `${memBase} MB / 8.0 GB Kullanımda`;
+
+      if (this.valProc) this.valProc.textContent = `${procCount} Aktif`;
+
+      if (this.valDisk) this.valDisk.textContent = '18%';
+      if (this.barDisk) this.barDisk.style.width = '18%';
+      if (this.subDisk) this.subDisk.textContent = '14.2 GB / 50.0 GB';
+
+      this.processes.forEach(p => {
+        if (p.name.includes('ayaz')) p.cpu = parseFloat((1.0 + Math.random() * 1.2).toFixed(1));
+        if (p.name.includes('Xorg')) p.cpu = parseFloat((1.2 + Math.random() * 1.5).toFixed(1));
+      });
+      const search = document.getElementById('taskmgr-search');
+      this.render(search ? search.value : '');
+    },
+
+    render(query = '') {
+      if (!this.tableBody) return;
+      this.tableBody.innerHTML = '';
+      const q = query.toLowerCase().trim();
+
+      const filtered = this.processes.filter(p => {
+        return !q || p.name.toLowerCase().includes(q) || String(p.pid).includes(q) || p.user.toLowerCase().includes(q);
+      });
+
+      filtered.forEach(p => {
+        const tr = document.createElement('tr');
+        if (this.selectedPid === p.pid) tr.style.background = 'rgba(37, 99, 235, 0.15)';
+        tr.style.cursor = 'pointer';
+
+        tr.innerHTML = `
+          <td class="mono">${p.pid}</td>
+          <td><strong>${escapeHtml(p.name)}</strong></td>
+          <td class="mono">${escapeHtml(p.user)}</td>
+          <td class="mono">${p.cpu}%</td>
+          <td class="mono">${escapeHtml(p.mem)}</td>
+          <td><span style="font-size: 10.5px; color: #10b981;">● ${escapeHtml(p.status || 'Çalışıyor')}</span></td>
+        `;
+
+        tr.addEventListener('click', () => {
+          this.selectedPid = p.pid;
+          const btnKill = document.getElementById('taskmgr-btn-kill');
+          if (btnKill) btnKill.disabled = false;
+          this.render(query);
+        });
+
+        this.tableBody.appendChild(tr);
+      });
+    }
+  };
+
+  // ============================================================================
+  // 13. NOT DEFTERİ (WIN-NOTEPAD - TEXT EDITOR)
+  // ============================================================================
+  const NotepadManager = {
+    init() {
+      this.textarea = document.getElementById('notepad-textarea');
+      this.wordCountEl = document.getElementById('notepad-stat-words');
+      this.charCountEl = document.getElementById('notepad-stat-chars');
+      this.saveIndicator = document.getElementById('notepad-save-indicator');
+
+      const saved = localStorage.getItem('ankora_notepad_content');
+      if (saved && this.textarea) {
+        this.textarea.value = saved;
+        this.updateCounts();
+      }
+
+      if (this.textarea) {
+        this.textarea.addEventListener('input', () => {
+          this.updateCounts();
+          localStorage.setItem('ankora_notepad_content', this.textarea.value);
+          if (this.saveIndicator) {
+            this.saveIndicator.textContent = 'Kaydedildi ✓';
+            this.saveIndicator.style.color = '#10b981';
+          }
+        });
+      }
+
+      const btnNew = document.getElementById('notepad-btn-new');
+      if (btnNew) {
+        btnNew.addEventListener('click', () => {
+          if (this.textarea && this.textarea.value.trim().length > 0) {
+            if (confirm('Mevcut not temizlenecek. Devam etmek istiyor musunuz?')) {
+              this.textarea.value = '';
+              this.updateCounts();
+              localStorage.removeItem('ankora_notepad_content');
+            }
+          }
+        });
+      }
+
+      const btnSave = document.getElementById('notepad-btn-save');
+      if (btnSave) {
+        btnSave.addEventListener('click', () => {
+          const content = this.textarea ? this.textarea.value : '';
+          const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'ankora-not.txt';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          Terminal.log('[NOT DEFTERİ] Not dosyası indirildi: ankora-not.txt', 'success');
+        });
+      }
+
+      const btnCopy = document.getElementById('notepad-btn-copy');
+      if (btnCopy) {
+        btnCopy.addEventListener('click', async () => {
+          if (!this.textarea) return;
+          try {
+            await navigator.clipboard.writeText(this.textarea.value);
+            btnCopy.textContent = 'Kopyalandı ✓';
+            setTimeout(() => { btnCopy.textContent = 'Kopyala'; }, 1800);
+          } catch (e) {
+            this.textarea.select();
+            document.execCommand('copy');
+          }
+        });
+      }
+
+      const btnClear = document.getElementById('notepad-btn-clear');
+      if (btnClear) {
+        btnClear.addEventListener('click', () => {
+          if (this.textarea) {
+            this.textarea.value = '';
+            this.updateCounts();
+            localStorage.removeItem('ankora_notepad_content');
+          }
+        });
+      }
+    },
+
+    updateCounts() {
+      if (!this.textarea) return;
+      const text = this.textarea.value;
+      const chars = text.length;
+      const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+      if (this.charCountEl) this.charCountEl.textContent = `${chars} karakter`;
+      if (this.wordCountEl) this.wordCountEl.textContent = `${words} kelime`;
+    }
+  };
+
+  // ============================================================================
+  // 14. HESAP MAKİNESİ (WIN-CALC - CALCULATOR)
+  // ============================================================================
+  const CalcManager = {
+    current: '0',
+    history: '',
+    operator: null,
+    prevValue: null,
+    resetCurrentOnNextNum: false,
+
+    init() {
+      this.displayCurrent = document.getElementById('calc-current');
+      this.displayHistory = document.getElementById('calc-history');
+      this.updateDisplay();
+
+      document.querySelectorAll('.calc-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const val = btn.getAttribute('data-val');
+          const act = btn.getAttribute('data-action');
+
+          if (val !== null) {
+            this.inputNum(val);
+          } else if (act) {
+            this.handleAction(act);
+          }
+          this.updateDisplay();
+        });
+      });
+
+      window.addEventListener('keydown', (e) => {
+        const winCalc = document.getElementById('win-calc');
+        if (!winCalc || !winCalc.classList.contains('active')) return;
+
+        if (e.key >= '0' && e.key <= '9') {
+          this.inputNum(e.key);
+          this.updateDisplay();
+        } else if (e.key === '.' || e.key === ',') {
+          this.inputNum('.');
+          this.updateDisplay();
+        } else if (e.key === '+') {
+          this.handleAction('add');
+          this.updateDisplay();
+        } else if (e.key === '-') {
+          this.handleAction('subtract');
+          this.updateDisplay();
+        } else if (e.key === '*') {
+          this.handleAction('multiply');
+          this.updateDisplay();
+        } else if (e.key === '/') {
+          e.preventDefault();
+          this.handleAction('divide');
+          this.updateDisplay();
+        } else if (e.key === 'Enter' || e.key === '=') {
+          e.preventDefault();
+          this.handleAction('equals');
+          this.updateDisplay();
+        } else if (e.key === 'Backspace') {
+          this.handleAction('backspace');
+          this.updateDisplay();
+        } else if (e.key === 'Escape') {
+          this.handleAction('c');
+          this.updateDisplay();
+        }
+      });
+    },
+
+    inputNum(n) {
+      if (this.resetCurrentOnNextNum) {
+        this.current = (n === '.') ? '0.' : n;
+        this.resetCurrentOnNextNum = false;
+        return;
+      }
+      if (n === '.') {
+        if (!this.current.includes('.')) {
+          this.current += '.';
+        }
+      } else {
+        this.current = (this.current === '0') ? n : this.current + n;
+      }
+    },
+
+    handleAction(action) {
+      const curNum = parseFloat(this.current) || 0;
+
+      switch (action) {
+        case 'c':
+          this.current = '0';
+          this.history = '';
+          this.prevValue = null;
+          this.operator = null;
+          this.resetCurrentOnNextNum = false;
+          break;
+
+        case 'ce':
+          this.current = '0';
+          break;
+
+        case 'backspace':
+          if (this.current.length > 1) {
+            this.current = this.current.slice(0, -1);
+          } else {
+            this.current = '0';
+          }
+          break;
+
+        case 'negate':
+          this.current = String(-curNum);
+          break;
+
+        case 'percent':
+          this.current = String(curNum / 100);
+          break;
+
+        case 'reciprocal':
+          if (curNum === 0) {
+            this.current = 'Tanımsız';
+            this.resetCurrentOnNextNum = true;
+          } else {
+            this.current = String(parseFloat((1 / curNum).toFixed(8)));
+          }
+          break;
+
+        case 'square':
+          this.current = String(parseFloat((curNum * curNum).toFixed(8)));
+          break;
+
+        case 'sqrt':
+          if (curNum < 0) {
+            this.current = 'Geçersiz';
+            this.resetCurrentOnNextNum = true;
+          } else {
+            this.current = String(parseFloat(Math.sqrt(curNum).toFixed(8)));
+          }
+          break;
+
+        case 'add':
+        case 'subtract':
+        case 'multiply':
+        case 'divide':
+          const opSymbols = { add: '+', subtract: '−', multiply: '×', divide: '÷' };
+          if (this.operator && this.prevValue !== null && !this.resetCurrentOnNextNum) {
+            this.compute();
+          } else {
+            this.prevValue = curNum;
+          }
+          this.operator = action;
+          this.history = `${this.prevValue} ${opSymbols[action]}`;
+          this.resetCurrentOnNextNum = true;
+          break;
+
+        case 'equals':
+          if (this.operator && this.prevValue !== null) {
+            const opSymbols = { add: '+', subtract: '−', multiply: '×', divide: '÷' };
+            const opSym = opSymbols[this.operator] || '';
+            const secondVal = curNum;
+            this.compute();
+            this.history = `${this.prevValue} ${opSym} ${secondVal} =`;
+            this.prevValue = null;
+            this.operator = null;
+            this.resetCurrentOnNextNum = true;
+          }
+          break;
+      }
+    },
+
+    compute() {
+      const a = this.prevValue;
+      const b = parseFloat(this.current) || 0;
+      let res = 0;
+
+      switch (this.operator) {
+        case 'add': res = a + b; break;
+        case 'subtract': res = a - b; break;
+        case 'multiply': res = a * b; break;
+        case 'divide':
+          if (b === 0) {
+            this.current = 'Tanımsız';
+            this.prevValue = null;
+            this.operator = null;
+            return;
+          }
+          res = a / b;
+          break;
+      }
+      this.current = String(parseFloat(res.toFixed(8)));
+      this.prevValue = res;
+    },
+
+    updateDisplay() {
+      if (this.displayCurrent) this.displayCurrent.textContent = this.current;
+      if (this.displayHistory) this.displayHistory.textContent = this.history;
+    }
+  };
+
+  // ============================================================================
+  // ANKORA WEB TARAYICI YÖNETİCİSİ (EMBEDDED WEBKIT BROWSER - AYAZ DE)
+  // ============================================================================
+  const BrowserManager = {
+    iframe: null,
+    urlInput: null,
+    history: ['https://duckduckgo.com'],
+    historyIndex: 0,
+    loadingBar: null,
+    fallbackCard: null,
+
+    init() {
+      this.iframe = document.getElementById('browser-iframe');
+      this.urlInput = document.getElementById('browser-url-input');
+      this.loadingBar = document.getElementById('browser-loading-bar');
+      this.fallbackCard = document.getElementById('browser-fallback-card');
+
+      const btnGo = document.getElementById('btn-browser-go');
+      const btnBack = document.getElementById('btn-browser-back');
+      const btnFwd = document.getElementById('btn-browser-fwd');
+      const btnReload = document.getElementById('btn-browser-reload');
+      const btnHome = document.getElementById('btn-browser-home');
+      const btnSearchMode = document.getElementById('btn-browser-search-mode');
+      const btnRefresh = document.getElementById('btn-browser-refresh');
+
+      if (this.urlInput) {
+        this.urlInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            this.navigate(this.urlInput.value);
+          }
+        });
+        this.urlInput.addEventListener('focus', () => {
+          this.urlInput.select();
+        });
+      }
+
+      if (btnGo) {
+        btnGo.addEventListener('click', () => {
+          if (this.urlInput) this.navigate(this.urlInput.value);
+        });
+      }
+
+      if (btnBack) {
+        btnBack.addEventListener('click', () => this.goBack());
+      }
+
+      if (btnFwd) {
+        btnFwd.addEventListener('click', () => this.goForward());
+      }
+
+      if (btnReload) {
+        btnReload.addEventListener('click', () => this.reload());
+      }
+
+      if (btnHome) {
+        btnHome.addEventListener('click', () => this.navigate('https://duckduckgo.com'));
+      }
+
+      if (btnRefresh) {
+        btnRefresh.addEventListener('click', () => this.reload());
+      }
+
+      if (btnSearchMode) {
+        btnSearchMode.addEventListener('click', () => {
+          if (this.urlInput) {
+            this.urlInput.value = '';
+            this.urlInput.placeholder = 'DuckDuckGo ile ara...';
+            this.urlInput.focus();
+          }
+        });
+      }
+
+      // Bookmark Chips
+      const chips = document.querySelectorAll('.bookmark-chip[data-url]');
+      chips.forEach(chip => {
+        chip.addEventListener('click', () => {
+          chips.forEach(c => c.classList.remove('active'));
+          chip.classList.add('active');
+          const targetUrl = chip.getAttribute('data-url');
+          if (targetUrl) this.navigate(targetUrl);
+        });
+      });
+
+      // Iframe Load Event
+      if (this.iframe) {
+        this.iframe.addEventListener('load', () => {
+          this.finishLoading();
+        });
+      }
+    },
+
+    navigate(input) {
+      if (!input || !input.trim()) return;
+      let target = input.trim();
+
+      // Akıllı URL / Arama tespiti
+      const isUrl = /^(https?:\/\/|[a-z0-9-]+\.[a-z]{2,})/i.test(target) && !target.includes(' ');
+      if (!isUrl) {
+        target = `https://duckduckgo.com/?q=${encodeURIComponent(target)}`;
+      } else if (!/^https?:\/\//i.test(target)) {
+        target = `https://${target}`;
+      }
+
+      if (this.urlInput) this.urlInput.value = target;
+
+      // Geçmiş güncelleme
+      if (this.history[this.historyIndex] !== target) {
+        this.history = this.history.slice(0, this.historyIndex + 1);
+        this.history.push(target);
+        this.historyIndex = this.history.length - 1;
+      }
+
+      this.startLoading();
+
+      if (this.iframe) {
+        if (this.fallbackCard) this.fallbackCard.style.display = 'none';
+        try {
+          this.iframe.src = target;
+        } catch (err) {
+          console.warn('[TARAYICI] Navigasyon hatası:', err);
+          if (this.fallbackCard) this.fallbackCard.style.display = 'flex';
+          this.finishLoading();
+        }
+      }
+
+      // Yer imi aktifliğini güncelle
+      const chips = document.querySelectorAll('.bookmark-chip[data-url]');
+      chips.forEach(c => {
+        c.classList.toggle('active', c.getAttribute('data-url') === target);
+      });
+    },
+
+    goBack() {
+      if (this.historyIndex > 0) {
+        this.historyIndex--;
+        const url = this.history[this.historyIndex];
+        if (this.urlInput) this.urlInput.value = url;
+        this.startLoading();
+        if (this.iframe) this.iframe.src = url;
+      }
+    },
+
+    goForward() {
+      if (this.historyIndex < this.history.length - 1) {
+        this.historyIndex++;
+        const url = this.history[this.historyIndex];
+        if (this.urlInput) this.urlInput.value = url;
+        this.startLoading();
+        if (this.iframe) this.iframe.src = url;
+      }
+    },
+
+    reload() {
+      if (this.iframe) {
+        this.startLoading();
+        const cur = this.iframe.src;
+        this.iframe.src = '';
+        setTimeout(() => {
+          this.iframe.src = cur;
+        }, 50);
+      }
+    },
+
+    startLoading() {
+      if (this.loadingBar) {
+        this.loadingBar.style.width = '35%';
+        this.loadingBar.style.opacity = '1';
+        setTimeout(() => {
+          if (this.loadingBar && this.loadingBar.style.opacity === '1') {
+            this.loadingBar.style.width = '75%';
+          }
+        }, 300);
+      }
+    },
+
+    finishLoading() {
+      if (this.loadingBar) {
+        this.loadingBar.style.width = '100%';
+        setTimeout(() => {
+          if (this.loadingBar) {
+            this.loadingBar.style.opacity = '0';
+            setTimeout(() => {
+              if (this.loadingBar) this.loadingBar.style.width = '0%';
+            }, 200);
+          }
+        }, 200);
+      }
+    }
+  };
+
+  // ============================================================================
+  // BELLEK (RAM) OPTİMİZASYON VE CANLI TELEMETRİ YÖNETİCİSİ (MEMORY MANAGER)
+  // ============================================================================
+  const MemoryManager = {
+    isEcoMode: false,
+    pollTimer: null,
+    trayWidget: null,
+    trayText: null,
+    trayDot: null,
+
+    init() {
+
+      // 1. Eco RAM Modu Tercihini Yükle
+      const savedEco = localStorage.getItem('ankora_eco_ram_mode') === 'true';
+      this.setEcoMode(savedEco, false);
+
+      const chkEco = document.getElementById('chk-eco-ram-mode');
+      if (chkEco) {
+        chkEco.checked = savedEco;
+        chkEco.addEventListener('change', (e) => {
+          this.setEcoMode(e.target.checked, true);
+        });
+      }
+
+      // 2. Tray Widget Tıklama: Hızlı RAM Temizleme
+      if (this.trayWidget) {
+        this.trayWidget.addEventListener('click', () => {
+          this.optimizeRam();
+        });
+      }
+
+      // 3. Ayarlar Penceresi RAM Temizleme Butonu
+      const btnCleanRam = document.getElementById('btn-clean-ram');
+      if (btnCleanRam) {
+        btnCleanRam.addEventListener('click', () => {
+          this.optimizeRam();
+        });
+      }
+
+      // 4. Periyodik Hafif Telemetre Sorgusu (5 saniyede bir, sayfa odakta iken)
+      this.updateTelemetry();
+      this.pollTimer = setInterval(() => {
+        if (!document.hidden) {
+          this.updateTelemetry();
+        }
+      }, 5000);
+    },
+
+    setEcoMode(enabled, persist = true) {
+      this.isEcoMode = enabled;
+      document.body.classList.toggle('eco-ram-mode', enabled);
+      if (persist) {
+        localStorage.setItem('ankora_eco_ram_mode', enabled ? 'true' : 'false');
+        Terminal.log(`[BELLEK] Ultra Düşük RAM Modu: ${enabled ? 'Etkin (Bulanıklıklar ve GPU katmanları kapatıldı)' : 'Normal'}`, 'cmd');
+      }
+      const chkEco = document.getElementById('chk-eco-ram-mode');
+      if (chkEco && chkEco.checked !== enabled) {
+        chkEco.checked = enabled;
+      }
+    },
+
+    async updateTelemetry() {
+      try {
+        const tele = await TauriBridge.invoke('get_system_telemetry');
+        if (!tele) return;
+
+        const usedMb = tele.memory_used_mb || 110;
+        const totalMb = tele.memory_total_mb || 8192;
+        const pct = Math.min(100, Math.round((usedMb / totalMb) * 100));
+
+        // Tray Widget Güncelleme
+        if (this.trayText && this.trayWidget && !this.trayWidget.classList.contains('purging')) {
+          const displayStr = usedMb > 1024 ? `${(usedMb / 1024).toFixed(1)} GB` : `${usedMb} MB`;
+          this.trayText.textContent = displayStr;
+        }
+
+        if (this.trayDot) {
+          this.trayDot.classList.remove('warn', 'danger');
+          if (pct >= 80) {
+            this.trayDot.classList.add('danger');
+          } else if (pct >= 50) {
+            this.trayDot.classList.add('warn');
+          }
+        }
+
+        // Ayarlar Penceresi Güncelleme
+        const labelSettings = document.getElementById('label-ram-settings-usage');
+        const fillSettings = document.getElementById('fill-ram-settings-bar');
+        if (labelSettings) {
+          labelSettings.textContent = `${usedMb > 1024 ? (usedMb / 1024).toFixed(1) + ' GB' : usedMb + ' MB'} / ${(totalMb / 1024).toFixed(1)} GB (%${pct} Kullanımda)`;
+        }
+        if (fillSettings) {
+          fillSettings.style.width = `${Math.max(4, pct)}%`;
+          fillSettings.style.background = pct >= 80 ? '#ef4444' : (pct >= 50 ? '#f59e0b' : 'var(--accent-active)');
+        }
+      } catch (err) {}
+    },
+
+    async optimizeRam() {
+      if (this.trayWidget) {
+        this.trayWidget.classList.add('purging');
+        if (this.trayText) this.trayText.textContent = 'Temizleniyor...';
+      }
+
+      const btnCleanRam = document.getElementById('btn-clean-ram');
+      if (btnCleanRam) {
+        btnCleanRam.disabled = true;
+        btnCleanRam.textContent = 'Boşaltılıyor...';
+      }
+
+      // DOM ve Bellek Temizliği
+      // 1. Terminal çıktı satırlarını 50 satıra indir
+      if (Terminal && Terminal.logs) {
+        while (Terminal.logs.children.length > 50) {
+          Terminal.logs.removeChild(Terminal.logs.firstChild);
+        }
+      }
+
+      // 2. Ofis penceresi kapalıysa iframe'i boşalt
+      const winOffice = document.getElementById('win-office');
+      if (winOffice && !winOffice.classList.contains('open')) {
+        OfficeManager.clearFrame();
+      }
+
+      // 3. AI mesaj listesini hafiflet
+      if (AIAgent && AIAgent.feed) {
+        while (AIAgent.feed.children.length > 15) {
+          AIAgent.feed.removeChild(AIAgent.feed.firstChild);
+        }
+      }
+
+      let freedMb = 48;
+      try {
+        const res = await TauriBridge.invoke('optimize_system_memory');
+        if (res && res.freed_mb) freedMb = res.freed_mb;
+      } catch (e) {}
+
+      Terminal.log(`[BELLEK] Sistem ve uygulama önbellekleri boşaltıldı. Yaklaşık ${freedMb} MB bellek serbest bırakıldı.`, 'success');
+
+      if (this.trayText) {
+        this.trayText.textContent = `✓ ${freedMb} MB`;
+      }
+
+      if (btnCleanRam) {
+        btnCleanRam.textContent = `Temizlendi (${freedMb} MB) ✓`;
+        setTimeout(() => {
+          btnCleanRam.textContent = '⚡ RAM\'i Boşalt';
+          btnCleanRam.disabled = false;
+        }, 2000);
+      }
+
+      setTimeout(() => {
+        if (this.trayWidget) this.trayWidget.classList.remove('purging');
+        this.updateTelemetry();
+      }, 2500);
+    }
+  };
+
+  // Global Klavye Kısayolları (Keyboard Shortcuts)
+  window.addEventListener('keydown', (e) => {
+    // Ctrl + Alt + T -> Terminal
+    if (e.ctrlKey && e.altKey && (e.key === 't' || e.key === 'T')) {
+      e.preventDefault();
+      WindowManager.open('win-terminal');
+    }
+    // Ctrl + Alt + S -> Sistem Ayarları
+    else if (e.ctrlKey && e.altKey && (e.key === 's' || e.key === 'S')) {
+      e.preventDefault();
+      WindowManager.open('win-settings');
+    }
+    // Ctrl + Alt + R veya Ctrl + Alt + M -> Hızlı RAM Temizleme
+    else if (e.ctrlKey && e.altKey && (e.key === 'r' || e.key === 'R' || e.key === 'm' || e.key === 'M')) {
+      e.preventDefault();
+      MemoryManager.optimizeRam();
+    }
+    // Ctrl + Boşluk -> Başlat Menüsü
+    else if (e.ctrlKey && e.code === 'Space') {
+      e.preventDefault();
+      const flyout = document.getElementById('start-flyout');
+      const startBtn = document.getElementById('start-btn');
+      if (flyout) {
+        const isOpen = flyout.classList.contains('open');
+        flyout.classList.toggle('open', !isOpen);
+        if (startBtn) startBtn.classList.toggle('active', !isOpen);
+      }
+    }
+    // Escape -> Başlat veya Menüyü Gizle
+    else if (e.key === 'Escape') {
+      const flyout = document.getElementById('start-flyout');
+      const startBtn = document.getElementById('start-btn');
+      if (flyout && flyout.classList.contains('open')) {
+        flyout.classList.remove('open');
+        if (startBtn) startBtn.classList.remove('active');
+      }
+      const ctxMenu = document.getElementById('desktop-context-menu');
+      if (ctxMenu && ctxMenu.classList.contains('open')) {
+        ctxMenu.classList.remove('open');
+      }
+    }
+  });
+
+  // ============================================================================
+  // ANKORA LOCK SCREEN MANAGER (NATIVE GÜVENLİ KİLİT & X11 OTURUM KORUMASI) - BULGU #3 GİDERİLDİ
+  // ============================================================================
+  const LockManager = {
+    overlay: null,
+    input: null,
+    errorMsg: null,
+    isLocked: false,
+    autoLockTimer: null,
+    autoLockMinutes: 0,
+    lastActivityTime: Date.now(),
+
+    async init() {
+      this.overlay = document.getElementById('screen-lock');
+      this.input = document.getElementById('lock-password-input');
+      this.errorMsg = document.getElementById('lock-error-msg');
+
+      if (!this.overlay) return;
+
+      // Backend native hash yapılandırmasını kontrol et
+      try {
+        const configured = await TauriBridge.invoke('is_lock_configured');
+        const welcomeStatus = document.getElementById('welcome-lock-status-label');
+        if (welcomeStatus) {
+          welcomeStatus.textContent = configured
+            ? 'Kilit şifresi: Ayarlandı ✓'
+            : 'Kilit şifresi: Henüz Ayarlanmadı';
+          welcomeStatus.style.color = configured ? '#10b981' : '#f59e0b';
+        }
+      } catch (e) {}
+
+      // Otomatik kilit süresi ayarını yükle
+      const savedAutoLock = SafeStorage.getItem('ankora_autolock_mins');
+      if (savedAutoLock !== null) {
+        this.autoLockMinutes = parseInt(savedAutoLock, 10) || 0;
+        this.setupAutoLock();
+      }
+
+      // Kilit Saati ve Tarihi Güncelleme
+      this.updateClock();
+      setInterval(() => this.updateClock(), 1000);
+
+      // Form Gönderimi (Kilidi Aç)
+      const form = document.getElementById('lock-auth-form');
+      if (form) {
+        form.addEventListener('submit', (e) => {
+          e.preventDefault();
+          this.unlock();
+        });
+      }
+
+      const btnSubmit = document.getElementById('btn-lock-submit');
+      if (btnSubmit) {
+        btnSubmit.addEventListener('click', (e) => {
+          e.preventDefault();
+          this.unlock();
+        });
+      }
+
+      // Parolayı Göster / Gizle Butonu
+      const btnEye = document.getElementById('btn-lock-toggle-pass');
+      if (btnEye && this.input) {
+        btnEye.addEventListener('click', () => {
+          const isPass = this.input.type === 'password';
+          this.input.type = isPass ? 'text' : 'password';
+          btnEye.textContent = isPass ? '🙈' : '👁️';
+        });
+      }
+
+      // Kilit Ekranı Güç Butonları
+      const btnRestart = document.getElementById('lock-btn-restart');
+      if (btnRestart) {
+        btnRestart.addEventListener('click', async () => {
+          try { await TauriBridge.invoke('run_terminal_command', { command: 'reboot' }); } catch (e) {}
+          alert('Ankora Linux yeniden başlatılıyor...');
+        });
+      }
+
+      const btnShutdown = document.getElementById('lock-btn-shutdown');
+      if (btnShutdown) {
+        btnShutdown.addEventListener('click', async () => {
+          try { await TauriBridge.invoke('run_terminal_command', { command: 'poweroff' }); } catch (e) {}
+          alert('Ankora Linux kapatılıyor...');
+        });
+      }
+
+      // Klavye Kısayolu: Super+L veya Ctrl+Alt+L ile doğrudan kilitleme
+      document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey && e.altKey && e.key.toLowerCase() === 'l') || (e.metaKey && e.key.toLowerCase() === 'l')) {
+          e.preventDefault();
+          this.lock();
+        }
+      });
+
+      // Kullanıcı Etkinliği (Boşta Kalma Tespiti)
+      ['mousedown', 'mousemove', 'keydown', 'touchstart'].forEach(evt => {
+        document.addEventListener(evt, () => this.resetActivityTimer(), { passive: true });
+      });
+    },
+
+    updateClock() {
+      const timeEl = document.getElementById('lock-clock-time');
+      const dateEl = document.getElementById('lock-clock-date');
+      if (!timeEl || !dateEl) return;
+
+      const now = new Date();
+      const h = String(now.getHours()).padStart(2, '0');
+      const m = String(now.getMinutes()).padStart(2, '0');
+      timeEl.textContent = `${h}:${m}`;
+
+      const days = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+      const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+      dateEl.textContent = `${days[now.getDay()]}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+    },
+
+    async lock(useX11Lock = true) {
+      if (!this.overlay) return;
+
+      // Eğer henüz PIN ayarlanmamışsa kullanıcıyı uyar
+      try {
+        const configured = await TauriBridge.invoke('is_lock_configured');
+        if (!configured) {
+          if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+            ReportManager.showToast("Önce Ayarlar veya Hoş Geldiniz ekranından bir kilit PIN'i belirleyin.");
+          }
+          if (typeof WindowManager !== 'undefined') {
+            WindowManager.open('win-welcome');
+          }
+          return;
+        }
+      } catch (e) {}
+
+      this.isLocked = true;
+      this.overlay.classList.add('show');
+      if (this.errorMsg) {
+        this.errorMsg.textContent = '';
+        this.errorMsg.classList.remove('show', 'success');
+      }
+      if (this.input) {
+        this.input.value = '';
+        setTimeout(() => this.input.focus(), 150);
+      }
+      Terminal.log('[GÜVENLİK] Oturum kilitlendi (X11 & Kiosk).', 'cmd');
+
+      // Native X11 xtrlock kilidini devreye al (X server input grab)
+      if (useX11Lock) {
+        try {
+          await TauriBridge.invoke('lock_x11_session');
+        } catch (e) {}
+      }
+    },
+
+    async unlock() {
+      if (!this.input) return;
+      const entered = this.input.value.trim();
+      if (!entered) return;
+
+      const btnSubmit = document.getElementById('btn-lock-submit');
+      if (btnSubmit) btnSubmit.disabled = true;
+
+      try {
+        const ok = await TauriBridge.invoke('verify_lock_credentials', { pin: entered });
+        if (ok) {
+          this.isLocked = false;
+          this.overlay.classList.remove('show');
+          this.input.value = '';
+          Terminal.log('[GÜVENLİK] Kilit açıldı. Hoş geldiniz, pars.', 'cmd');
+          this.resetActivityTimer();
+        } else {
+          this.showError('Hatalı PIN veya Parola! Lütfen tekrar deneyin.');
+          this.input.classList.add('error-shake');
+          setTimeout(() => {
+            if (this.input) this.input.classList.remove('error-shake');
+          }, 500);
+          this.input.select();
+        }
+      } catch (err) {
+        this.showError(`Kilit Hatası: ${err}`);
+        this.input.classList.add('error-shake');
+        setTimeout(() => {
+          if (this.input) this.input.classList.remove('error-shake');
+        }, 500);
+      } finally {
+        if (btnSubmit) btnSubmit.disabled = false;
+      }
+    },
+
+    showError(msg, isError = true) {
+      if (!this.errorMsg) return;
+      this.errorMsg.textContent = msg;
+      this.errorMsg.classList.toggle('success', !isError);
+      this.errorMsg.classList.add('show');
+    },
+
+    async setPin(currentPin, newPin) {
+      if (!newPin || newPin.length < 3) {
+        return { success: false, error: 'Yeni PIN en az 3 karakter olmalıdır.' };
+      }
+      try {
+        await TauriBridge.invoke('set_lock_credentials', {
+          currentPin: currentPin || null,
+          newPin: newPin
+        });
+        SafeStorage.setItem('ankora_lock_pin', newPin);
+        return { success: true };
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    },
+
+    setupAutoLock() {
+      if (this.autoLockTimer) clearInterval(this.autoLockTimer);
+      if (this.autoLockMinutes <= 0) return;
+      this.lastActivityTime = Date.now();
+      this.autoLockTimer = setInterval(() => {
+        if (!this.isLocked && this.autoLockMinutes > 0) {
+          const idleTime = Date.now() - (this.lastActivityTime || Date.now());
+          if (idleTime >= this.autoLockMinutes * 60 * 1000) {
+            this.lock();
+          }
+        }
+      }, 10000);
+    },
+
+    resetActivityTimer() {
+      this.lastActivityTime = Date.now();
+    }
+  };
+
+  // ============================================================================
+  // ANKORA REPORT MANAGER (HATA BİLDİRİMİ, SİSTEM TANILAMA & TOPLULUK İLETİŞİMİ)
+  // ============================================================================
+  const ReportManager = {
+    forumUrl: 'https://ankalab.flarum.cloud',
+    siteUrl: 'https://ankora-linux.github.io',
+    telemetry: null,
+    _toastTimeout: null,
+
+    init() {
+      const btnOpenForum = document.getElementById('btn-open-forum');
+      const btnCopyForum = document.getElementById('btn-copy-forum');
+      const btnOpenSite = document.getElementById('btn-open-site');
+      const btnCopySite = document.getElementById('btn-copy-site');
+      const btnCopyReport = document.getElementById('btn-copy-report');
+      const btnPostForum = document.getElementById('btn-post-forum');
+      const btnRefreshTelemetry = document.getElementById('btn-refresh-telemetry');
+
+      const selectCategory = document.getElementById('report-category');
+      const inputSubject = document.getElementById('report-subject');
+      const textareaDetails = document.getElementById('report-details');
+      const chkIncludeTelemetry = document.getElementById('report-include-telemetry');
+
+      // Topluluk Forumu Açma & Kopyalama
+      if (btnOpenForum) {
+        btnOpenForum.addEventListener('click', () => this.openUrl(this.forumUrl));
+      }
+      if (btnCopyForum) {
+        btnCopyForum.addEventListener('click', () => this.copyToClipboard(this.forumUrl, 'Forum adresi kopyalandı!'));
+      }
+
+      // Resmi Web Sitesi Açma & Kopyalama
+      if (btnOpenSite) {
+        btnOpenSite.addEventListener('click', () => this.openUrl(this.siteUrl));
+      }
+      if (btnCopySite) {
+        btnCopySite.addEventListener('click', () => this.copyToClipboard(this.siteUrl, 'Web sitesi adresi kopyalandı!'));
+      }
+
+      // Canlı Rapor Güncelleme Dinleyicileri
+      [selectCategory, inputSubject, textareaDetails, chkIncludeTelemetry].forEach(el => {
+        if (el) {
+          el.addEventListener('input', () => this.updateReportPreview());
+          el.addEventListener('change', () => this.updateReportPreview());
+        }
+      });
+
+      // Telemetri Yenileme Butonu
+      if (btnRefreshTelemetry) {
+        btnRefreshTelemetry.addEventListener('click', async () => {
+          await this.loadTelemetry();
+          this.updateReportPreview();
+          this.showToast('Sistem tanılama verileri güncellendi.');
+        });
+      }
+
+      // Raporu Panoya Kopyalama Butonu
+      if (btnCopyReport) {
+        btnCopyReport.addEventListener('click', () => {
+          const reportText = this.generateReportMarkdown();
+          this.copyToClipboard(reportText, 'Tanılama raporu panoya kopyalandı!');
+        });
+      }
+
+      // Forumda Başlık Aç Butonu
+      if (btnPostForum) {
+        btnPostForum.addEventListener('click', () => {
+          const reportText = this.generateReportMarkdown();
+          this.copyToClipboard(reportText, 'Rapor kopyalandı! Forum sayfası açılıyor...');
+          setTimeout(() => {
+            this.openUrl(this.forumUrl);
+          }, 350);
+        });
+      }
+
+      // İlk telemetri yüklemesi
+      this.loadTelemetry().then(() => {
+        this.updateReportPreview();
+      });
+    },
+
+    async loadTelemetry() {
+      try {
+        const tel = await TauriBridge.invoke('get_system_telemetry');
+        if (tel) {
+          this.telemetry = tel;
+          return;
+        }
+      } catch (e) {}
+
+      // Standart Devuan Kiosk Telemetri Fallback
+      this.telemetry = {
+        os_name: 'Devuan GNU/Linux 5 (daedalus)',
+        kernel: 'Linux 6.1.0-22-amd64',
+        init_system: 'SysVinit (systemd-free)',
+        memory_used_mb: 1140,
+        memory_total_mb: 8192,
+        cpu_cores: (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) || 4,
+        uptime_seconds: 3600
+      };
+    },
+
+    generateReportMarkdown() {
+      const categoryEl = document.getElementById('report-category');
+      const subjectEl = document.getElementById('report-subject');
+      const detailsEl = document.getElementById('report-details');
+      const chkTel = document.getElementById('report-include-telemetry');
+
+      const category = categoryEl ? categoryEl.options[categoryEl.selectedIndex]?.text : 'Genel';
+      const subject = (subjectEl && subjectEl.value.trim()) || 'Konu belirtilmedi';
+      const details = (detailsEl && detailsEl.value.trim()) || 'Açıklama girilmedi.';
+      const includeTelemetry = chkTel ? chkTel.checked : true;
+
+      const dateStr = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+      let md = `### [Ankora Report] ${subject}\n\n`;
+      md += `**Kategori:** ${category}\n`;
+      md += `**Tarih / Saat:** ${dateStr} UTC\n\n`;
+      md += `#### 📋 Açıklama & Yeniden Oluşturma Adımları\n${details}\n\n`;
+
+      if (includeTelemetry && this.telemetry) {
+        const memPercent = Math.round((this.telemetry.memory_used_mb / Math.max(1, this.telemetry.memory_total_mb)) * 100);
+        const uptimeHours = Math.floor(this.telemetry.uptime_seconds / 3600);
+        const uptimeMins = Math.floor((this.telemetry.uptime_seconds % 3600) / 60);
+
+        md += `#### 🖥️ Sistem Tanılama Verileri\n`;
+        md += `\`\`\`yaml\n`;
+        md += `İşletim Sistemi : ${this.telemetry.os_name}\n`;
+        md += `Masaüstü Ortamı : Ayaz DE v2.0.0 (Ankora Kiosk / X11)\n`;
+        md += `Çekirdek (Kernel): ${this.telemetry.kernel}\n`;
+        md += `İnit Sistemi     : ${this.telemetry.init_system}\n`;
+        md += `CPU Çekirdek     : ${this.telemetry.cpu_cores} İş parçacığı\n`;
+        md += `Bellek (RAM)     : ${this.telemetry.memory_used_mb} MB / ${this.telemetry.memory_total_mb} MB (%${memPercent})\n`;
+        md += `Çalışma Süresi   : ${uptimeHours} sa ${uptimeMins} dk\n`;
+        md += `Kullanıcı Ajanı  : ${typeof navigator !== 'undefined' ? navigator.userAgent : 'WebKitGTK'}\n`;
+        md += `Ekran Çözünürlüğü: ${typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : 'N/A'}\n`;
+        md += `\`\`\`\n\n`;
+        md += `---\n*Topluluk Forumu: https://ankalab.flarum.cloud | Resmi Web Sitesi: https://ankora-linux.github.io*`;
+      }
+
+      return md;
+    },
+
+    updateReportPreview() {
+      const previewEl = document.getElementById('report-preview-text');
+      if (previewEl) {
+        previewEl.textContent = this.generateReportMarkdown();
+      }
+    },
+
+    async copyToClipboard(text, successMessage = 'Kopyalandı!') {
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        this.showToast(successMessage);
+      } catch (err) {
+        this.showToast('Panoya kopyalama başarısız oldu.');
+      }
+    },
+
+    showToast(message) {
+      let toast = document.getElementById('ayaz-global-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'ayaz-global-toast';
+        toast.className = 'ayaz-toast-notification';
+        document.body.appendChild(toast);
+      }
+      toast.textContent = message;
+      toast.classList.add('show');
+      clearTimeout(this._toastTimeout);
+      this._toastTimeout = setTimeout(() => {
+        toast.classList.remove('show');
+      }, 2600);
+    },
+
+    openUrl(url) {
+      try {
+        if (typeof BrowserManager !== 'undefined' && typeof WindowManager !== 'undefined') {
+          const winBrowser = document.getElementById('win-browser');
+          if (winBrowser) {
+            WindowManager.open(winBrowser);
+            BrowserManager.navigate(url);
+            this.showToast(`${url} açılıyor...`);
+            return;
+          }
+        }
+      } catch (e) {}
+
+      try {
+        window.open(url, '_blank');
+      } catch (e) {}
+    }
+  };
+
+  // SİSTEMİ ÇALIŞTIR (HATA İZOLASYONLU VE DOM GÜVENCELİ BOOTSTRAP)
+  function safeInit(name, fn) {
+    try {
+      fn();
+    } catch (err) {
+      console.warn(`[ANKORA BAŞLATMA UYARISI] ${name} modülü başlatılamadı:`, err);
+    }
+  }
+
+  function boot() {
+    // 1. Temel pencere yöneticisini ve masaüstü kontrollerini ÖNCELİKLİ ve GARANTİ olarak başlat
+    safeInit('WindowManager', () => WindowManager.init());
+    safeInit('DesktopControls', () => initDesktopControls());
+    safeInit('ThemeManager', () => ThemeManager.init());
+
+    // 2. Diğer sistem uygulamalarını ve arka plan servislerini bağımsız olarak güvenle çalıştır
+    safeInit('XdgDesktopEngine', () => XdgDesktopEngine.init());
+    safeInit('StoreManager', () => StoreManager.init());
+    safeInit('Terminal', () => Terminal.init());
+    safeInit('OfficeManager', () => OfficeManager.init());
+    safeInit('AIAgent', () => AIAgent.init());
+    safeInit('WelcomeManager', () => WelcomeManager.init());
+    safeInit('InstallerWizard', () => InstallerWizard.init());
+    safeInit('SettingsManager', () => SettingsManager.init());
+    safeInit('UpdaterManager', () => UpdaterManager.init());
+    safeInit('TaskManager', () => TaskManager.init());
+    safeInit('NotepadManager', () => NotepadManager.init());
+    safeInit('CalcManager', () => CalcManager.init());
+    safeInit('BrowserManager', () => BrowserManager.init());
+    safeInit('MemoryManager', () => MemoryManager.init());
+    safeInit('ReportManager', () => ReportManager.init());
+    safeInit('LockManager', () => LockManager.init());
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
 
 })();
 

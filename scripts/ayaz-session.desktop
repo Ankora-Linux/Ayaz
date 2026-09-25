@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=Ayaz
+Comment=Ankora Linux Minimalist Kiosk X11 Oturumu
+Exec=/usr/bin/ayaz
+TryExec=/usr/bin/ayaz
+Type=Application
+DesktopNames=Ayaz;Ankora;
+Keywords=session;desktop;kiosk;ankora;

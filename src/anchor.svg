@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="90 55 332 365" fill="none">
+  <!-- Geometric Ankora Anchor & Apex 'A' Monogram -->
+  <!-- Top Anchor Ring -->
+  <circle cx="256" cy="100" r="38" stroke="#ffffff" stroke-width="14" fill="none"/>
+
+  <!-- Crossbar -->
+  <path d="M190 146 H322" stroke="#ffffff" stroke-width="14" stroke-linecap="square"/>
+
+  <!-- Central Shaft -->
+  <line x1="256" y1="138" x2="256" y2="370" stroke="#ffffff" stroke-width="14"/>
+
+  <!-- Outer Apex Legs ('A' shape) -->
+  <path d="M256 146 L150 350" stroke="#ffffff" stroke-width="18" stroke-linecap="round"/>
+  <path d="M256 146 L362 350" stroke="#ffffff" stroke-width="18" stroke-linecap="round"/>
+
+  <!-- 'A' Horizontal Bridge -->
+  <path d="M188 270 H324" stroke="#ffffff" stroke-width="16"/>
+
+  <!-- Anchor Curved Flukes -->
+  <path d="M130 240 C130 370 382 370 382 240" stroke="#ffffff" stroke-width="20" fill="none" stroke-linecap="round"/>
+
+  <!-- Left & Right Arrow Tips -->
+  <polygon points="130,215 105,265 155,265" fill="#ffffff"/>
+  <polygon points="382,215 357,265 407,265" fill="#ffffff"/>
+
+  <!-- Anchor Bottom Center Keel -->
+  <polygon points="256,400 236,355 276,355" fill="#ffffff"/>
+</svg>

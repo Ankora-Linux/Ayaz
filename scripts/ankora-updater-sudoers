@@ -1,4 +1,5 @@
 # /etc/sudoers.d/ankora-updater
 # Ankora Linux kullanıcısının Ayaz Masaüstü Ortamını GUI üzerinden şifresiz güncelleyebilmesi için izin kuralı.
-# Bu kural YALNIZCA ayaz-update-helper ve ankora-de-update-helper scriptlerini çalıştırma hakkı tanır.
+pars ALL=(ALL) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ankora-de-update-helper
 ankora ALL=(ALL) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ankora-de-update-helper
+

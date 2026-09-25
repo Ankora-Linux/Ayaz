@@ -1,0 +1,117 @@
+name: Ankora Linux Canlı ISO Derleme (Live ISO Build)
+
+# Bu iş akışı Ankora Linux 2.0 (Ayaz DE - Devuan Daedalus SysVinit) 
+# canlı ISO imajını (.iso) ve Debian paketini (.deb) bulutta otomatik olarak derler.
+# Manuel olarak GitHub arayüzünden (Actions -> Run workflow) veya v* etiketleriyle tetiklenebilir.
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_build:
+        description: 'Önbellekleri temizleyip sıfırdan derle'
+        required: false
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-iso:
+    name: Ankora Linux Hibrit Live ISO Derle
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Kaynak Kodları İndir (Checkout)
+        uses: actions/checkout@v4
+
+      - name: Rust Araç Setini Kur
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Node.js Ortamını Kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Gerekli Paketleri Kur (Tauri + ISO Oluşturucu Araçları)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.0-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            debootstrap \
+            squashfs-tools \
+            xorriso \
+            isolinux \
+            syslinux-efi \
+            grub-pc-bin \
+            grub-efi-amd64-bin \
+            mtools \
+            dosfstools
+
+      - name: Tauri CLI Kur
+        run: cargo install tauri-cli --version "^1.5"
+
+      - name: NPM Bağımlılıklarını Kur
+        run: npm install
+
+      - name: Ayaz DE Debian Paketini (.deb) Derle
+        run: |
+          mkdir -p dist
+          cargo tauri build --bundles deb
+          DEB_FILE=$(find src-tauri/target/release/bundle/deb/ -name "*.deb" | head -n 1)
+          if [ -n "$DEB_FILE" ] && [ -f "$DEB_FILE" ]; then
+            cp -v "$DEB_FILE" dist/ayaz-de-latest-amd64.deb
+            echo "Paket hazırlandı: dist/ayaz-de-latest-amd64.deb"
+          else
+            echo "::error::Debian paketi üretilemedi!"
+            exit 1
+          fi
+
+      - name: Ankora Linux Canlı ISO Kalıbını Pişir (build-iso.sh)
+        run: |
+          sudo bash scripts/build-iso.sh
+
+      - name: ISO Bütünlük ve Boyut Denetimi
+        run: |
+          ls -lh dist/
+          if [ -f "dist/ankora-linux-2.0-ayaz-amd64.iso" ]; then
+            echo "ISO başarıyla üretildi:"
+            sha256sum dist/ankora-linux-2.0-ayaz-amd64.iso
+          else
+            echo "::error::ISO dosyası dist dizininde bulunamadı!"
+            exit 2
+          fi
+
+      - name: ISO ve Sağlama Toplamını GitHub Artifact Olarak Yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ankora-linux-2.0-ayaz-amd64
+          path: |
+            dist/ankora-linux-2.0-ayaz-amd64.iso
+            dist/ankora-linux-2.0-ayaz-amd64.iso.sha256
+            dist/ayaz-de-latest-amd64.deb
+          retention-days: 14
+
+      - name: Sürüm (Release) Varsa ISO'yu Ekle
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/ankora-linux-2.0-ayaz-amd64.iso
+            dist/ankora-linux-2.0-ayaz-amd64.iso.sha256
+            dist/ayaz-de-latest-amd64.deb
+          generate_release_notes: true
+          name: Ankora Linux 2.0 (${{ github.ref_name }})
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
