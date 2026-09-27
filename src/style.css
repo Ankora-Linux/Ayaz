@@ -19,7 +19,8 @@
 
   --text-primary: #f5f6fa;
   --text-secondary: #a3a6be;
-  --text-muted: #6e7087;
+  /* WCAG AA (4.5:1) için en açık yüzeyde bile tutacak şekilde açıldı */
+  --text-muted: #9597b6;
   --text-inverse: #050508;
 
   --accent-white: #ffffff;
@@ -30,8 +31,64 @@
   --radius-window: 8px;
   --radius-ui: 6px;
 
+  /* Tarayıcı, güncelleştirici ve rapor ekranlarının çağırdığı takma adlar.
+     Tema ile birlikte çözüldüğü için açık/koyu/gece temalarında da doğru kalır. */
+  --bg-card: var(--bg-surface-hover);
+  --bg-elevated: var(--bg-surface);
+  --border-color: var(--border-medium);
+  --accent-hover: rgba(37, 99, 235, 0.1);
+  --radius-card: var(--radius-window);
+
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "Fira Code", Menlo, Consolas, monospace;
+}
+
+/* ==============================================================================
+   TEK RENK İKON SİSTEMİ
+   ============================================================================== */
+.icon-sprite {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* Sprite içindeki her sembol bu özellikleri devralır; ayrı ayrı yazılmaz. */
+.glyph {
+  width: 1em;
+  height: 1em;
+  display: inline-block;
+  flex: none;
+  vertical-align: -0.15em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Küçük yüzeylerde çizgi incelmesin */
+.term-chip-btn .glyph,
+.bookmark-chip .glyph,
+.report-hint-text .glyph {
+  stroke-width: 2.2;
+}
+
+/* İkon + metin taşıyan satırlar tek hizada dursun */
+.term-chip-btn,
+.bookmark-chip,
+.single-key-title,
+.report-hint-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.files-side-icon,
+.files-path-icon,
+.cal-notif-icon {
+  display: inline-flex;
+  align-items: center;
 }
 
 /* ==============================================================================
@@ -53,7 +110,8 @@ body.theme-light {
 
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-muted: #64748b;
+  /* WCAG AA (4.5:1) için en koyu yüzeyde bile tutacak şekilde koyulaştıldı */
+  --text-muted: #5a687d;
   --text-inverse: #ffffff;
 
   --accent-white: #0f172a;
@@ -76,7 +134,8 @@ body.theme-midnight {
 
   --text-primary: #f0f4ff;
   --text-secondary: #9cb0d8;
-  --text-muted: #647496;
+  /* WCAG AA (4.5:1) için en açık yüzeyde bile tutacak şekilde açıldı */
+  --text-muted: #8398c5;
 }
 
 body.theme-light .desktop-body {
@@ -225,7 +284,7 @@ body.theme-light .toggle-slider-knob {
 body.theme-light .taskbar {
   background: rgba(255, 255, 255, 0.88);
   border-top: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 -4px 20px rgba(0, 0, 0, 0.05);
 }
 
 body.theme-light .taskbar-pin-btn {
@@ -260,13 +319,14 @@ body.theme-light .tray-clock {
 }
 
 body.theme-light .tray-status-island {
-  background: transparent;
-  border-color: transparent;
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.07);
   color: #0f172a;
 }
 
 body.theme-light .tray-status-island:hover {
-  background: rgba(0, 0, 0, 0.05);
+  background: rgba(15, 23, 42, 0.08);
+  border-color: rgba(15, 23, 42, 0.14);
 }
 
 body.theme-light .tray-island-item {
@@ -280,7 +340,8 @@ body.theme-light .battery-pct-text {
 body.theme-light .start-glyph-logo,
 body.theme-light .tray-anchor-logo,
 body.theme-light .preview-anchor-logo {
-  filter: invert(1) brightness(0.2);
+  /* Açık zeminde logo okunur kalsın. Eski cyan parlama palet dışındaydı. */
+  filter: drop-shadow(0 1px 2px rgba(15, 23, 42, 0.3));
 }
 
 body.theme-light .start-btn,
@@ -292,6 +353,12 @@ body.theme-light .tray-anchor-btn {
 body.theme-light .start-btn:hover,
 body.theme-light .tray-anchor-btn:hover {
   background: rgba(0, 0, 0, 0.08);
+}
+
+/* Başlat menüsü açıkken düğme tek vurgu rengiyle ayrılır. */
+body.theme-light .start-btn.active {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.4);
 }
 
 body.theme-light .tray-ram-widget {
@@ -406,7 +473,7 @@ body.theme-light .btn-power-item:hover {
 body.theme-light .btn-power-item.power-danger:hover {
   background: #fee2e2;
   border-color: #fca5a5;
-  color: #dc2626;
+  color: #b91c1c;
 }
 
 /* Mağaza & Tablolar - Açık Tema */
@@ -450,11 +517,11 @@ body.theme-light .taskmgr-stat-card {
   border-color: rgba(0, 0, 0, 0.08);
 }
 
-body.theme-light .taskmgr-stat-label {
+body.theme-light .taskmgr-stat-sub {
   color: #64748b;
 }
 
-body.theme-light .taskmgr-stat-val {
+body.theme-light .taskmgr-badge-val {
   color: #0f172a;
 }
 
@@ -537,9 +604,13 @@ body.theme-light .notepad-statusbar {
 }
 
 html, body {
-  width: 100vw;
-  height: 100vh;
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  position: fixed;
+  inset: 0;
   font-family: var(--font-sans);
   background-color: var(--bg-deep);
   color: var(--text-primary);
@@ -549,12 +620,16 @@ html, body {
 }
 
 /* ==============================================================================
-   DUVAR KAĞIDI (MONOCHROME MOUNTAIN WALLPAPER)
+   DUVAR KAĞIDI (MONOCHROME NORDIC WALLPAPER)
    ============================================================================== */
 .desktop-body {
-  position: relative;
-  width: 100vw;
-  height: 100vh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   background-color: #040405;
 }
 
@@ -562,7 +637,7 @@ html, body {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background-image: url("wallpaper-mountain.jpg");
+  background-image: url("wallpaper-nordic.svg");
   background-size: cover;
   background-position: center center;
   background-repeat: no-repeat;
@@ -616,6 +691,208 @@ html, body {
   pointer-events: auto;
 }
 
+/* Masaüstü widget katmanı. Simgeler solda durur, kartlar sağda; kapalıyken
+   katman tamamen tıklamayı altındakine bırakır. Cam değil: DESIGN.md'de cam
+   yalnızca görev çubuğu ve başlat menüsüne izinli. */
+.desktop-widgets {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+  max-height: calc(100vh - var(--taskbar-height) - 32px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  z-index: 15;
+  pointer-events: none;
+}
+
+.desktop-widgets::-webkit-scrollbar {
+  display: none;
+}
+
+/* Tüm bileşenler kapalıyken katman gerçekten kapanmalı: [hidden] özniteliği
+   yazar stili display:flex ile ezildiği için ayrıca ele alınır. */
+.desktop-widgets[hidden] {
+  display: none;
+}
+
+.desk-widget {
+  pointer-events: auto;
+  width: 236px;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+  color: var(--text-primary);
+  contain: layout style paint;
+}
+
+.dw-time {
+  font-family: var(--font-mono);
+  font-size: 40px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -1.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.dw-date {
+  margin-top: 7px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.dw-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 9px;
+}
+
+.dw-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.dw-meter-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent-white);
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.4s ease;
+}
+
+.dw-meter-fill.lvl-mid {
+  background: #f59e0b;
+}
+
+.dw-meter-fill.lvl-high {
+  background: #ef4444;
+}
+
+.dw-rows {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 9px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dw-sub {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.dw-meta-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 11.5px;
+}
+
+.dw-meta-key {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.dw-meta-val {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Widget Merkezi penceresi */
+.widgets-panel {
+  padding: 16px;
+}
+
+.widgets-lead {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.widget-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.widget-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 12px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease;
+}
+
+.widget-row:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-medium);
+}
+
+.widget-row:focus-within {
+  border-color: var(--accent-active);
+  outline: 2px solid var(--accent-active);
+  outline-offset: 1px;
+}
+
+.widget-row input {
+  width: 15px;
+  height: 15px;
+  margin: 2px 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent-active);
+}
+
+.widget-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.widget-row-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.widget-row-hint {
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.widgets-footnote {
+  margin: 14px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .desktop-item,
 .ayaz-desktop-shortcut {
   width: 82px;
@@ -647,10 +924,8 @@ html, body {
 
 .desktop-item:hover,
 .ayaz-desktop-shortcut:hover {
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.14);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
   transform: translateY(-2px);
 }
 
@@ -672,16 +947,14 @@ html, body {
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: rgba(18, 22, 34, 0.75);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: #141724;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-primary);
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.15s ease, background 0.15s ease;
 }
 
 .item-icon svg {
@@ -691,64 +964,31 @@ html, body {
   transition: stroke 0.18s ease, transform 0.18s ease;
 }
 
-.desktop-item:hover .item-icon svg,
-.ayaz-desktop-shortcut:hover .item-icon svg {
-  transform: scale(1.08);
+.desktop-item:hover .item-icon,
+.ayaz-desktop-shortcut:hover .item-icon {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .item-cat-dot {
   position: absolute;
   bottom: -2px;
   right: -2px;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   border: 1.5px solid #0f141f;
   background: var(--text-muted);
 }
 
-/* Kategori Vurguları */
-.cat-dev .item-cat-dot { background: #00e5ff; }
-.cat-dev:hover .item-icon {
-  border-color: rgba(0, 229, 255, 0.45);
-  box-shadow: 0 6px 18px rgba(0, 229, 255, 0.28);
-}
-.cat-dev:hover .item-icon svg { stroke: #00e5ff; }
-
-.cat-media .item-cat-dot { background: #c084fc; }
-.cat-media:hover .item-icon {
-  border-color: rgba(192, 132, 252, 0.45);
-  box-shadow: 0 6px 18px rgba(192, 132, 252, 0.28);
-}
-.cat-media:hover .item-icon svg { stroke: #c084fc; }
-
-.cat-net .item-cat-dot { background: #34d399; }
-.cat-net:hover .item-icon {
-  border-color: rgba(52, 211, 153, 0.45);
-  box-shadow: 0 6px 18px rgba(52, 211, 153, 0.28);
-}
-.cat-net:hover .item-icon svg { stroke: #34d399; }
-
-.cat-office .item-cat-dot { background: #fbbf24; }
-.cat-office:hover .item-icon {
-  border-color: rgba(251, 191, 36, 0.45);
-  box-shadow: 0 6px 18px rgba(251, 191, 36, 0.28);
-}
-.cat-office:hover .item-icon svg { stroke: #fbbf24; }
-
-.cat-sys .item-cat-dot { background: #60a5fa; }
-.cat-sys:hover .item-icon {
-  border-color: rgba(96, 165, 250, 0.45);
-  box-shadow: 0 6px 18px rgba(96, 165, 250, 0.28);
-}
-.cat-sys:hover .item-icon svg { stroke: #60a5fa; }
-
-.cat-util .item-cat-dot { background: #f43f5e; }
-.cat-util:hover .item-icon {
-  border-color: rgba(244, 63, 94, 0.45);
-  box-shadow: 0 6px 18px rgba(244, 63, 94, 0.28);
-}
-.cat-util:hover .item-icon svg { stroke: #f43f5e; }
+/* Kategori Belirteçleri (Sade, mat ve abartısız) */
+.cat-dev .item-cat-dot { background: #38bdf8; }
+.cat-media .item-cat-dot { background: #a855f7; }
+.cat-net .item-cat-dot { background: #10b981; }
+.cat-office .item-cat-dot { background: #f59e0b; }
+.cat-sys .item-cat-dot { background: #3b82f6; }
+.cat-util .item-cat-dot { background: #ef4444; }
 
 .item-name {
   font-size: 11px;
@@ -773,7 +1013,7 @@ html, body {
   background: var(--bg-base);
   border: 1px solid var(--border-medium);
   border-radius: var(--radius-window);
-  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.08);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -795,7 +1035,7 @@ html, body {
 
 .window.active {
   border-color: var(--border-active-window);
-  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 0 1px var(--accent-active, #3b82f6);
 }
 
 .window.maximized {
@@ -831,7 +1071,7 @@ body.is-dragging button {
 .window.is-dragging {
   will-change: left, top;
   transition: none !important;
-  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.9), 0 0 0 1px var(--accent-active, #2563eb) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--accent-active, #3b82f6) !important;
 }
 
 .window-header {
@@ -1039,6 +1279,23 @@ body.is-dragging button {
   border-color: #772222;
   color: #ff7777;
   background: transparent;
+}
+
+.btn-pkg.danger {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #ef4444;
+}
+
+.btn-pkg.danger:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.btn-pkg:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .pkg-progress-bar {
@@ -1473,12 +1730,10 @@ body.is-dragging button {
 .welcome-preview-window {
   width: 500px !important;
   max-width: 92vw;
-  background: rgba(18, 20, 26, 0.94) !important;
-  backdrop-filter: blur(24px) !important;
-  -webkit-backdrop-filter: blur(24px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: #141724 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
   border-radius: 12px !important;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65) !important;
   overflow: hidden;
 }
 
@@ -1713,7 +1968,7 @@ body.theme-light .toggle-slider-knob {
 }
 
 .preview-action-btn.highlight:hover {
-  background: #3b82f6;
+  background: #1d4ed8;
   color: #ffffff;
 }
 
@@ -2219,18 +2474,18 @@ body.theme-light .toggle-slider-knob {
   bottom: 0;
   left: 0;
   right: 0;
+  width: 100%;
   height: var(--taskbar-height);
-  background: rgba(11, 13, 17, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(14, 16, 23, 0.84);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  /* Üst kenarda tek hairline: yüzeye kalınlık verir, parlama yok. */
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 -2px 10px rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 10px;
   z-index: 99995;
-  transition: background 0.15s ease, border-color 0.15s ease;
-  contain: layout style;
+  box-sizing: border-box;
 }
 
 .taskbar-left-group {
@@ -2247,20 +2502,25 @@ body.theme-light .toggle-slider-knob {
   padding: 0;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: var(--radius-ui);
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-primary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
   flex-shrink: 0;
 }
 
-.start-btn:hover, .start-btn.active {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.12);
-  transform: scale(1.04);
+/* Vurgu tek renk: DESIGN.md'deki mavi. Eski cyan + parlama bu yüzden kalktı. */
+.start-btn:hover {
+  background: var(--accent-hover);
+  border-color: rgba(37, 99, 235, 0.45);
+}
+
+.start-btn.active {
+  background: rgba(37, 99, 235, 0.2);
+  border-color: rgba(37, 99, 235, 0.55);
 }
 
 .start-glyph-logo {
@@ -2268,6 +2528,12 @@ body.theme-light .toggle-slider-knob {
   height: 20px;
   object-fit: contain;
   pointer-events: none;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.start-btn:hover .start-glyph-logo,
+.start-btn.active .start-glyph-logo {
+  transform: scale(1.06);
 }
 
 /* Hızlı Başlatıcı İkonları (>_, Klasör, B, S, AI, Ayarlar) */
@@ -2283,7 +2549,7 @@ body.theme-light .toggle-slider-knob {
   width: 34px;
   height: 32px;
   padding: 0;
-  border-radius: var(--radius-ui);
+  border-radius: 9px;
   background: rgba(255, 255, 255, 0.035);
   border: 1px solid rgba(255, 255, 255, 0.07);
   display: flex;
@@ -2291,31 +2557,24 @@ body.theme-light .toggle-slider-knob {
   justify-content: center;
   color: rgba(255, 255, 255, 0.88);
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease,
+    color 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .taskbar-pin-btn:hover {
   background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.18);
   color: #ffffff;
   transform: translateY(-1px);
 }
 
 .taskbar-pin-btn:active {
   transform: scale(0.95);
+  transition-duration: 0.08s;
 }
 
-.pin-glyph-term {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: -1px;
-}
-
-.pin-glyph-letter {
-  font-family: var(--font-sans);
-  font-size: 13.5px;
-  font-weight: 700;
+.taskbar-pin-btn svg {
+  display: block;
 }
 
 .taskbar-running-tabs {
@@ -2336,8 +2595,7 @@ body.theme-light .toggle-slider-knob {
   padding: 0 12px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
-  border-bottom: 2px solid transparent;
-  border-radius: var(--radius-ui);
+  border-radius: 8px;
   font-size: 11.5px;
   color: var(--text-secondary);
   display: flex;
@@ -2348,7 +2606,7 @@ body.theme-light .toggle-slider-knob {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  transition: all 0.12s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
   flex-shrink: 0;
 }
 
@@ -2357,10 +2615,10 @@ body.theme-light .toggle-slider-knob {
   color: var(--text-primary);
 }
 
+/* Aktif sekmeyi yalnızca alttaki mavi çubuk işaretler; ikinci bir çizgi yok. */
 .task-tab.active {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.15);
-  border-bottom-color: var(--accent-white);
   color: var(--text-primary);
   font-weight: 600;
 }
@@ -2387,9 +2645,9 @@ body.theme-light .toggle-slider-knob {
   color: rgba(255, 255, 255, 0.92);
   letter-spacing: 0.2px;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: var(--radius-ui);
-  transition: background 0.15s ease;
+  padding: 4px 9px;
+  border-radius: 9px;
+  transition: background-color 0.16s ease;
   white-space: nowrap;
 }
 
@@ -2401,20 +2659,21 @@ body.theme-light .toggle-slider-knob {
 .tray-status-group {
   display: flex;
   align-items: center;
-  padding: 4px 6px;
-  border-radius: var(--radius-ui);
+  padding: 4px 7px;
+  border-radius: 9px;
   color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
   gap: 8px;
-  background: transparent;
-  border: 1px solid transparent;
-  transition: all 0.15s ease;
+  /* Sağ blok kalıcı bir ada olarak okunur; boşlukta kaybolmaz. */
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
 }
 
 .tray-status-island:hover,
 .tray-status-group:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
   color: var(--text-primary);
 }
 
@@ -2434,14 +2693,14 @@ body.theme-light .toggle-slider-knob {
   width: 32px;
   height: 32px;
   padding: 0;
-  border-radius: var(--radius-ui);
+  border-radius: 9px;
   background: transparent;
   border: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
 }
 
 .tray-anchor-btn:hover {
@@ -2464,9 +2723,7 @@ body.theme-light .toggle-slider-knob {
   width: 220px;
   padding: 12px 14px;
   border-radius: 10px;
-  background: rgba(18, 20, 26, 0.96);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: #141622;
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
   z-index: 99999;
@@ -2504,6 +2761,7 @@ body.theme-light .toggle-slider-knob {
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.5px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ==============================================================================
@@ -2516,10 +2774,8 @@ body.theme-light .toggle-slider-knob {
   width: 580px;
   max-width: calc(100vw - 20px);
   max-height: calc(100vh - var(--taskbar-height) - 20px);
-  background: rgba(18, 20, 28, 0.96);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid var(--border-medium);
+  background: #12141c;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75), 0 0 0 1px var(--border-subtle);
   display: flex;
@@ -2538,6 +2794,37 @@ body.theme-light .toggle-slider-knob {
   pointer-events: auto;
   visibility: visible;
   transform: translateY(0) scale(1);
+}
+
+/* ==============================================================================
+   CAM YÜZEYLER (glassmorphism) — YALNIZCA GÖREV ÇUBUĞU VE BAŞLAT MENÜSÜ
+
+   Pencere, kart ve tablo yüzeyleri cam değil: arkalarında içerik kayar, blur
+   hem yavaşlatır hem okunurluğu bozar. Bu ikisi sabit ve içerik kaydırmıyor.
+   Desteklemeyen motorlarda yarı saydam zemin tek başına yeterli.
+   ============================================================================== */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .taskbar,
+  .start-flyout {
+    -webkit-backdrop-filter: blur(14px) saturate(1.5);
+    backdrop-filter: blur(14px) saturate(1.5);
+  }
+
+  .taskbar {
+    background: rgba(14, 16, 23, 0.64);
+  }
+
+  .start-flyout {
+    background: rgba(18, 20, 28, 0.7);
+  }
+
+  body.theme-light .taskbar {
+    background: rgba(255, 255, 255, 0.66);
+  }
+
+  body.theme-light .start-flyout {
+    background: rgba(255, 255, 255, 0.78);
+  }
 }
 
 /* 1. Üst Profil & Arama */
@@ -2616,7 +2903,7 @@ body.theme-light .toggle-slider-knob {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.12s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
 }
 
 .profile-action-btn svg {
@@ -3090,6 +3377,27 @@ body.theme-light .toggle-slider-knob {
   font-size: 12px;
   color: var(--text-secondary);
   margin-top: 4px;
+}
+
+/* Kilit & Güvenlik panosundaki kartlar, kardeş .settings-card-group ile aynı düzende */
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-card-header h4 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.settings-card-header p {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 4px 0 0;
 }
 
 .settings-card-group {
@@ -3879,25 +4187,27 @@ body.glass-solid .window {
 }
 
 body.glass-balanced .window {
-  background: rgba(18, 19, 26, 0.95);
+  background: var(--bg-base);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 body.glass-balanced .window.active {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--bg-base);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 body.glass-high .window {
-  background: rgba(18, 19, 26, 0.85);
+  background: var(--bg-base);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 body.glass-high .window.active {
-  backdrop-filter: blur(12px) saturate(120%);
-  -webkit-backdrop-filter: blur(12px) saturate(120%);
+  background: var(--bg-base);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 body.theme-light.glass-solid .window {
@@ -3911,7 +4221,7 @@ body.theme-light.glass-balanced .window {
 }
 
 body.theme-light.glass-balanced .window.active {
-  backdrop-filter: blur(8px);
+  backdrop-filter: none !important;
 }
 
 body.theme-light.glass-high .window {
@@ -3920,7 +4230,7 @@ body.theme-light.glass-high .window {
 }
 
 body.theme-light.glass-high .window.active {
-  backdrop-filter: blur(12px);
+  backdrop-filter: none !important;
 }
 
 /* Ultra Düşük Bellek Modu (Eco RAM Mode) */
@@ -4030,8 +4340,7 @@ body.anim-none *::after {
   padding: 6px;
   z-index: 2000;
   min-width: 220px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: #141724;
 }
 
 .desktop-context-menu.open {
@@ -4442,7 +4751,15 @@ body.theme-light .ai-entry.user {
   transform: scale(0.95);
 }
 
-.term-clear-action-btn {
+.term-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.term-clear-action-btn,
+.term-action-btn {
   background: transparent;
   border: 1px solid var(--border-subtle);
   border-radius: 4px;
@@ -4450,6 +4767,7 @@ body.theme-light .ai-entry.user {
   font-size: 11px;
   padding: 3px 8px;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.12s ease;
 }
 
@@ -4457,6 +4775,12 @@ body.theme-light .ai-entry.user {
   background: rgba(239, 68, 68, 0.15);
   color: #f87171;
   border-color: rgba(239, 68, 68, 0.4);
+}
+
+.term-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+  border-color: var(--border-focus);
 }
 
 /* ==============================================================================
@@ -4504,7 +4828,7 @@ select:focus-visible {
   position: relative;
   height: 34px;
   padding: 0 12px;
-  border-radius: 6px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
   color: var(--text-secondary);
@@ -4513,20 +4837,19 @@ select:focus-visible {
   align-items: center;
   gap: 6px;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
 }
 
 .task-tab.active::after {
   content: '';
   position: absolute;
-  bottom: 2px;
+  bottom: 3px;
   left: 50%;
   transform: translateX(-50%);
   width: 16px;
   height: 3px;
   border-radius: 2px;
   background: var(--accent-active, #2563eb);
-  box-shadow: 0 0 6px rgba(37, 99, 235, 0.5);
 }
 
 /* ==============================================================================
@@ -4536,15 +4859,13 @@ select:focus-visible {
   position: absolute;
   pointer-events: none;
   border-radius: 12px;
-  background: rgba(37, 99, 235, 0.15);
-  border: 2px solid rgba(37, 99, 235, 0.5);
-  box-shadow: 0 0 30px rgba(37, 99, 235, 0.25);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(37, 99, 235, 0.18);
+  border: 2px dashed rgba(59, 130, 246, 0.85);
+  box-shadow: 0 0 16px rgba(37, 99, 235, 0.2);
   z-index: 19;
   opacity: 0;
   visibility: hidden;
-  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.18s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.18s;
   box-sizing: border-box;
 }
 
@@ -4567,7 +4888,7 @@ select:focus-visible {
   overflow-y: auto;
 }
 
-.taskmgr-metrics-grid {
+.taskmgr-stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
@@ -4592,29 +4913,34 @@ select:focus-visible {
 .taskmgr-stat-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.taskmgr-stat-icon {
-  width: 16px;
-  height: 16px;
-  stroke: var(--accent-active);
-}
-
-.taskmgr-stat-label {
+.taskmgr-stat-header > span:first-child {
   font-size: 11px;
   font-weight: 500;
   color: var(--text-secondary);
 }
 
-.taskmgr-stat-val {
-  font-size: 16px;
+.taskmgr-badge-val {
+  font-size: 13px;
   font-weight: 700;
   font-family: var(--font-mono);
   color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-ui);
+  padding: 1px 7px;
 }
 
-.taskmgr-progress-track {
+.taskmgr-stat-sub {
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.taskmgr-bar-track {
   width: 100%;
   height: 4px;
   background: var(--border-subtle);
@@ -4622,11 +4948,39 @@ select:focus-visible {
   overflow: hidden;
 }
 
-.taskmgr-progress-fill {
+.taskmgr-bar-fill {
   height: 100%;
   background: var(--accent-active);
   border-radius: 2px;
   transition: width 0.3s ease;
+}
+
+.taskmgr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.taskmgr-search-input {
+  flex: 1;
+  max-width: 320px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-medium);
+  border-radius: var(--radius-ui);
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.taskmgr-search-input:focus {
+  border-color: var(--border-focus);
+}
+
+.taskmgr-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .taskmgr-table-wrap {
@@ -4680,7 +5034,7 @@ select:focus-visible {
 }
 
 .btn-kill-proc:hover {
-  background: #ef4444;
+  background: #dc2626;
   color: #ffffff;
 }
 
@@ -4697,10 +5051,30 @@ select:focus-visible {
 .notepad-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   padding: 6px 12px;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.notepad-left-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.notepad-right-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.dot-sep {
+  color: var(--border-medium);
 }
 
 .notepad-btn {
@@ -4862,9 +5236,7 @@ select:focus-visible {
   bottom: 56px;
   right: 12px;
   width: 360px;
-  background: rgba(24, 25, 34, 0.94);
-  backdrop-filter: blur(28px) saturate(130%);
-  -webkit-backdrop-filter: blur(28px) saturate(130%);
+  background: #141622;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -5039,9 +5411,7 @@ select:focus-visible {
   bottom: 56px;
   right: 12px;
   width: 340px;
-  background: rgba(24, 25, 34, 0.94);
-  backdrop-filter: blur(28px) saturate(130%);
-  -webkit-backdrop-filter: blur(28px) saturate(130%);
+  background: #141622;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 14px;
   box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
@@ -5224,12 +5594,10 @@ select:focus-visible {
   position: fixed;
   display: none;
   flex-direction: column;
-  background: rgba(22, 23, 31, 0.95);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
+  background: #141724;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
   padding: 10px;
   gap: 8px;
   z-index: 3000;
@@ -5790,9 +6158,9 @@ body.theme-light .bookmark-chip:hover {
 }
 
 .btn-report-action:hover {
-  background: #0284c7;
+  background: #0369a1;
   color: #ffffff;
-  border-color: #0284c7;
+  border-color: #0369a1;
 }
 
 .btn-report-action.secondary {
@@ -5999,7 +6367,7 @@ body.theme-light .bookmark-chip:hover {
 }
 
 .btn-report-submit {
-  background: #ef4444;
+  background: #dc2626;
   color: #ffffff;
   border: none;
   display: inline-flex;
@@ -6109,9 +6477,7 @@ body.theme-light .ayaz-toast-notification {
 .lock-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(10, 15, 29, 0.88);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  background: #0b0d14;
 }
 
 .lock-container {
@@ -6122,7 +6488,7 @@ body.theme-light .ayaz-toast-notification {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 28px 36px;
+  padding: 24px 32px;
   box-sizing: border-box;
   color: #ffffff;
 }
@@ -6139,34 +6505,39 @@ body.theme-light .ayaz-toast-notification {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 600;
-  opacity: 0.9;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  opacity: 0.85;
 }
 
 .lock-brand-icon {
-  width: 20px;
-  height: 20px;
-  filter: brightness(1.2);
+  width: 18px;
+  height: 18px;
+  opacity: 0.9;
 }
 
 .lock-indicators {
   display: flex;
-  gap: 10px;
+  gap: 8px;
 }
 
 .lock-pill {
   padding: 4px 10px;
-  background: rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  font-size: 11px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  font-size: 11.5px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: rgba(255, 255, 255, 0.82);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .lock-center-content {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 28px;
+  gap: 24px;
   margin: auto 0;
 }
 
@@ -6175,16 +6546,17 @@ body.theme-light .ayaz-toast-notification {
 }
 
 .lock-big-time {
-  font-size: 76px;
+  font-size: 72px;
   font-weight: 300;
-  letter-spacing: -0.03em;
+  letter-spacing: -0.02em;
   line-height: 1;
-  text-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+  color: #ffffff;
 }
 
 .lock-big-date {
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.75);
+  font-size: 14.5px;
+  color: rgba(255, 255, 255, 0.65);
   margin-top: 8px;
   font-weight: 400;
   letter-spacing: 0.02em;
@@ -6194,30 +6566,31 @@ body.theme-light .ayaz-toast-notification {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  padding: 24px 32px;
-  border-radius: 16px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
-  width: 320px;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 24px 28px;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  width: 300px;
   box-sizing: border-box;
 }
 
 .lock-avatar-wrap {
   position: relative;
-  width: 68px;
-  height: 68px;
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
-  padding: 3px;
-  background: linear-gradient(135deg, #0284c7, #38bdf8);
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
 }
 
 .lock-avatar {
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: #0f172a;
+  background: #0f1219;
   object-fit: cover;
 }
 
@@ -6225,30 +6598,29 @@ body.theme-light .ayaz-toast-notification {
   position: absolute;
   bottom: 2px;
   right: 2px;
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
   background: #10b981;
-  border: 2px solid #0f172a;
+  border: 2px solid #0f1219;
   border-radius: 50%;
 }
 
 .lock-username {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
-  color: #ffffff;
+  color: #f1f5f9;
+  letter-spacing: 0.01em;
 }
 
 .lock-hostname {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.55);
-  margin-top: -6px;
+  display: none;
 }
 
 .lock-form {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
-  margin-top: 8px;
+  margin-top: 4px;
 }
 
 .lock-input-group {
@@ -6259,19 +6631,19 @@ body.theme-light .ayaz-toast-notification {
 .lock-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 10px 34px 10px 14px;
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 8px;
+  padding: 9px 32px 9px 12px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
   color: #ffffff;
   font-size: 13px;
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .lock-input:focus {
-  border-color: #38bdf8;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.25);
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
 }
 
 .btn-toggle-eye {
@@ -6282,47 +6654,46 @@ body.theme-light .ayaz-toast-notification {
   background: none;
   border: none;
   cursor: pointer;
-  font-size: 14px;
-  opacity: 0.7;
+  font-size: 13px;
+  opacity: 0.6;
   transition: opacity 0.15s ease;
 }
 
 .btn-toggle-eye:hover {
-  opacity: 1;
+  opacity: 0.95;
 }
 
 .btn-unlock {
-  width: 40px;
-  height: 40px;
-  border-radius: 8px;
-  background: #0284c7;
+  width: 38px;
+  height: 38px;
+  border-radius: 6px;
+  background: #2563eb;
   border: none;
   color: #ffffff;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease;
   flex-shrink: 0;
 }
 
 .btn-unlock svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 
 .btn-unlock:hover {
-  background: #0369a1;
-  transform: scale(1.05);
+  background: #1d4ed8;
 }
 
 .lock-error-msg {
   font-size: 11.5px;
   color: #ef4444;
-  min-height: 18px;
+  min-height: 16px;
   text-align: center;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.15s ease;
 }
 
 .lock-error-msg.show {
@@ -6346,45 +6717,40 @@ body.theme-light .ayaz-toast-notification {
 }
 
 .lock-quick-hints {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  font-size: 10.5px;
-  color: rgba(255, 255, 255, 0.45);
-  margin-top: 4px;
+  display: none;
 }
 
 .lock-link-btn {
   background: none;
   border: none;
-  color: #38bdf8;
-  font-size: 10.5px;
+  color: #60a5fa;
+  font-size: 11px;
   cursor: pointer;
   text-decoration: underline;
   padding: 2px;
 }
 
 .lock-power-btn {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: #ffffff;
   padding: 6px 14px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 11.5px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .lock-power-btn:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.16);
 }
 
 .lock-power-btn.danger:hover {
-  background: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.2);
   border-color: #ef4444;
 }
 
@@ -6431,5 +6797,432 @@ body.theme-light .ayaz-toast-notification {
   font-size: 11.5px;
   font-weight: 500;
 }
+
+/* ========================================================================== */
+/* ANKORA DOSYA YÖNETİCİSİ (FILE MANAGER) STİLLERİ                            */
+/* ========================================================================== */
+.files-app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--bg-deep, #0f121d);
+  overflow: hidden;
+  user-select: none;
+}
+
+.files-top-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(18, 22, 34, 0.95);
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+.files-nav-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.files-tool-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary, #e2e8f0);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.files-tool-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.files-tool-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  transform: translateY(-1px);
+}
+
+.files-tool-btn:active {
+  transform: translateY(0);
+}
+
+.files-path-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.1));
+  border-radius: 6px;
+  padding: 4px 10px;
+  min-height: 32px;
+  overflow-x: auto;
+}
+
+.files-path-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.files-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+
+.files-crumb {
+  padding: 2px 7px;
+  border-radius: 4px;
+  color: var(--text-secondary, #94a3b8);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.files-crumb:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.files-crumb.active {
+  color: #38bdf8;
+  font-weight: 600;
+  background: rgba(56, 189, 248, 0.1);
+}
+
+.files-crumb-sep {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 11px;
+}
+
+.files-actions-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.files-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(2, 132, 199, 0.35);
+  transition: all 0.15s ease;
+}
+
+.files-primary-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.files-primary-btn:hover {
+  background: linear-gradient(135deg, #0369a1 0%, #075985 100%);
+  border-color: #38bdf8;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 8px rgba(2, 132, 199, 0.5);
+}
+
+.files-main-layout {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.files-sidebar {
+  width: 190px;
+  background: rgba(14, 18, 28, 0.85);
+  border-right: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+.files-sidebar-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #64748b);
+  padding: 8px 10px 4px;
+}
+
+.files-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary, #cbd5e1);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.files-side-icon {
+  font-size: 15px;
+}
+
+.files-sidebar-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary, #ffffff);
+}
+
+.files-sidebar-item.active {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  font-weight: 600;
+  border-left: 2px solid #38bdf8;
+}
+
+.files-content-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  background: rgba(11, 14, 22, 0.95);
+}
+
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(115px, 1fr));
+  gap: 14px;
+}
+
+.files-item-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.files-item-card:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.files-item-card.selected {
+  background: rgba(56, 189, 248, 0.18);
+  border-color: rgba(56, 189, 248, 0.6);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+}
+
+.files-item-icon {
+  font-size: 38px;
+  margin-bottom: 6px;
+  filter: drop-shadow(0 2px 5px rgba(0, 0, 0, 0.4));
+}
+
+.files-item-name {
+  font-size: 11.5px;
+  color: var(--text-primary, #e2e8f0);
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.files-item-size {
+  font-size: 10px;
+  color: var(--text-muted, #94a3b8);
+  margin-top: 3px;
+}
+
+.file-card-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 8px;
+  font-weight: 800;
+  padding: 1px 4px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.file-card-badge.deb {
+  background: rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.5);
+}
+
+.files-empty-state {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+}
+
+.files-status-bar {
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  background: rgba(14, 18, 28, 0.95);
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+/* ========================================================================== */
+/* SİSTEM PERFORMANS & AKICILIK OPTİMİZASYONLARI                             */
+/* ========================================================================== */
+.window {
+  contain: layout style;
+}
+
+.window.dragging,
+.window.is-dragging {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--accent-active, #3b82f6) !important;
+  transition: none !important;
+  will-change: left, top;
+}
+
+.window-view {
+  contain: content;
+}
+
+.taskbar {
+  contain: layout style;
+}
+
+/* ==============================================================================
+   HTML'DE KULLANILIP CSS'E YAZILMAMIŞ BAĞLANTI SINIFLARI
+   ============================================================================== */
+
+/* Başlat menüsü: arama kutusu .start-flyout içinde kenarlara yapışıyordu */
+.start-search-wrap {
+  padding: 14px 18px 2px;
+}
+
+/* Alt çubuktaki avatar ve kullanıcı bilgisi üst üste biniyordu */
+.start-user-profile {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Sistem tepsisi durum simgeleri boyutsuz kalıyordu */
+.tray-status-glyph {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+/* Kurulum sihirbazındaki onay kutusu */
+.check-container {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.check-container input {
+  accent-color: var(--accent-active);
+}
+
+.disk-loading {
+  padding: 16px;
+  text-align: center;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* Sabit uygulama simgelerinin aksan renkleri.
+   body.theme-* kurallarıyla eşit özdeşliğe gelmesi için seçiciler body ile
+   başlıyor; dosyanın sonunda oldukları için bağlayıcı oluyor. */
+body .pinned-icon-box.store-accent {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+body .pinned-icon-box.terminal-accent {
+  background: rgba(13, 148, 136, 0.15);
+  color: #0d9488;
+}
+
+body .pinned-icon-box.ai-accent {
+  background: rgba(236, 72, 153, 0.15);
+  color: #ec4899;
+}
+
+body .pinned-icon-box.settings-accent {
+  background: rgba(100, 116, 139, 0.15);
+  color: #64748b;
+}
+
+body .pinned-icon-box.office-accent {
+  background: rgba(234, 88, 12, 0.15);
+  color: #ea580c;
+}
+
+body .pinned-icon-box.welcome-accent {
+  background: rgba(180, 83, 9, 0.15);
+  color: #b45309;
+}
+
+body .pinned-icon-box.installer-accent {
+  background: rgba(99, 102, 241, 0.15);
+  color: #6366f1;
+}
+
+/* ==============================================================================
+   HAREKET AZALTMA (SİSTEM TERCİHİ)
+   Ayaz DE'de hareket zaten yalnızca durum geçişidir (DESIGN.md, MOTION 1).
+   Sistem bu tercihi açtıysa geçişler ve açılış animasyonları anında biter;
+   pencere konumu bozulmasın diye transform yok sayılır.
+   ============================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .window {
+    transform: none !important;
+  }
+}
+
 
 

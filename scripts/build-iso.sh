@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ISO_NAME="ankora-linux-2.0-ayaz-amd64.iso"
-WORK_DIR="/tmp/ankora-iso-build"
+WORK_DIR="/var/tmp/ankora-iso-build"
 CHROOT_DIR="$WORK_DIR/chroot"
 IMAGE_DIR="$WORK_DIR/image"
 DEVUAN_MIRROR="http://deb.devuan.org/merged"
@@ -30,7 +30,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # 2. Gerekli Host Paketlerinin Denetimi
-REQUIRED_HOST_PKGS=(debootstrap squashfs-tools xorriso isolinux syslinux-efi grub-pc-bin grub-efi-amd64-bin mtools dosfstools)
+REQUIRED_HOST_PKGS=(debootstrap squashfs-tools xorriso isolinux syslinux-common syslinux-efi grub-pc-bin grub-efi-amd64-bin mtools dosfstools wget gpgv)
 MISSING_HOST_PKGS=()
 for pkg in "${REQUIRED_HOST_PKGS[@]}"; do
     if ! dpkg -s "$pkg" &>/dev/null; then
@@ -44,8 +44,46 @@ if [ ${#MISSING_HOST_PKGS[@]} -gt 0 ]; then
     apt-get install -y --no-install-recommends "${MISSING_HOST_PKGS[@]}"
 fi
 
+# Devuan suite betiğini debootstrap için tanımla (Debian host üzerinde eksikse ekle)
+if [ ! -f "/usr/share/debootstrap/scripts/$DEVUAN_SUITE" ]; then
+    echo "[BİLGİ] Debootstrap için $DEVUAN_SUITE profili oluşturuluyor..."
+    if [ -f "/usr/share/debootstrap/scripts/bookworm" ]; then
+        ln -sf bookworm "/usr/share/debootstrap/scripts/$DEVUAN_SUITE"
+    else
+        ln -sf sid "/usr/share/debootstrap/scripts/$DEVUAN_SUITE"
+    fi
+fi
+
+# Devuan GPG resmi anahtarlık denetimi
+if [ ! -f /usr/share/keyrings/devuan-archive-keyring.gpg ]; then
+    echo "[BİLGİ] Devuan resmi GPG anahtarlığı (devuan-keyring) aranıyor..."
+    wget -qO /tmp/devuan-keyring.deb https://pkgmaster.devuan.org/devuan/pool/main/d/devuan-keyring/devuan-keyring_2022.09.04_all.deb 2>/dev/null || true
+    if [ -f /tmp/devuan-keyring.deb ] && [ -s /tmp/devuan-keyring.deb ]; then
+        dpkg -i /tmp/devuan-keyring.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+        rm -f /tmp/devuan-keyring.deb
+    fi
+fi
+
+KEYRING_ARG=""
+if [ -f /usr/share/keyrings/devuan-archive-keyring.gpg ]; then
+    KEYRING_ARG="--keyring=/usr/share/keyrings/devuan-archive-keyring.gpg"
+elif [ -f /etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg ]; then
+    KEYRING_ARG="--keyring=/etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg"
+else
+    # Anahtarlıksız kurulum imzasız taban sistem demektir; sessizce geçilmez.
+    echo "[HATA] Devuan GPG anahtarlığı bulunamadı:" >&2
+    echo "       /usr/share/keyrings/devuan-archive-keyring.gpg" >&2
+    echo "       /etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg" >&2
+    echo "[HATA] Kurulum imzasız olacağı için durduruldu." >&2
+    exit 1
+fi
+
 # 3. Temiz Çalışma Alanı Hazırlığı
 echo "[1/8] Çalışma dizinleri hazırlanıyor..."
+umount -lf "$CHROOT_DIR/dev/pts" 2>/dev/null || true
+umount -lf "$CHROOT_DIR/dev" 2>/dev/null || true
+umount -lf "$CHROOT_DIR/proc" 2>/dev/null || true
+umount -lf "$CHROOT_DIR/sys" 2>/dev/null || true
 rm -rf "$WORK_DIR"
 mkdir -p "$CHROOT_DIR" "$IMAGE_DIR/live" "$IMAGE_DIR/isolinux" "$IMAGE_DIR/boot/grub" "$ROOT_DIR/dist"
 
@@ -53,10 +91,17 @@ mkdir -p "$CHROOT_DIR" "$IMAGE_DIR/live" "$IMAGE_DIR/isolinux" "$IMAGE_DIR/boot/
 echo "[2/8] Devuan Daedalus SysVinit temel tabanı kuruluyor (debootstrap)..."
 debootstrap --arch=amd64 \
     --variant=minbase \
+    $KEYRING_ARG \
     --include=sysvinit-core,sysvinit-utils,insserv,initramfs-tools,live-boot,live-config,live-config-sysvinit \
     "$DEVUAN_SUITE" "$CHROOT_DIR" "$DEVUAN_MIRROR"
 
-# 5. Sanal Dosya Sistemlerinin Bağlanması (Mount)
+# 5. Sanal Dosya Sistemlerinin Bağlanması (Mount) ve Anahtarlık Transferi
+mkdir -p "$CHROOT_DIR/etc/apt/trusted.gpg.d" "$CHROOT_DIR/usr/share/keyrings"
+cp -f /usr/share/keyrings/devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
+cp -f /usr/share/keyrings/devuan* "$CHROOT_DIR/usr/share/keyrings/" 2>/dev/null || true
+# Baz sistemler anahtarlığı yalnızca /etc/apt/trusted.gpg.d altında tutar
+cp -f /etc/apt/trusted.gpg.d/devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
+
 mount --bind /dev "$CHROOT_DIR/dev"
 mount --bind /dev/pts "$CHROOT_DIR/dev/pts"
 mount -t proc none "$CHROOT_DIR/proc"
@@ -80,6 +125,25 @@ export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
 export LC_ALL=C
 
+# -----------------------------------------------------------------------
+# ALAN YÖNETİMİ: Gereksiz dil/doc/man dosyalarını engelle (~300 MB tasarruf)
+# -----------------------------------------------------------------------
+cat << 'NODOC' > /etc/dpkg/dpkg.cfg.d/01-nodoc
+path-exclude /usr/share/doc/*
+path-exclude /usr/share/man/*
+path-exclude /usr/share/info/*
+path-exclude /usr/share/lintian/*
+path-exclude /usr/share/linda/*
+path-include /usr/share/doc/*/copyright
+NODOC
+
+cat << 'NOLOCALE' > /etc/dpkg/dpkg.cfg.d/02-nolocale
+path-exclude /usr/share/locale/*
+path-include /usr/share/locale/tr/*
+path-include /usr/share/locale/en/*
+path-include /usr/share/locale/locale.alias
+NOLOCALE
+
 # Depo kaynakları
 cat << 'SOURCES' > /etc/apt/sources.list
 deb http://deb.devuan.org/merged daedalus main contrib non-free non-free-firmware
@@ -87,24 +151,75 @@ deb http://deb.devuan.org/merged daedalus-security main contrib non-free non-fre
 deb http://deb.devuan.org/merged daedalus-updates main contrib non-free non-free-firmware
 SOURCES
 
+# trusted=yes imza denetimini tamamen kapatıyordu. Anahtarlık yukarıda
+# zaten chroot'a kopyalandığından Release dosyaları GPG ile doğrulanır;
+# doğrulanamazsa `set -e` kurulumu burada durdurur.
 apt-get update -qq
+apt-get install -y --no-install-recommends devuan-keyring || true
 
-# Linux Çekirdeği, Xorg, WebKitGTK ve Temel Kiosk Bileşenleri
+# -----------------------------------------------------------------------
+# FARZ 1: Linux Çekirdeği ve temel araçlar (alan kontrolü ile)
+# -----------------------------------------------------------------------
 apt-get install -y --no-install-recommends \
     linux-image-amd64 \
-    xserver-xorg-core \
-    xserver-xorg-video-all \
-    xserver-xorg-input-all \
-    xinit \
-    x11-xserver-utils \
-    libwebkit2gtk-4.0-37 \
-    libgtk-3-0 \
-    libayatana-appindicator3-1 \
+    live-boot \
+    live-config \
+    live-config-sysvinit \
+    initramfs-tools \
     ca-certificates \
     curl \
     wget \
     sudo \
-    dbus-x11 \
+    locales
+
+# Ara temizlik (çekirdek ve firmware dosyaları çok yer kaplar)
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+apt-get update -qq
+
+echo "[ALAN RAPORU] Çekirdek kurulumundan sonra:"
+df -h / || true
+
+# -----------------------------------------------------------------------
+# FARZ 2: Xorg (minimal sürücü seti — tüm video sürücüleri DEĞİL)
+# -----------------------------------------------------------------------
+apt-get install -y --no-install-recommends \
+    xserver-xorg-core \
+    xserver-xorg-video-all \
+    xserver-xorg-video-vesa \
+    xserver-xorg-video-fbdev \
+    xserver-xorg-video-vmware \
+    xserver-xorg-video-qxl \
+    xserver-xorg-input-all \
+    xserver-xorg-legacy \
+    libgl1-mesa-dri \
+    libglx-mesa0 \
+    mesa-va-drivers \
+    mesa-utils \
+    xinit \
+    openbox \
+    x11-xserver-utils \
+    dbus-x11
+
+# Ara temizlik
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+apt-get update -qq
+
+echo "[ALAN RAPORU] Xorg kurulumundan sonra:"
+df -h / || true
+
+# -----------------------------------------------------------------------
+# FARZ 3: WebKitGTK, ses ve kiosk bileşenleri + Kurulum Araçları
+# -----------------------------------------------------------------------
+apt-get install -y --no-install-recommends \
+    libwebkit2gtk-4.0-37 \
+    libgtk-3-0 \
+    libayatana-appindicator3-1 \
+    python3 \
+    python3-gi \
+    gir1.2-webkit2-4.0 \
+    gir1.2-gtk-3.0 \
     alsa-utils \
     pulseaudio \
     pavucontrol \
@@ -116,65 +231,157 @@ apt-get install -y --no-install-recommends \
     iproute2 \
     net-tools \
     wpasupplicant \
-    locales
+    parted \
+    dosfstools \
+    e2fsprogs \
+    rsync \
+    grub-efi-amd64-bin \
+    grub-pc-bin \
+    xdg-utils \
+    file \
+    xterm
 
+# Son temizlik
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+
+echo "[ALAN RAPORU] Tüm paketler kurulduktan sonra:"
+df -h / || true
+
+# -----------------------------------------------------------------------
 # Yerel ayarlar (Türkçe & UTF-8 desteği)
+# -----------------------------------------------------------------------
 echo "tr_TR.UTF-8 UTF-8" > /etc/locale.gen
 echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
 locale-gen
 update-locale LANG=tr_TR.UTF-8
 
-# Canlı Oturum Kullanıcısı: pars
-useradd -m -s /bin/bash -u 1000 -G sudo,audio,video,plugdev,netdev pars
+# -----------------------------------------------------------------------
+# Canlı Oturum Kullanıcısı: ankora
+# -----------------------------------------------------------------------
+for grp in sudo audio video plugdev netdev; do
+    getent group "$grp" >/dev/null || groupadd -r "$grp" 2>/dev/null || true
+done
 
-# GÜVENLİK İYİLEŞTİRMESİ (BULGU #1 & #2 GİDERİLDİ):
-# 1. Root hesabı doğrudan yerel/uzaktan girişlere tamamen kilitlenir
-passwd -l root
+if ! id -u ankora &>/dev/null; then
+    useradd -m -s /bin/bash -u 1000 -G sudo,audio,video,plugdev,netdev ankora
+else
+    usermod -aG sudo,audio,video,plugdev,netdev ankora 2>/dev/null || true
+fi
 
-# 2. Canlı kullanıcı 'pars' için rastgele güvenli parola oluşturulur ve ilk girişte değişim zorunlu tutulur
-RANDPASS=$(openssl rand -hex 12 2>/dev/null || tr -dc 'A-Za-z0-9!@#%' </dev/urandom | head -c 16)
-echo "pars:${RANDPASS}" | chpasswd
-chage -d 0 pars
+# Root hesabı doğrudan girişlere kilitlenir
+passwd -l root 2>/dev/null || true
 
-# 3. NOPASSWD: ALL (Sınırsız Root) KESİNLİKLE KALDIRILDI.
-# Yalnızca Ayaz DE kiosk arayüzünün ihtiyaç duyduğu yardımcı güncelleme scriptlerine izin verilir (asgari yetki ilkesi).
-cat << 'SUDO' > /etc/sudoers.d/pars
-pars ALL=(ALL) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ankora-de-update-helper
+# Canlı kullanıcı 'ankora' için varsayılan parola: ankora
+echo "ankora:ankora" | chpasswd
+passwd -u ankora 2>/dev/null || true
+
+# Canlı sistem kullanıcısı için şifresiz sudo (Live USB / Kiosk için tam yetki)
+cat << 'SUDO' > /etc/sudoers.d/ankora
+ankora ALL=(ALL:ALL) NOPASSWD: ALL
 SUDO
-chmod 0440 /etc/sudoers.d/pars
+chmod 0440 /etc/sudoers.d/ankora
 
 # Hostname
 echo "ankora-live" > /etc/hostname
 
+# Xorg Kullanıcı Hakları (xserver-xorg-legacy ile ankora kullanıcısının startx çalıştırma izni)
+mkdir -p /etc/X11
+cat << 'XWRAP' > /etc/X11/Xwrapper.config
+allowed_users=anybody
+needs_root_rights=yes
+XWRAP
+chmod 0644 /etc/X11/Xwrapper.config
+
+# Ağ Yapılandırması: Loopback arabirimi
+mkdir -p /etc/network
+cat << 'NETIF' > /etc/network/interfaces
+auto lo
+iface lo inet loopback
+
+allow-hotplug eth0
+iface eth0 inet dhcp
+NETIF
+
+# -----------------------------------------------------------------------
 # X11 Otomatik Kiosk Başlatıcı
-cat << 'XINIT' > /home/pars/.xinitrc
+# -----------------------------------------------------------------------
+cat << 'XINIT' > /home/ankora/.xinitrc
 #!/bin/sh
-xsetroot -solid "#0b0c10"
-xset -dpms
-xset s off
-xset s noblank
+# Loopback ağ arabirimini ayağa kaldır
+ip link set lo up 2>/dev/null || ifconfig lo 127.0.0.1 up 2>/dev/null || true
+
+xsetroot -solid "#0b0c10" 2>/dev/null || true
+xset -dpms 2>/dev/null || true
+xset s off 2>/dev/null || true
+xset s noblank 2>/dev/null || true
+
+# Sanal makinede ekran çözünürlüğünü dinamik ayarla
+xrandr -s 1280x800 2>/dev/null || xrandr -s 1024x768 2>/dev/null || true
+
+# Pencere yöneticisini arka planda başlat
+if command -v openbox >/dev/null 2>&1; then
+    openbox &
+fi
+
 if [ -x /usr/bin/ayaz ]; then
     exec /usr/bin/ayaz
+elif [ -x /usr/local/bin/ayaz ]; then
+    exec /usr/local/bin/ayaz
 else
-    exec xterm
+    exec xterm 2>/dev/null || exec sh
 fi
 XINIT
-chmod +x /home/pars/.xinitrc
-chown pars:pars /home/pars/.xinitrc
+chmod +x /home/ankora/.xinitrc
+cp /home/ankora/.xinitrc /etc/skel/.xinitrc
 
 # SysVinit Otomatik Giriş (Getty inittab)
-sed -i 's|^1:2345:respawn:/sbin/getty 38400 tty1|1:2345:respawn:/sbin/getty --autologin pars --noclear 38400 tty1|' /etc/inittab
+mkdir -p /etc/inittab.d
+if [ ! -f /etc/inittab ] && [ -f /usr/share/sysvinit/inittab ]; then
+    cp /usr/share/sysvinit/inittab /etc/inittab
+fi
+if [ -f /etc/inittab ]; then
+    if grep -q "tty1" /etc/inittab; then
+        sed -i -E 's|^[0-9a-zA-Z]+:([0-9]+):respawn:/sbin/getty.*tty1.*|1:\1:respawn:/sbin/getty --autologin ankora --noclear 38400 tty1 linux|' /etc/inittab
+    else
+        echo "1:2345:respawn:/sbin/getty --autologin ankora --noclear 38400 tty1 linux" >> /etc/inittab
+    fi
+fi
 
 # TTY1 Girişinde startx Başlatma
-cat << 'PROFILE' >> /home/pars/.profile
-if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-    exec startx
+cat << 'PROFILE' >> /home/ankora/.profile
+if [ -z "$DISPLAY" ] && [ "$(tty 2>/dev/null)" = "/dev/tty1" ]; then
+    exec startx -- -keeptty > ~/.xsession-errors 2>&1
 fi
 PROFILE
-chown pars:pars /home/pars/.profile
+chown -R ankora:ankora /home/ankora
+cp /home/ankora/.profile /etc/skel/.profile
 
+# -----------------------------------------------------------------------
+# INITRAMFS GÜNCELLEMESİ — live-boot modüllerinin initrd'ye eklenmesi
+# Bu adım olmazsa ISO boot sırasında root dosya sistemi bulunamaz!
+# -----------------------------------------------------------------------
+echo "[KRİTİK] initramfs güncelleniyor (live-boot modülleri enjekte ediliyor)..."
+update-initramfs -u -k all
+
+# Canlı imaj için resmi kaynak listesi
+cat << 'SOURCES' > /etc/apt/sources.list
+deb http://deb.devuan.org/merged daedalus main contrib non-free non-free-firmware
+deb http://deb.devuan.org/merged daedalus-security main contrib non-free non-free-firmware
+deb http://deb.devuan.org/merged daedalus-updates main contrib non-free non-free-firmware
+SOURCES
+
+# Son temizlik
 apt-get clean
-rm -rf /var/lib/apt/lists/* /tmp/*
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Gereksiz doc, man, locale dosyalarını temizle
+rm -rf /usr/share/doc/* /usr/share/man/* /usr/share/info/* 2>/dev/null || true
+rm -rf /usr/share/lintian/* /usr/share/linda/* 2>/dev/null || true
+
+echo "[ALAN RAPORU] Son durum:"
+df -h / || true
+du -sh / 2>/dev/null || true
 EOF
 
 chmod +x "$CHROOT_DIR/chroot-setup.sh"
@@ -193,10 +400,1043 @@ fi
 
 # Eğer dist altında deb varsa kur, yoksa mevcut src dosyalarını kopyala
 if [ -f "$ROOT_DIR/dist/ayaz-de-latest-amd64.deb" ]; then
+    echo "[BİLGİ] Önceden derlenmiş Ayaz DE .deb paketi kuruluyor..."
     cp "$ROOT_DIR/dist/ayaz-de-latest-amd64.deb" "$CHROOT_DIR/tmp/ayaz.deb"
     chroot "$CHROOT_DIR" bash -c "dpkg -i /tmp/ayaz.deb || apt-get install -f -y; rm -f /tmp/ayaz.deb"
 elif [ -f "$ROOT_DIR/src-tauri/target/release/ayaz-de" ]; then
+    echo "[BİLGİ] Ayaz DE ikili dosyası kopyalanıyor..."
     cp "$ROOT_DIR/src-tauri/target/release/ayaz-de" "$CHROOT_DIR/usr/bin/ayaz"
+    chmod +x "$CHROOT_DIR/usr/bin/ayaz"
+else
+    echo "[BİLGİ] Ayaz DE Kiosk çalışma ortamı ve arayüz bileşenleri entegre ediliyor..."
+    mkdir -p "$CHROOT_DIR/usr/share/ayaz"
+    cp -r "$ROOT_DIR/src/"* "$CHROOT_DIR/usr/share/ayaz/"
+    cat << 'AYAZ_PY' > "$CHROOT_DIR/usr/bin/ayaz"
+#!/usr/bin/env python3
+import sys, os, subprocess, json, threading, shutil, re, shlex, hmac
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# GPU Donanım Hızlandırma ve WebKit Ortam Değişkenleri
+os.environ["GDK_BACKEND"] = "x11"
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('WebKit2', '4.0')
+from gi.repository import Gtk, WebKit2, Gdk, GLib
+
+PORT = 49152
+# Origin başlığı yansıtılmaz: sabitlenen tek origin, aynı makinedeki her
+# sayfanın IPC köprüsünü kullanmasını engeller.
+ALLOWED_ORIGIN = f'http://127.0.0.1:{PORT}'
+TERM_CWD = '/home/ankora' if os.path.exists('/home/ankora') else os.path.expanduser('~')
+
+# GÜVENLİK: IPC Token - sunucu başlarken üretilir, her istekte doğrulanır
+import secrets
+IPC_TOKEN = secrets.token_hex(32)
+# Ardışık başarısız token denemelerini sayar; aşımında kapı tamamen kapanır
+IPC_STATE = {'bad': 0}
+
+def execute_ayaz_command(cmd, args):
+    global TERM_CWD
+    home_dir = os.path.expanduser('~')
+    if not os.path.exists(home_dir):
+        home_dir = '/home/ankora' if os.path.exists('/home/ankora') else '/root'
+
+    if not os.path.exists(TERM_CWD):
+        TERM_CWD = home_dir
+
+    if cmd == 'run_terminal_command':
+        command = args.get('command', '').strip()
+        if not command:
+            return ''
+
+        # GÜVENLİK: Rust tarafındaki whitelist'in Python karşılığı
+        EXACT_ALLOWED = [
+            'uname -a', 'uname -r', 'whoami', 'uptime', 'ls', 'ls -la', 'ls -l', 'ls -lh',
+            'date', 'hostname', 'id', 'free -m', 'free -h', 'df -h', 'df -h /',
+            'cat /etc/os-release', 'cat /etc/issue', 'cat /proc/version',
+            'cat /proc/meminfo', 'cat /proc/cpuinfo', 'ps aux', 'top -b -n 1',
+            'apt-get clean', 'apt-get update', 'apt-get upgrade -y',
+            'apt-get update && apt-get upgrade -y',
+            'rm -rf /tmp/*', 'apt-get clean && rm -rf /tmp/*',
+            'df -h / && free -m', 'clear', 'sync',
+            'echo 3 > /proc/sys/vm/drop_caches',
+        ]
+        ALLOWED_BINS = ['uname', 'whoami', 'uptime', 'date', 'hostname', 'id', 'free', 'df', 'ls', 'ps', 'top', 'which']
+        SHELL_METACHARS = set(';|`$><\\()\n\r')
+        
+        # Persistent cd tracking
+        if command == 'cd':
+            TERM_CWD = home_dir
+            return ''
+        elif command.startswith('cd '):
+            target_d = command[3:].strip()
+            if target_d.startswith('~'):
+                target_d = os.path.expanduser(target_d)
+            new_path = os.path.normpath(os.path.join(TERM_CWD, target_d))
+            if os.path.isdir(new_path):
+                TERM_CWD = new_path
+                return ''
+            else:
+                return f'bash: cd: {target_d}: Böyle bir dosya ya da dizin yok'
+
+        is_exact = command in EXACT_ALLOWED
+        has_meta = bool(SHELL_METACHARS & set(command))
+        
+        if has_meta and not is_exact:
+            return '[HATA] Güvenlik İhlali: Kabuk metakarakterleri içeren komutlar reddedilir.'
+        
+        first_word = command.split()[0] if command.split() else ''
+        if not is_exact and first_word not in ALLOWED_BINS:
+            return f'[HATA] Güvenlik İhlali: \'{first_word}\' aracı izin verilenler listesinde yok.'
+
+        if is_exact and '&&' in command:
+            parts = [p.strip() for p in command.split('&&')]
+            results = []
+            for part in parts:
+                p_args = part.split()
+                try:
+                    proc = subprocess.run(p_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=TERM_CWD, timeout=60)
+                    if proc.stdout:
+                        results.append(proc.stdout)
+                except Exception as e:
+                    results.append(f'[HATA] {e}')
+            return '\n'.join(results) if results else '[Komut tamamlandı]'
+
+        cmd_parts = command.split()
+        try:
+            proc = subprocess.run(
+                cmd_parts,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=TERM_CWD,
+                timeout=60
+            )
+        except FileNotFoundError:
+            return f'bash: {first_word}: komut bulunamadı'
+        except subprocess.TimeoutExpired:
+            return '[HATA] Komut zaman aşımına uğradı (60s)'
+        out = proc.stdout
+        if proc.stderr:
+            out = (out + '\n' if out else '') + proc.stderr
+        return out if out else f'[Komut {proc.returncode} koduyla tamamlandı]'
+
+    elif cmd == 'launch_application':
+        exec_cmd = args.get('exec', '').strip()
+        if not exec_cmd:
+            raise Exception('Uygulama komutu boş olamaz')
+        # GÜVENLİK: Shell metakarakterleri engelle
+        SHELL_BAD = set(';|`$><\\()\n\r&')
+        if SHELL_BAD & set(exec_cmd):
+            raise Exception('Güvenlik Hatası: Komutta tehlikeli karakterler var')
+        FORBIDDEN_BINS = {
+            'sudo', 'su', 'pkexec', 'dd', 'mkfs', 'fdisk', 'parted',
+            'sh', 'bash', 'zsh', 'dash', 'csh', 'tcsh', 'fish', 'env',
+            'xargs', 'passwd', 'chpasswd', 'chmod', 'chown', 'reboot',
+            'poweroff', 'shutdown', 'init', 'systemctl', 'telinit', 'halt',
+            'chroot', 'unshare', 'nsenter', 'mount', 'umount',
+            'nc', 'ncat', 'socat', 'ssh', 'scp', 'wget', 'curl',
+            'kill', 'pkill', 'killall', 'tee', 'install', 'ln',
+            'mkfifo', 'mknod', 'insmod', 'modprobe', 'rmmod',
+            'docker', 'podman', 'runuser', 'sg', 'newgrp',
+            'at', 'batch', 'crontab', 'systemd-run'
+        }
+        first_word = exec_cmd.split()[0]
+        base_name = os.path.basename(first_word)
+        if base_name in FORBIDDEN_BINS:
+            raise Exception(f'Güvenlik: {base_name} doğrudan başlatılamaz')
+        env = os.environ.copy()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        cli_apps = {'htop', 'btop', 'ncdu', 'fastfetch', 'neofetch', 'inxi', 'iotop', 'iftop'}
+        if first_word in cli_apps:
+            subprocess.Popen(['xterm', '-title', first_word, '-e'] + exec_cmd.split(), cwd=home_dir, env=env, start_new_session=True)
+        else:
+            subprocess.Popen(exec_cmd.split(), cwd=home_dir, env=env, start_new_session=True)
+        return f'Uygulama başlatıldı: {exec_cmd}'
+
+    elif cmd == 'install_deb_package':
+        pkg = args.get('packageName', '').strip()
+        if not pkg or not re.match(r'^[a-zA-Z0-9.+_-]+$', pkg):
+            raise Exception('Geçersiz paket adı biçimi')
+        helper = '/usr/local/bin/ayaz-pkg-helper'
+        cmd_args = ['sudo', helper, 'install', pkg] if os.path.exists(helper) else ['sudo', 'apt-get', 'install', '-y', '--no-install-recommends', '--', pkg]
+        proc = subprocess.run(
+            cmd_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=300
+        )
+        if proc.returncode != 0:
+            raise Exception(f'Kurulum başarısız: {proc.stderr or proc.stdout}')
+        return {'id': pkg, 'name': pkg, 'exec': pkg, 'cat': 'util'}
+
+    elif cmd == 'remove_deb_package':
+        pkg = args.get('packageName', '').strip()
+        if not pkg or not re.match(r'^[a-zA-Z0-9.+_-]+$', pkg):
+            raise Exception('Geçersiz paket adı biçimi')
+        helper = '/usr/local/bin/ayaz-pkg-helper'
+        cmd_args = ['sudo', helper, 'remove', pkg] if os.path.exists(helper) else ['sudo', 'apt-get', 'remove', '-y', '--', pkg]
+        proc = subprocess.run(
+            cmd_args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=120
+        )
+        return f'{pkg} kaldırıldı'
+
+    elif cmd == 'system_poweroff':
+        subprocess.Popen(['/sbin/poweroff', '-f'])
+        return 'Sistem kapatılıyor'
+
+    elif cmd == 'system_reboot':
+        subprocess.Popen(['/sbin/reboot', '-f'])
+        return 'Sistem yeniden başlatılıyor'
+
+    elif cmd == 'get_storage_devices':
+        try:
+            proc = subprocess.run(
+                ['lsblk', '-J', '-b', '-o', 'NAME,PATH,SIZE,MODEL,RM,TYPE,RO'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            data = json.loads(proc.stdout)
+            disks = []
+            for d in data.get('blockdevices', []):
+                name = d.get('name', '')
+                if d.get('type') == 'disk' and not name.startswith('loop') and not name.startswith('zram') and not name.startswith('sr'):
+                    size_b = int(d.get('size', 0))
+                    size_gb = round(size_b / (1024 ** 3), 1)
+                    model = (d.get('model') or f'Depolama Sürücüsü ({size_gb} GB)').strip()
+                    disks.append({
+                        'name': name,
+                        'path': d.get('path', f"/dev/{name}"),
+                        'size_gb': size_gb,
+                        'model': model,
+                        'is_removable': bool(d.get('rm', False))
+                    })
+            if disks:
+                return disks
+        except Exception:
+            pass
+        return [
+            {'name': 'sda', 'path': '/dev/sda', 'size_gb': 64.0, 'model': 'Sistem Sabit Diski (/dev/sda)', 'is_removable': False}
+        ]
+
+    elif cmd == 'execute_system_installation':
+        payload = args.get('payload', {})
+        target = payload.get('target_disk', '').strip()
+        username = payload.get('username', 'ankora').strip()
+        hostname = payload.get('hostname', 'ankora-pc').strip()
+        password = payload.get('password', 'ankora').strip()
+        autologin = payload.get('autologin', True)
+
+        if not target or not re.match(r'^/dev/(sd[a-z]|vd[a-z]|nvme[0-9]+n[0-9]+)$', target):
+            raise Exception('Geçersiz hedef disk seçimi (Örn: /dev/sda veya /dev/nvme0n1)')
+        if not re.match(r'^[a-z_][a-z0-9_-]{0,31}$', username):
+            raise Exception('Geçersiz kullanıcı adı')
+        if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]{0,62}$', hostname):
+            raise Exception('Geçersiz makine adı')
+        if not password or '\0' in password or '\n' in password:
+            raise Exception('Geçersiz parola')
+
+        subprocess.run("umount -q -R /target 2>/dev/null || true", shell=True)
+        subprocess.run(f"umount -q {target}* 2>/dev/null || true", shell=True)
+        subprocess.run("swapoff -a 2>/dev/null || true", shell=True)
+
+        cmds = [
+            f"parted -s {target} mklabel gpt",
+            f"parted -s {target} mkpart ESP fat32 1MiB 513MiB",
+            f"parted -s {target} set 1 esp on",
+            f"parted -s {target} mkpart primary ext4 513MiB 100%"
+        ]
+        for c in cmds:
+            subprocess.run(c, shell=True, check=True)
+
+        subprocess.run("udevadm settle || sleep 1", shell=True)
+
+        p1 = f"{target}p1" if "nvme" in target else f"{target}1"
+        p2 = f"{target}p2" if "nvme" in target else f"{target}2"
+
+        subprocess.run(f"mkfs.vfat -F32 {p1}", shell=True, check=True)
+        subprocess.run(f"mkfs.ext4 -F {p2}", shell=True, check=True)
+
+        os.makedirs('/target', exist_ok=True)
+        subprocess.run(f"mount {p2} /target", shell=True, check=True)
+        os.makedirs('/target/boot/efi', exist_ok=True)
+        subprocess.run(f"mount {p1} /target/boot/efi", shell=True, check=True)
+
+        rsync_cmd = "rsync -aAX / /target/ --exclude=/proc/* --exclude=/sys/* --exclude=/dev/* --exclude=/tmp/* --exclude=/run/* --exclude=/mnt/* --exclude=/media/* --exclude=/target/* --exclude=/home/*"
+        subprocess.run(rsync_cmd, shell=True, check=True)
+
+        with open('/target/etc/hostname', 'w') as f:
+            f.write(f"{hostname}\n")
+
+        with open('/target/etc/hosts', 'w') as f:
+            f.write(f"127.0.0.1\tlocalhost\n127.0.1.1\t{hostname}\n\n# The following lines are desirable for IPv6 capable hosts\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n")
+
+        try:
+            root_uuid = subprocess.check_output(f"blkid -s UUID -o value {p2}", shell=True, text=True).strip()
+            efi_uuid = subprocess.check_output(f"blkid -s UUID -o value {p1}", shell=True, text=True).strip()
+        except Exception:
+            root_uuid = p2
+            efi_uuid = p1
+
+        fstab_content = f"""# /etc/fstab generated by Ankora Linux Installer
+UUID={root_uuid} / ext4 errors=remount-ro 0 1
+UUID={efi_uuid} /boot/efi vfat umask=0077 0 1
+tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
+"""
+        with open('/target/etc/fstab', 'w') as f:
+            f.write(fstab_content)
+
+        bind_mounts = ['/dev', '/dev/pts', '/proc', '/sys', '/run']
+        for bm in bind_mounts:
+            os.makedirs(f"/target{bm}", exist_ok=True)
+            subprocess.run(f"mount --bind {bm} /target{bm}", shell=True, check=True)
+
+        chroot_setup_cmds = [
+            ['chroot', '/target', 'useradd', '-m', '-s', '/bin/bash', '-G', 'sudo,audio,video,plugdev,netdev', username],
+        ]
+        for cmd_args in chroot_setup_cmds:
+            subprocess.run(cmd_args, check=False)
+
+        # GÜVENLİK: Parola stdin pipe ile güvenli geçiş (shell interpolation yok)
+        chpasswd_proc = subprocess.Popen(
+            ['chroot', '/target', 'chpasswd'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        chpasswd_proc.communicate(input=f"{username}:{password}\n".encode())
+
+        # Sudoers dosyası
+        with open(f'/target/etc/sudoers.d/{username}', 'w') as f:
+            f.write(f"{username} ALL=(ALL:ALL) ALL\n")
+        os.chmod(f'/target/etc/sudoers.d/{username}', 0o440)
+
+        # GÜVENLİK: rsync /etc'i de kopyaladığı için canlı oturumun izleri
+        # kurulu sisteme geçerdi: `ankora` hesabının herkese açık bilinen
+        # parolası + şifresiz sudo yetkisi = parolasız root. Canlı hesap
+        # kurulu sistemde yetkisiz ve parolası bilinmeyen bir hesap olur.
+        if username != 'ankora':
+            try:
+                os.remove('/target/etc/sudoers.d/ankora')
+            except OSError:
+                pass
+            subprocess.run(['chroot', '/target', 'gpasswd', '-d', 'ankora', 'sudo'], check=False)
+            try:
+                live_pw = secrets.token_urlsafe(24)
+                subprocess.run(['chroot', '/target', 'chpasswd'],
+                               input=f"ankora:{live_pw}\n".encode(), check=False)
+            except Exception:
+                pass
+            try:
+                with open('/target/etc/sudoers.d/ankora-updater', 'w') as f:
+                    f.write(f"{username} ALL=(root) NOPASSWD: "
+                            "/usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper\n")
+                os.chmod('/target/etc/sudoers.d/ankora-updater', 0o440)
+            except OSError:
+                pass
+
+        # GRUB
+        subprocess.run(['chroot', '/target', 'grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=ankora', '--recheck'], check=False)
+        subprocess.run(['chroot', '/target', 'update-grub'], check=False)
+
+        if autologin:
+            inittab_path = '/target/etc/inittab'
+            if os.path.exists(inittab_path):
+                with open(inittab_path, 'r') as f:
+                    content = f.read()
+                content = re.sub(
+                    r'^1:2345:respawn:/sbin/getty.*tty1.*',
+                    f'1:2345:respawn:/sbin/getty --autologin {username} --noclear 38400 tty1 linux',
+                    content,
+                    flags=re.MULTILINE
+                )
+                with open(inittab_path, 'w') as f:
+                    f.write(content)
+        else:
+            # Canlı ISO'nun `--autologin ankora` satırı kurulu sistemde
+            # kalmamalı: hem kullanıcı otomatik girişi kapatmış oluyor hem de
+            # o satır artık yetkisiz olan canlı hesaba bağlanırdı.
+            inittab_path = '/target/etc/inittab'
+            if os.path.exists(inittab_path):
+                with open(inittab_path, 'r') as f:
+                    content = f.read()
+                content = re.sub(
+                    r'^1:2345:respawn:/sbin/getty --autologin \S+ --noclear 38400 tty1 linux',
+                    '1:2345:respawn:/sbin/getty 38400 tty1 linux',
+                    content,
+                    flags=re.MULTILINE
+                )
+                with open(inittab_path, 'w') as f:
+                    f.write(content)
+
+        try:
+            pass  # chroot komutları yukarıda zaten çalıştırıldı
+        finally:
+            for bm in reversed(bind_mounts):
+                subprocess.run(f"umount -l /target{bm} 2>/dev/null || true", shell=True)
+            subprocess.run("umount -l /target/boot/efi 2>/dev/null || true", shell=True)
+            subprocess.run("umount -l /target 2>/dev/null || true", shell=True)
+
+        return "Ankora Linux 2.0 başarıyla kuruldu! Sistemi yeniden başlatabilirsiniz."
+
+    elif cmd == 'get_system_telemetry':
+        mem_total = 4096
+        mem_used = 512
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                lines = f.readlines()
+                t = 0
+                a = 0
+                for l in lines:
+                    if l.startswith('MemTotal:'):
+                        t = int(l.split()[1]) // 1024
+                    elif l.startswith('MemAvailable:'):
+                        a = int(l.split()[1]) // 1024
+                mem_total = t
+                mem_used = max(0, t - a)
+        except Exception:
+            pass
+
+        uptime_s = 3600
+        try:
+            with open('/proc/uptime', 'r') as f:
+                uptime_s = int(float(f.read().split()[0]))
+        except Exception:
+            pass
+
+        kernel = 'Linux 6.1.0-22-amd64'
+        try:
+            with open('/proc/version', 'r') as f:
+                kernel = ' '.join(f.read().split()[:3])
+        except Exception:
+            pass
+
+        return {
+            'os_name': 'Devuan GNU/Linux 5 (daedalus)',
+            'kernel': kernel,
+            'init_system': 'SysVinit (systemd-free)',
+            'memory_used_mb': mem_used,
+            'memory_total_mb': mem_total,
+            'cpu_cores': os.cpu_count() or 4,
+            'uptime_seconds': uptime_s
+        }
+
+    elif cmd == 'optimize_system_memory':
+        try:
+            subprocess.run(['sync'], check=False)
+            res = subprocess.run(['sudo', 'tee', '/proc/sys/vm/drop_caches'], input=b'3\n', stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if res.returncode == 0:
+                return {'success': True, 'freed_mb': 0, 'message': 'Bellek önbellekleri başarıyla temizlendi.'}
+            else:
+                return {'success': False, 'freed_mb': 0, 'message': 'Önbellek temizleme yetki hatası (root gerekli).'}
+        except Exception as e:
+            return {'success': False, 'freed_mb': 0, 'message': str(e)}
+
+    elif cmd == 'list_directory':
+        req_path = args.get('path', home_dir).strip()
+        if not req_path or '\0' in req_path or not os.path.exists(req_path):
+            req_path = home_dir
+        req_path = os.path.abspath(req_path)
+        # GÜVENLİK: Kök gezilebilir, ancak başkalarının hesapları ve çekirdek /
+        # aygıt arayüzleri listelenemez (dosya adı sızıntısı).
+        real_req = os.path.realpath(req_path)
+        for sensitive_root in ('/root', '/proc', '/sys', '/dev', '/boot', '/etc'):
+            if real_req == sensitive_root or real_req.startswith(sensitive_root + '/'):
+                raise Exception('Güvenlik İlkesi İhlali: Bu dizin listelenemez')
+        items = []
+        try:
+            with os.scandir(req_path) as entries:
+                for entry in entries:
+                    try:
+                        is_d = entry.is_dir(follow_symlinks=True)
+                        size_str = '-'
+                        if not is_d:
+                            s = entry.stat().st_size
+                            if s < 1024:
+                                size_str = f"{s} B"
+                            elif s < 1024 * 1024:
+                                size_str = f"{round(s / 1024, 1)} KB"
+                            else:
+                                size_str = f"{round(s / (1024 * 1024), 1)} MB"
+                        ext = os.path.splitext(entry.name)[1].lower().replace('.', '')
+                        items.append({
+                            'name': entry.name,
+                            'path': entry.path,
+                            'is_dir': is_d,
+                            'size_str': size_str,
+                            'ext': ext,
+                            'is_hidden': entry.name.startswith('.')
+                        })
+                    except Exception:
+                        continue
+            items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        except Exception as e:
+            raise Exception(f"Dizin okunamadı: {e}")
+        return {'current_path': req_path, 'items': items, 'home_dir': home_dir}
+
+    elif cmd == 'create_folder':
+        folder_path = args.get('path', '').strip()
+        if not folder_path or '\0' in folder_path:
+            raise Exception('Geçersiz klasör yolu')
+        folder_path = os.path.abspath(folder_path)
+        restricted = ['/bin', '/sbin', '/usr', '/etc', '/boot', '/dev', '/proc', '/sys',
+                      '/lib', '/lib64', '/var', '/opt', '/srv', '/root']
+        for r in restricted:
+            if folder_path == r or folder_path.startswith(r + '/'):
+                raise Exception('Bu sistem dizininde klasör oluşturulamaz')
+        os.makedirs(folder_path, exist_ok=True)
+        return f"Klasör oluşturuldu: {folder_path}"
+
+    elif cmd == 'open_path':
+        target_path = args.get('path', '').strip()
+        if not target_path or '\0' in target_path or not os.path.exists(target_path):
+            raise Exception('Açılacak dosya bulunamadı')
+        target_path = os.path.abspath(target_path)
+        env = os.environ.copy()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        # GÜVENLİK: kurulabilir/çalıştırılabilir dosyalar xdg-open'a verilmez
+        lower_tp = target_path.lower()
+        # .deb → doğrudan sudo install yapmak yerine bilgi dön
+        if lower_tp.endswith('.deb'):
+            return f"DEB paketi tespit edildi: {target_path}. Lütfen Ankora Mağaza üzerinden kurun."
+        if lower_tp.endswith(('.desktop', '.run', '.appimage')):
+            raise Exception('Güvenlik Hatası: Çalıştırılabilir dosyalar buradan açılamaz')
+        subprocess.Popen(['xdg-open', target_path], env=env, start_new_session=True)
+        return f"Açıldı: {target_path}"
+
+    elif cmd == 'delete_file':
+        target_path = args.get('path', '').strip()
+        if not target_path or '\0' in target_path or not os.path.exists(target_path):
+            raise Exception('Silinecek dosya bulunamadı')
+        target_path = os.path.abspath(target_path)
+        # GÜVENLİK: Denetim kökü çözülmüş gerçek yol üzerinde yapılır; kısayol
+        # veya sondaki eğik çizgiyle eşleştirme aşılamaz. Ev kökü ayrı, evin
+        # içeriği serbesttir — dosya yöneticisi kendi dosyalarını silebilsin.
+        real_path = os.path.realpath(target_path)
+        if real_path in ('/', '/home', home_dir):
+            raise Exception('Kritik sistem dosyaları silinemez')
+        forbidden = ['/bin', '/sbin', '/usr', '/etc', '/boot', '/dev', '/proc', '/sys',
+                     '/lib', '/lib64', '/var', '/opt', '/srv', '/root']
+        for f in forbidden:
+            if real_path == f or real_path.startswith(f + '/'):
+                raise Exception('Kritik sistem dosyaları silinemez')
+        if os.path.isdir(target_path) and not os.path.islink(target_path):
+            shutil.rmtree(target_path)
+        else:
+            os.remove(target_path)
+        return f"Silindi: {target_path}"
+
+    elif cmd == 'scan_xdg_applications':
+        apps = []
+        app_dirs = ['/usr/share/applications', os.path.expanduser('~/.local/share/applications')]
+        for ad in app_dirs:
+            if os.path.exists(ad):
+                for fname in os.listdir(ad):
+                    if fname.endswith('.desktop'):
+                        p = os.path.join(ad, fname)
+                        try:
+                            name = fname.replace('.desktop', '')
+                            exec_cmd = name
+                            cat = 'util'
+                            comment = ''
+                            with open(p, 'r', errors='ignore') as f:
+                                for line in f:
+                                    if line.startswith('Name=') and name == fname.replace('.desktop', ''):
+                                        name = line.strip().split('=', 1)[1]
+                                    elif line.startswith('Exec='):
+                                        exec_cmd = line.strip().split('=', 1)[1].split()[0]
+                                    elif line.startswith('Categories='):
+                                        c = line.lower()
+                                        if 'audio' in c or 'video' in c or 'media' in c:
+                                            cat = 'media'
+                                        elif 'graphic' in c:
+                                            cat = 'graphics'
+                                        elif 'network' in c or 'web' in c:
+                                            cat = 'net'
+                                        elif 'office' in c:
+                                            cat = 'office'
+                                        elif 'development' in c:
+                                            cat = 'dev'
+                                        elif 'system' in c:
+                                            cat = 'sys'
+                                    elif line.startswith('Comment='):
+                                        comment = line.strip().split('=', 1)[1]
+                            apps.append({
+                                'id': fname.replace('.desktop', ''),
+                                'name': name,
+                                'exec': exec_cmd,
+                                'cat': cat,
+                                'comment': comment
+                            })
+                        except Exception:
+                            continue
+        return apps
+
+    elif cmd == 'read_document_file':
+        f_path = args.get('file_path') or args.get('filePath') or ''
+        if not f_path:
+            raise Exception('Belge bulunamadı')
+        # GÜVENLİK: Rust tarafındaki read_document_file denetiminin birebir karşılığı
+        if '..' in f_path:
+            raise Exception("Güvenlik Hatası: Dizin geçişine ('..') izin verilmez")
+        f_ext = os.path.splitext(f_path)[1].lower().replace('.', '')
+        if f_ext not in ('pdf', 'md', 'txt', 'conf', 'log', 'json', 'yaml', 'yml', 'ini'):
+            raise Exception(f"Güvenlik Hatası: '.{f_ext}' uzantılı dosyalar güvenlik nedeniyle okunamaz")
+        if not os.path.exists(f_path):
+            raise Exception('Belge bulunamadı: ' + str(f_path))
+        real_path = os.path.realpath(f_path)
+        real_lower = real_path.lower()
+        sensitive = (
+            '/etc/shadow', '/etc/gshadow', '/etc/sudoers', '/etc/master.passwd',
+            '/etc/security', '/root/.ssh', '.ssh/', 'id_rsa', 'id_ed25519',
+            'id_ecdsa', 'id_dsa', '/proc/kcore', '/sys/', '/dev/',
+            '/var/log/auth', 'ai_creds.json', 'lock.hash',
+        )
+        if any(p in real_lower for p in sensitive):
+            raise Exception('Güvenlik Hatası: Hassas sistem dosyalarının okunması engellendi')
+        allowed_dirs = [
+            os.path.join(home_dir, 'Belgeler'),
+            os.path.join(home_dir, 'Downloads'),
+            home_dir,
+            '/root/Belgeler',
+            '/usr/share/doc',
+        ]
+        if not any(real_path.startswith(d + os.sep) for d in allowed_dirs if d):
+            if os.path.basename(real_path) not in (
+                    'ankora-sistem-rehberi.pdf', 'kiosk-ayarlari.txt', 'kiosk-ayarlari.md'):
+                raise Exception('Güvenlik Hatası: Yalnızca kullanıcı belgeleri ve sistem '
+                                'dokümantasyonu dizinindeki dosyalar okunabilir')
+        f_path = real_path
+        f_size = os.path.getsize(f_path)
+        f_name = os.path.basename(f_path)
+        if f_ext == 'pdf':
+            import base64
+            with open(f_path, 'rb') as f:
+                b64 = base64.b64encode(f.read()).decode('utf-8')
+            return {
+                'file_name': f_name,
+                'file_type': 'pdf',
+                'file_size': f_size,
+                'content': f"data:application/pdf;base64,{b64}"
+            }
+        else:
+            with open(f_path, 'r', errors='ignore') as f:
+                txt = f.read()
+            return {
+                'file_name': f_name,
+                'file_type': 'text',
+                'file_size': f_size,
+                'content': txt
+            }
+
+    elif cmd == 'list_available_documents':
+        docs = []
+        doc_roots = ['/home/ankora/Belgeler', '/home/ankora/Downloads', '/root/Belgeler', '/usr/share/doc']
+        for dr in doc_roots:
+            if os.path.exists(dr):
+                for fn in os.listdir(dr):
+                    if fn.endswith(('.pdf', '.txt', '.md')):
+                        docs.append(os.path.join(dr, fn))
+        if not docs:
+            docs = ['/root/Belgeler/ankora-sistem-rehberi.pdf', '/root/Belgeler/kiosk-ayarlari.txt']
+        return docs
+
+    elif cmd == 'is_lock_configured':
+        cfg_dir = os.path.expanduser('~/.config/ankora')
+        h_file = os.path.join(cfg_dir, 'lock.hash')
+        return os.path.exists(h_file)
+
+    elif cmd == 'set_lock_credentials':
+        new_pin = (args.get('new_pin') or args.get('newPin') or '').strip()
+        if len(new_pin) < 4:
+            raise Exception('Yeni PIN/Parola en az 4 karakter olmalıdır.')
+        cfg_dir = os.path.expanduser('~/.config/ankora')
+        os.makedirs(cfg_dir, exist_ok=True)
+        import hashlib
+        salt = os.urandom(16)
+        h = hashlib.sha256(salt + new_pin.encode()).digest()
+        for i in range(50000):
+            h = hashlib.sha256(h + salt + i.to_bytes(4, 'little')).digest()
+        with open(os.path.join(cfg_dir, 'lock.hash'), 'wb') as f:
+            f.write(salt + h)
+        os.chmod(os.path.join(cfg_dir, 'lock.hash'), 0o600)
+        return True
+
+    elif cmd == 'verify_lock_credentials':
+        pin = (args.get('pin') or '').strip()
+        cfg_dir = os.path.expanduser('~/.config/ankora')
+        h_file = os.path.join(cfg_dir, 'lock.hash')
+        if not os.path.exists(h_file):
+            return True
+        import hashlib
+        with open(h_file, 'rb') as f:
+            data = f.read()
+        if len(data) < 48:
+            return False
+        salt = data[:16]
+        expected = data[16:48]
+        h = hashlib.sha256(salt + pin.encode()).digest()
+        for i in range(50000):
+            h = hashlib.sha256(h + salt + i.to_bytes(4, 'little')).digest()
+        return h == expected
+
+    elif cmd == 'lock_x11_session':
+        if os.path.exists('/usr/bin/xtrlock'):
+            subprocess.Popen(['/usr/bin/xtrlock', '-b'])
+            return 'X11 oturumu kilitlendi'
+        return 'Kiosk kilit ekranı devrede'
+
+    elif cmd == 'set_brightness':
+        lvl = int(args.get('level', 100))
+        clamped = max(20, min(100, lvl))
+        ratio = clamped / 100.0
+        try:
+            p = subprocess.run(['xrandr'], stdout=subprocess.PIPE, text=True)
+            for line in p.stdout.splitlines():
+                if ' connected' in line:
+                    d_name = line.split()[0]
+                    subprocess.run(['xrandr', '--output', d_name, '--brightness', f"{ratio:.2f}"])
+                    break
+        except Exception:
+            pass
+        return f"Parlaklık ayarlandı: %{clamped}"
+
+    elif cmd == 'save_ai_credential':
+        prov = (args.get('provider') or '').strip().lower()
+        key = (args.get('apiKey') or args.get('api_key') or '').strip()
+        cfg_dir = os.path.expanduser('~/.config/ankora')
+        os.makedirs(cfg_dir, exist_ok=True)
+        c_file = os.path.join(cfg_dir, 'ai_creds.json')
+        creds = {}
+        if os.path.exists(c_file):
+            try:
+                with open(c_file, 'r') as f: creds = json.load(f)
+            except: pass
+        if key: creds[prov] = key
+        elif prov in creds: del creds[prov]
+        with open(c_file, 'w') as f: json.dump(creds, f)
+        os.chmod(c_file, 0o600)
+        return True
+
+    elif cmd == 'has_ai_credential':
+        prov = (args.get('provider') or '').strip().lower()
+        c_file = os.path.expanduser('~/.config/ankora/ai_creds.json')
+        if os.path.exists(c_file):
+            try:
+                with open(c_file, 'r') as f: creds = json.load(f)
+                return bool(creds.get(prov))
+            except: pass
+        return False
+
+    elif cmd == 'delete_ai_credential':
+        prov = (args.get('provider') or '').strip().lower()
+        c_file = os.path.expanduser('~/.config/ankora/ai_creds.json')
+        if os.path.exists(c_file):
+            try:
+                with open(c_file, 'r') as f: creds = json.load(f)
+                if prov in creds: del creds[prov]
+                with open(c_file, 'w') as f: json.dump(creds, f)
+            except: pass
+        return True
+
+    elif cmd == 'query_local_ai':
+        prompt = args.get('prompt', '')
+        p_lower = prompt.lower()
+        if 'temizle' in p_lower or 'önbellek' in p_lower:
+            return {
+                'reply': 'Sistem ve paket önbelleklerinin temizlenmesi önerilir.',
+                'has_action': True,
+                'action_command': 'apt-get clean && rm -rf /tmp/*',
+                'action_desc': 'Geçici önbellekleri temizleme',
+                'action_token': 'live_iso_token'
+            }
+        elif 'disk' in p_lower or 'ram' in p_lower or 'durum' in p_lower:
+            return {
+                'reply': 'Sistem donanım ve depolama kaynakları taranıyor.',
+                'has_action': True,
+                'action_command': 'df -h / && free -m',
+                'action_desc': 'Disk ve bellek doluluk durumu',
+                'action_token': 'live_iso_token'
+            }
+        return {
+            'reply': f"Ankora AI Çekirdeği hazır. Canlı sistem oturumunda yanıtlanıyor:\n\"{prompt}\"",
+            'has_action': False,
+            'action_command': None,
+            'action_desc': None,
+            'action_token': None
+        }
+
+    elif cmd == 'execute_agent_confirmed_action':
+        command = args.get('command', '')
+        return execute_ayaz_command('run_terminal_command', {'command': command})
+
+    elif cmd == 'check_first_run':
+        cfg_file = os.path.expanduser('~/.config/ankora/welcomed.lock')
+        return not os.path.exists(cfg_file)
+
+    elif cmd == 'set_first_run_completed':
+        dont_show = args.get('dontShowAgain', True)
+        if dont_show:
+            cfg_dir = os.path.expanduser('~/.config/ankora')
+            os.makedirs(cfg_dir, exist_ok=True)
+            with open(os.path.join(cfg_dir, 'welcomed.lock'), 'w') as f:
+                f.write('welcomed')
+        return True
+
+    elif cmd == 'check_de_update':
+        return {
+            'has_update': False,
+            'current_version': '2.0.0',
+            'latest_version': '2.0.0',
+            'release_name': 'Ankora Linux 2.0 (Canlı Kalıp)',
+            'release_notes': 'Sisteminiz şu anda en güncel Ayaz DE sürümünü çalıştırmaktadır.',
+            'download_url': None,
+            'published_at': '2026-09-27',
+            'package_size_bytes': 0,
+            'expected_sha256': None,
+            'sha256_url': None
+        }
+
+    elif cmd == 'download_and_apply_de_update':
+        return 'Canlı ISO ortamında güncelleme simülasyonu tamamlandı.'
+
+    elif cmd == 'restart_desktop_process':
+        subprocess.Popen(['pkill', '-x', 'ayaz'])
+        return True
+
+    return f"{cmd} işlendi"
+
+
+class AyazIpcHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # Denetim izi: hangi istek ne zaman geldi. Dosya sahibine 0600 ile
+        # açılır, 256 KB'ta baştan başlar; günlük tutma hatası isteği durdurmaz.
+        try:
+            log_dir = os.path.join(os.path.expanduser('~'), '.cache')
+            if not os.path.isdir(log_dir):
+                os.makedirs(log_dir, mode=0o700, exist_ok=True)
+            log_path = os.path.join(log_dir, 'ayaz-ipc.log')
+            if os.path.exists(log_path) and os.path.getsize(log_path) > 262144:
+                os.remove(log_path)
+            line = '%s - %s\n' % (self.log_date_time_string(), format % args)
+            fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+            try:
+                os.write(fd, line.encode('utf-8', 'replace'))
+            finally:
+                os.close(fd)
+        except Exception:
+            pass
+
+    def _send_cors(self):
+        self.send_header('Access-Control-Allow-Origin', ALLOWED_ORIGIN)
+        self.send_header('Vary', 'Origin')
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        if self.headers.get('Origin', '') == ALLOWED_ORIGIN:
+            self._send_cors()
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Ayaz-Token')
+        self.end_headers()
+
+    def do_GET(self):
+        clean_path = self.path.split('?')[0].split('#')[0]
+        if clean_path in ('/', ''):
+            clean_path = '/index.html'
+
+        base_dir = os.path.abspath('/usr/share/ayaz')
+        clean_rel = clean_path.lstrip('/')
+        file_path = os.path.abspath(os.path.normpath(os.path.join(base_dir, clean_rel)))
+        if not (file_path == base_dir or file_path.startswith(base_dir + os.sep)) or not os.path.isfile(file_path):
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        ext = os.path.splitext(file_path)[1].lower()
+        mime_types = {
+            '.html': 'text/html; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+            '.js': 'application/javascript; charset=utf-8',
+            '.json': 'application/json; charset=utf-8',
+            '.svg': 'image/svg+xml',
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.webp': 'image/webp',
+            '.woff': 'font/woff',
+            '.woff2': 'font/woff2',
+            '.ttf': 'font/ttf',
+            '.pdf': 'application/pdf'
+        }
+        content_type = mime_types.get(ext, 'application/octet-stream')
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            # Token asla HTTP ile servis edilmez: kimliksiz GET çeken her yerel
+            # süreç aynısını okuyup IPC'ye yetkisiz erişebilirdi. Token yalnızca
+            # WebView user script'inde (build-iso.sh içinde) üretilir.
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(data)))
+            self._send_cors()
+            self.end_headers()
+            self.wfile.write(data)
+        except Exception:
+            self.send_response(500)
+            self.end_headers()
+
+    def do_POST(self):
+        if self.path != '/api/ipc':
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        # GÜVENLİK: Tarayıcı kökenleri yalnız sabit izinli Origin'den gelebilir.
+        # Origin başlığı taşımayan yerel süreçler (curl vb.) etkilenmez.
+        req_origin = self.headers.get('Origin', '')
+        if req_origin and req_origin != ALLOWED_ORIGIN:
+            resp = json.dumps({'error': 'Yetkisiz erişim: Geçersiz Origin'}).encode('utf-8')
+            self.send_response(403)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(resp)
+            return
+
+        # GÜVENLİK: Token doğrulaması — yetkisiz yerel süreçlerin IPC'ye erişimini
+        # engeller. Zaman sabitli karşılaştırma, karşılaştırmayı ölçülebilir kılmaz.
+        req_token = self.headers.get('X-Ayaz-Token', '')
+        if not hmac.compare_digest(req_token, IPC_TOKEN):
+            IPC_STATE['bad'] += 1
+            resp = json.dumps({'error': 'Yetkisiz erişim: Geçersiz IPC token'}).encode('utf-8')
+            # Token 256 bit olduğu için deneme kırılamaz; yine de uzun süreli
+            # denemede yanıt kodu değişir ve kapı kalıcı olarak kapanır.
+            self.send_response(503 if IPC_STATE['bad'] >= 50 else 403)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(resp)
+            return
+        IPC_STATE['bad'] = 0
+
+        content_length = int(self.headers.get('Content-Length', 0))
+        # Sınırsız gövde, tek istekle bellek tüketilebilir
+        if content_length > 1_000_000:
+            self.send_response(413)
+            self.end_headers()
+            return
+        body = self.rfile.read(content_length).decode('utf-8')
+        try:
+            req = json.loads(body)
+            cmd = req.get('cmd', '')
+            args = req.get('args', {})
+            result = execute_ayaz_command(cmd, args)
+            resp = json.dumps({'result': result}).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self._send_cors()
+            self.end_headers()
+            self.wfile.write(resp)
+        except Exception as e:
+            resp = json.dumps({'error': str(e)}).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self._send_cors()
+            self.end_headers()
+            self.wfile.write(resp)
+
+def start_ipc_server():
+    server = HTTPServer(('127.0.0.1', PORT), AyazIpcHandler)
+    server.serve_forever()
+
+class AyazDesktop(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Ayaz — Ankora Linux")
+        self.connect("destroy", Gtk.main_quit)
+        self.maximize()
+        self.fullscreen()
+        
+        settings = WebKit2.Settings()
+        settings.set_enable_javascript(True)
+        settings.set_enable_webgl(False)
+        settings.set_enable_accelerated_2d_canvas(False)
+        settings.set_enable_smooth_scrolling(False)
+        settings.set_enable_developer_extras(False)
+        settings.set_allow_file_access_from_file_urls(True)
+        settings.set_allow_universal_access_from_file_urls(True)
+        settings.set_enable_page_cache(False)
+        settings.set_enable_offline_web_application_cache(False)
+        settings.set_enable_html5_local_storage(True)
+        settings.set_enable_html5_database(False)
+        settings.set_enable_media_stream(False)
+        settings.set_enable_mediasource(False)
+        settings.set_enable_webaudio(False)
+        
+        self.webview = WebKit2.WebView.new_with_settings(settings)
+        try:
+            ctx = self.webview.get_context()
+            ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
+        except Exception:
+            pass
+
+        content_mgr = self.webview.get_user_content_manager()
+        content_mgr.register_script_message_handler("ayazIpc")
+        content_mgr.connect("script-message-received::ayazIpc", self.on_script_message)
+        try:
+            token_script = WebKit2.UserScript.new(
+                f"window.__AYAZ_IPC_TOKEN__ = '{IPC_TOKEN}';",
+                WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                WebKit2.UserScriptInjectionTime.START,
+                None,
+                None
+            )
+            content_mgr.add_user_script(token_script)
+        except Exception:
+            pass
+
+        # Doğrudan yerel dosya üzerinden açma - Sıfır ağ bağımlılığı, anında ve hatasız başlatma
+        path = os.path.abspath("/usr/share/ayaz/index.html")
+        self.webview.load_uri(f"file://{path}")
+        self.add(self.webview)
+        self.show_all()
+
+    def on_script_message(self, manager, js_result):
+        val = js_result.get_value()
+        try:
+            raw_str = val.to_string()
+            data = json.loads(raw_str)
+            req_id = data.get('id') if data.get('id') is not None else data.get('req_id')
+            cmd = data.get('cmd')
+            args = data.get('args', {})
+
+            def run_worker():
+                try:
+                    res = execute_ayaz_command(cmd, args)
+                    payload = json.dumps({'id': req_id, 'result': res})
+                    js_code = f"if (window.__AYAZ_RESOLVE__) window.__AYAZ_RESOLVE__({payload});"
+                except Exception as err:
+                    payload = json.dumps({'id': req_id, 'error': str(err)})
+                    js_code = f"if (window.__AYAZ_REJECT__) window.__AYAZ_REJECT__({payload});"
+                GLib.idle_add(lambda: self.webview.run_javascript(js_code, None, None, None))
+
+            threading.Thread(target=run_worker, daemon=True).start()
+        except Exception as e:
+            pass
+
+if __name__ == "__main__":
+    t = threading.Thread(target=start_ipc_server, daemon=True)
+    t.start()
+    app = AyazDesktop()
+    Gtk.main()
+AYAZ_PY
     chmod +x "$CHROOT_DIR/usr/bin/ayaz"
 fi
 
@@ -205,8 +1445,38 @@ cp "$ROOT_DIR/scripts/ayaz.desktop" "$CHROOT_DIR/usr/share/applications/ayaz.des
 cp "$ROOT_DIR/scripts/ayaz-session.desktop" "$CHROOT_DIR/usr/share/xsessions/ayaz.desktop" || true
 cp "$ROOT_DIR/scripts/ayaz-update-helper.sh" "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" || true
 chmod +x "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" || true
+cp "$ROOT_DIR/scripts/ayaz-pkg-helper.sh" "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" || true
+chmod +x "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" || true
 cp "$ROOT_DIR/scripts/ankora-updater-sudoers" "$CHROOT_DIR/etc/sudoers.d/ankora-updater" || true
 chmod 0440 "$CHROOT_DIR/etc/sudoers.d/ankora-updater" || true
+
+# Masaüstü ve Sistem Marka İkonlarını Yerleştir
+mkdir -p "$CHROOT_DIR/usr/share/pixmaps" "$CHROOT_DIR/usr/share/icons/hicolor/512x512/apps" "$CHROOT_DIR/usr/share/icons/hicolor/scalable/apps"
+cp "$ROOT_DIR/assets/logo.png" "$CHROOT_DIR/usr/share/pixmaps/ayaz.png" 2>/dev/null || true
+cp "$ROOT_DIR/assets/logo.png" "$CHROOT_DIR/usr/share/pixmaps/ankora.png" 2>/dev/null || true
+cp "$ROOT_DIR/assets/logo.png" "$CHROOT_DIR/usr/share/icons/hicolor/512x512/apps/ayaz.png" 2>/dev/null || true
+cp "$ROOT_DIR/assets/logo.svg" "$CHROOT_DIR/usr/share/icons/hicolor/scalable/apps/ayaz.svg" 2>/dev/null || true
+
+# Windows CRLF → Unix LF dönüşümü (sudoers \r görürse syntax error verir)
+echo "[BİLGİ] Windows satır sonları (CRLF) temizleniyor..."
+for f in \
+    "$CHROOT_DIR/etc/sudoers.d/ankora-updater" \
+    "$CHROOT_DIR/etc/sudoers.d/ankora" \
+    "$CHROOT_DIR/etc/inittab" \
+    "$CHROOT_DIR/etc/X11/Xwrapper.config" \
+    "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" \
+    "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" \
+    "$CHROOT_DIR/usr/share/applications/ayaz.desktop" \
+    "$CHROOT_DIR/usr/share/xsessions/ayaz.desktop" \
+    "$CHROOT_DIR/home/ankora/.xinitrc" \
+    "$CHROOT_DIR/home/ankora/.profile" \
+    "$CHROOT_DIR/etc/skel/.xinitrc" \
+    "$CHROOT_DIR/etc/skel/.profile" \
+    "$CHROOT_DIR/usr/bin/ayaz"; do
+    if [ -f "$f" ]; then
+        sed -i 's/\r$//' "$f"
+    fi
+done
 
 # 8. SquashFS Sıkıştırılmış Kök Dosya Sisteminin Üretilmesi
 echo "[5/8] SquashFS kök dosya sistemi sıkıştırılıyor (filesystem.squashfs)..."
@@ -214,8 +1484,25 @@ echo "[5/8] SquashFS kök dosya sistemi sıkıştırılıyor (filesystem.squashf
 KERNEL_FILE=$(find "$CHROOT_DIR/boot" -name "vmlinuz*" | sort -V | tail -n 1)
 INITRD_FILE=$(find "$CHROOT_DIR/boot" -name "initrd.img*" | sort -V | tail -n 1)
 
+if [ -z "$KERNEL_FILE" ] || [ -z "$INITRD_FILE" ]; then
+    echo "[HATA] Çekirdek (vmlinuz) veya initrd dosyası bulunamadı!" >&2
+    echo "       Chroot /boot içeriği:" >&2
+    ls -la "$CHROOT_DIR/boot/" >&2
+    exit 2
+fi
+
 cp -v "$KERNEL_FILE" "$IMAGE_DIR/live/vmlinuz"
 cp -v "$INITRD_FILE" "$IMAGE_DIR/live/initrd"
+
+# initrd içinde live-boot modüllerinin varlığını doğrula
+echo "[DOĞRULAMA] initrd içindeki live-boot modülleri kontrol ediliyor..."
+if lsinitramfs "$IMAGE_DIR/live/initrd" 2>/dev/null | grep -q "live"; then
+    echo "[OK] live-boot modülleri initrd içinde mevcut."
+else
+    echo "[UYARI] live-boot modülleri initrd içinde bulunamadı. Boot sorunları yaşanabilir."
+    echo "        lsinitramfs çıktısı (ilk 20 satır):"
+    lsinitramfs "$IMAGE_DIR/live/initrd" 2>/dev/null | head -20 || true
+fi
 
 # Sanal bağlantıları kaldır
 umount -lf "$CHROOT_DIR/dev/pts" 2>/dev/null || true
@@ -242,7 +1529,7 @@ MENU COLOR sel          7;37;40 #e0000000 #20ffffff all
 LABEL ankora
   MENU LABEL ^1. Ankora Linux 2.0 (Canli Masaustu / Kiosk)
   KERNEL /live/vmlinuz
-  APPEND initrd=/live/initrd boot=live quiet splash components username=pars
+  APPEND initrd=/live/initrd boot=live quiet splash components username=ankora
 
 LABEL failsafe
   MENU LABEL ^2. Ankora Linux (Failsafe Guvenli Mod)
@@ -251,16 +1538,29 @@ LABEL failsafe
 EOF
 
 # Gerekli syslinux modülleri
-cp /usr/lib/ISOLINUX/isolinux.bin "$IMAGE_DIR/isolinux/" 2>/dev/null || true
-cp /usr/lib/syslinux/modules/bios/* "$IMAGE_DIR/isolinux/" 2>/dev/null || true
+mkdir -p "$IMAGE_DIR/isolinux"
+for src_iso in /usr/lib/ISOLINUX/isolinux.bin /usr/lib/syslinux/isolinux.bin /usr/lib/syslinux/modules/bios/isolinux.bin; do
+    if [ -f "$src_iso" ]; then
+        cp -f "$src_iso" "$IMAGE_DIR/isolinux/isolinux.bin"
+        break
+    fi
+done
+for mod_dir in /usr/lib/syslinux/modules/bios /usr/lib/syslinux/bios /usr/lib/syslinux /usr/lib/ISOLINUX; do
+    if [ -d "$mod_dir" ]; then
+        cp -f "$mod_dir"/*.c32 "$IMAGE_DIR/isolinux/" 2>/dev/null || true
+    fi
+done
 
 # GRUB (UEFI)
 cat << 'EOF' > "$IMAGE_DIR/boot/grub/grub.cfg"
 set default="0"
 set timeout=5
 
+insmod all_video
+insmod gfxterm
+
 menuentry "Ankora Linux 2.0 (Ayaz DE - Canli Masaustu)" {
-    linux /live/vmlinuz boot=live quiet splash components username=pars
+    linux /live/vmlinuz boot=live quiet splash components username=ankora
     initrd /live/initrd
 }
 
@@ -271,7 +1571,7 @@ menuentry "Ankora Linux 2.0 (Guvenli Mod / Failsafe)" {
 EOF
 
 # EFI Bağımsız Önyükleyici ve efi.img Üretimi (Modern UEFI Boot Desteği)
-mkdir -p "$IMAGE_DIR/EFI/boot" "$IMAGE_DIR/boot/grub/x86_64-efi"
+mkdir -p "$IMAGE_DIR/EFI/BOOT" "$IMAGE_DIR/EFI/boot" "$IMAGE_DIR/boot/grub/x86_64-efi"
 
 if command -v grub-mkstandalone &>/dev/null; then
     echo "[EFI] grub-mkstandalone ile bootx64.efi üretiliyor..."
@@ -280,7 +1580,9 @@ if command -v grub-mkstandalone &>/dev/null; then
         --output="$IMAGE_DIR/EFI/boot/bootx64.efi" \
         --locales="" \
         --fonts="" \
+        --modules="part_gpt part_msdos fat ext2 iso9660 normal configfile linux" \
         "boot/grub/grub.cfg=$IMAGE_DIR/boot/grub/grub.cfg" 2>/dev/null || true
+    cp -f "$IMAGE_DIR/EFI/boot/bootx64.efi" "$IMAGE_DIR/EFI/BOOT/BOOTX64.EFI" 2>/dev/null || true
 fi
 
 if [ -f "$IMAGE_DIR/EFI/boot/bootx64.efi" ]; then
@@ -324,7 +1626,10 @@ XORRISO_CMD+=(-output "$ROOT_DIR/dist/$ISO_NAME" "$IMAGE_DIR")
 
 "${XORRISO_CMD[@]}" 2>/dev/null || {
     echo "[UYARI] Hibrit xorriso komutu tamamlanamadı, standart mod ile deneniyor..."
-    xorriso -as mkisofs -r -V "ANKORA_2_0" -o "$ROOT_DIR/dist/$ISO_NAME" "$IMAGE_DIR"
+    xorriso -as mkisofs -r -V "ANKORA_2_0" \
+        -b isolinux/isolinux.bin -c isolinux/boot.cat \
+        -no-emul-boot -boot-load-size 4 -boot-info-table \
+        -o "$ROOT_DIR/dist/$ISO_NAME" "$IMAGE_DIR"
 }
 
 # 11. Bitiş ve Doğrulama

@@ -48,8 +48,6 @@ const EXACT_ALLOWED_COMMANDS: &[&str] = &[
     "rm -rf /tmp/*",
     "apt-get clean && rm -rf /tmp/*",
     "df -h / && free -m",
-    "reboot",
-    "poweroff",
     "clear",
     "sync",
     "echo 3 > /proc/sys/vm/drop_caches",
@@ -59,6 +57,8 @@ const EXACT_ALLOWED_COMMANDS: &[&str] = &[
 const ALLOWED_UTILITIES: &[&str] = &[
     "uname", "whoami", "uptime", "date", "hostname", "id",
     "free", "df", "ls", "ps", "top", "which",
+    "cat", "pwd", "echo", "head", "tail", "grep", "wc",
+    "lscpu", "lsblk", "arch", "w", "who", "cal", "apt-cache",
 ];
 
 /// `cat` komutu ile okunmasına izin verilen güvenli telemetri dosyaları
@@ -94,6 +94,12 @@ const FORBIDDEN_LAUNCH_BINARIES: &[&str] = &[
     "sh", "bash", "zsh", "dash", "csh", "tcsh", "fish", "env",
     "xargs", "passwd", "chpasswd", "chmod", "chown", "reboot",
     "poweroff", "shutdown", "init", "systemctl", "telinit", "halt",
+    "chroot", "unshare", "nsenter", "mount", "umount",
+    "nc", "ncat", "socat", "ssh", "scp", "wget", "curl",
+    "kill", "pkill", "killall", "tee", "install", "ln",
+    "mkfifo", "mknod", "insmod", "modprobe", "rmmod",
+    "docker", "podman", "runuser", "sg", "newgrp",
+    "at", "batch", "crontab", "systemd-run",
 ];
 
 /// Kesinlikle okunması engellenen hassas sistem dosyası ve dizin kalıpları
@@ -113,6 +119,9 @@ const SENSITIVE_FILE_PATTERNS: &[&str] = &[
     "/sys/",
     "/dev/",
     "/var/log/auth",
+    // Kasada tutulan kimlik bilgileri ve kilit dosyası
+    "ai_creds.json",
+    "lock.hash",
 ];
 
 /// İzin verilen klavye haritaları
@@ -278,8 +287,81 @@ fn get_credentials_path() -> PathBuf {
     get_ankora_config_dir().join("credentials.dat")
 }
 
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// Standart RFC 2104 HMAC-SHA256 Gerçekleştirmesi
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut k = [0u8; 64];
+    if key.len() > 64 {
+        let hash = Sha256::digest(key);
+        k[..32].copy_from_slice(&hash);
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; 64];
+    let mut opad = [0x5cu8; 64];
+    for i in 0..64 {
+        ipad[i] ^= k[i];
+        opad[i] ^= k[i];
+    }
+    let mut inner = Sha256::new();
+    inner.update(&ipad);
+    inner.update(message);
+    let inner_hash = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(&opad);
+    outer.update(&inner_hash);
+    let result = outer.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
+    out
+}
+
 fn get_machine_key() -> [u8; 32] {
+    // 1. Kullanıcıya özel CSPRNG gizli anahtar dosyası (~/.config/ankora/.vault_secret, 0600)
+    let secret_path = get_ankora_config_dir().join(".vault_secret");
+    let mut user_secret = [0u8; 32];
+    let mut loaded = false;
+
+    if secret_path.exists() {
+        if let Ok(bytes) = fs::read(&secret_path) {
+            if bytes.len() >= 32 {
+                user_secret.copy_from_slice(&bytes[..32]);
+                loaded = true;
+            }
+        }
+    }
+
+    if !loaded {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        for (i, b) in now.to_le_bytes().iter().enumerate() {
+            user_secret[i] = *b ^ ((i as u8 + 1) * 43);
+            user_secret[i + 16] = *b ^ ((i as u8 + 1) * 79);
+        }
+        if let Ok(mut f) = fs::File::open("/dev/urandom") {
+            let _ = f.read_exact(&mut user_secret);
+        }
+        let _ = fs::write(&secret_path, &user_secret);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&secret_path, fs::Permissions::from_mode(0o600));
+        }
+    }
+
+    // 2. Makine kimliği + Kullanıcı adı + Gizli anahtar ile harmanlama
     let mut seed = Vec::new();
+    seed.extend_from_slice(&user_secret);
     if let Ok(id) = fs::read_to_string("/etc/machine-id") {
         seed.extend_from_slice(id.trim().as_bytes());
     } else if let Ok(id) = fs::read_to_string("/var/lib/dbus/machine-id") {
@@ -293,14 +375,9 @@ fn get_machine_key() -> [u8; 32] {
     } else if let Ok(user) = std::env::var("USERNAME") {
         seed.extend_from_slice(user.as_bytes());
     }
-    seed.extend_from_slice(b"ankora-os-ayaz-credential-vault-salt-v2");
+    seed.extend_from_slice(b"ankora-os-ayaz-credential-vault-salt-v3");
 
-    let mut hasher = Sha256::new();
-    hasher.update(&seed);
-    let result = hasher.finalize();
-    let mut key = [0u8; 32];
-    key.copy_from_slice(&result);
-    key
+    hmac_sha256(&user_secret, &seed)
 }
 
 fn encrypt_vault_payload(plaintext: &[u8]) -> Vec<u8> {
@@ -333,11 +410,7 @@ fn encrypt_vault_payload(plaintext: &[u8]) -> Vec<u8> {
         block_idx += 1;
     }
 
-    let mut m_hasher = Sha256::new();
-    m_hasher.update(&session_key);
-    m_hasher.update(b"ANKORA_MAC");
-    m_hasher.update(&ciphertext);
-    let mac = m_hasher.finalize();
+    let mac = hmac_sha256(&session_key, &ciphertext);
 
     let mut out = Vec::with_capacity(16 + 16 + 32 + ciphertext.len());
     out.extend_from_slice(b"ANKORA_VAULT_V2\n");
@@ -363,13 +436,9 @@ fn decrypt_vault_payload(data: &[u8]) -> Option<Vec<u8>> {
     k_hasher.update(salt);
     let session_key = k_hasher.finalize();
 
-    let mut m_hasher = Sha256::new();
-    m_hasher.update(&session_key);
-    m_hasher.update(b"ANKORA_MAC");
-    m_hasher.update(ciphertext);
-    let computed_mac = m_hasher.finalize();
+    let computed_mac = hmac_sha256(&session_key, ciphertext);
 
-    if computed_mac.as_slice() != expected_mac {
+    if !constant_time_eq(&computed_mac, expected_mac) {
         return None;
     }
 
@@ -483,15 +552,28 @@ fn is_lock_configured() -> Result<bool, String> {
     if !path.exists() {
         return Ok(false);
     }
+    // Hard-link koruması: nlink > 1 ise dosya reddedilir
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(meta) = fs::metadata(&path) {
+            if meta.nlink() > 1 {
+                return Err("Güvenlik Hatası: Kilit dosyası çoklu bağlantıya (hard link) sahip, erişim reddedildi.".to_string());
+            }
+        }
+    }
     let data = fs::read(&path).map_err(|e| e.to_string())?;
-    Ok(data.len() >= 48)
+    if data.len() < 48 {
+        return Err("Güvenlik Hatası: Kilit dosyası bozulmuş veya geçersiz boyutta (48 bayttan kısa).".to_string());
+    }
+    Ok(true)
 }
 
 #[tauri::command]
 fn set_lock_credentials(current_pin: Option<String>, new_pin: String) -> Result<(), String> {
     let clean_new = new_pin.trim();
-    if clean_new.len() < 3 {
-        return Err("Yeni PIN/Parola en az 3 karakter olmalıdır.".to_string());
+    if clean_new.len() < 4 {
+        return Err("Yeni PIN/Parola en az 4 karakter olmalıdır.".to_string());
     }
 
     let is_configured = is_lock_configured().unwrap_or(false);
@@ -538,10 +620,12 @@ fn verify_lock_credentials(pin: String) -> Result<bool, String> {
     if let Ok(mut lock) = LOCK_ATTEMPTS.lock() {
         if let Some(cooldown) = lock.1 {
             let elapsed = cooldown.elapsed();
-            let penalty_duration = if lock.0 >= 5 {
-                Duration::from_secs(30)
-            } else if lock.0 >= 3 {
-                Duration::from_secs(5)
+            // Üstel bekleme: 2^(deneme-2) saniye, en fazla 300 saniye
+            let penalty_duration = if lock.0 >= 3 {
+                let exp = (lock.0 as u32).saturating_sub(2);
+                // checked_pow: 64. denemeden sonra 2^64 taşar ve bekleme kalkmasın
+                let secs = 2u64.checked_pow(exp).unwrap_or(3600).min(300);
+                Duration::from_secs(secs)
             } else {
                 Duration::from_secs(0)
             };
@@ -562,7 +646,7 @@ fn verify_lock_credentials(pin: String) -> Result<bool, String> {
 
     let data = fs::read(&path).map_err(|e| e.to_string())?;
     if data.len() < 48 {
-        return Ok(false);
+        return Err("Güvenlik Hatası: Kilit verisi bozulmuş veya eksik.".to_string());
     }
 
     let salt = &data[..16];
@@ -734,25 +818,18 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
     #[cfg(target_os = "linux")]
     {
         let output = if clean_pkg.ends_with(".deb") {
-            // Yerel .deb paketi: Yol geçişi ve kabuk metakarakteri doğrulaması
-            if clean_pkg.contains("..") || clean_pkg.chars().any(|c| matches!(c, ';' | '&' | '|' | '`' | '$' | '>' | '<' | '\\')) {
-                return Err("Güvenlik Hatası: .deb dosya yolunda geçersiz karakterler tespit edildi.".to_string());
-            }
-            let deb_path = Path::new(clean_pkg);
-            if !deb_path.exists() {
-                return Err(format!("Paket dosyası bulunamadı: {}", clean_pkg));
-            }
-            let canonical = fs::canonicalize(deb_path).map_err(|e| e.to_string())?;
-            let can_str = canonical.to_string_lossy().to_string();
-            Command::new("sudo").args(["dpkg", "-i", "--", &can_str]).output()
-                .or_else(|_| Command::new("dpkg").args(["-i", "--", &can_str]).output())
+            return Err("Güvenlik İlkesi: Yerel .deb paketleri doğrudan kurulamaz; sistem bileşenleri için resmi Ayaz Güncelleyici'yi kullanın.".to_string());
         } else {
             // Debian resmi paket adı: Sıkı regex doğrulaması ve bayrak enjeksiyonu koruması (--)
             if !is_valid_deb_package_name(clean_pkg) {
                 return Err("Güvenlik Hatası: Geçersiz Debian paket adı biçimi.".to_string());
             }
-            Command::new("sudo").args(["apt-get", "install", "-y", "--", clean_pkg]).output()
-                .or_else(|_| Command::new("apt-get").args(["install", "-y", "--", clean_pkg]).output())
+            let helper = Path::new("/usr/local/bin/ayaz-pkg-helper");
+            if helper.exists() {
+                Command::new("sudo").args(["/usr/local/bin/ayaz-pkg-helper", "install", clean_pkg]).output()
+            } else {
+                Command::new("sudo").args(["apt-get", "install", "-y", "--no-install-recommends", "--", clean_pkg]).output()
+            }
         };
 
         match output {
@@ -790,9 +867,16 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
             let _ = fs::create_dir_all(&desktop_dir);
             let _ = fs::create_dir_all(&local_apps_dir);
 
+            // .desktop alanındaki satır sonu, dosyaya yeni anahtar enjekte eder
+            let safe_field = |s: &str| s.replace('\n', " ").replace('\r', " ");
+
             let desktop_entry_content = format!(
                 "[Desktop Entry]\nVersion=1.0\nType=Application\nName={}\nComment={}\nExec={}\nIcon={}\nTerminal=false\nCategories={};\nStartupNotify=true\nX-Ayaz-Installed=true\n",
-                final_app.name, final_app.comment, final_app.exec, final_app.icon, final_app.categories.join(";")
+                safe_field(&final_app.name),
+                safe_field(&final_app.comment),
+                safe_field(&final_app.exec),
+                safe_field(&final_app.icon),
+                safe_field(&final_app.categories.join(";"))
             );
 
             let target_desktop = desktop_dir.join(format!("{}.desktop", clean_pkg));
@@ -846,8 +930,12 @@ async fn remove_deb_package(package_name: String) -> Result<String, String> {
             let _ = fs::remove_file(local_file);
         }
 
-        let res = Command::new("sudo").args(["apt-get", "remove", "-y", "--", clean_pkg]).output()
-            .or_else(|_| Command::new("apt-get").args(["remove", "-y", "--", clean_pkg]).output());
+        let helper = Path::new("/usr/local/bin/ayaz-pkg-helper");
+        let res = if helper.exists() {
+            Command::new("sudo").args(["/usr/local/bin/ayaz-pkg-helper", "remove", clean_pkg]).output()
+        } else {
+            Command::new("sudo").args(["apt-get", "remove", "-y", "--", clean_pkg]).output()
+        };
 
         match res {
             Ok(out) => {
@@ -985,6 +1073,20 @@ async fn run_terminal_command(command: String) -> Result<String, String> {
     if bin == "cat" {
         if args.len() != 1 || !ALLOWED_CAT_FILES.contains(&args[0]) {
             return Err("Güvenlik İlkesi İhlali: Sadece izin verilen sistem telemetri dosyaları okunabilir.".to_string());
+        }
+    }
+
+    // Dosya içeriği okuyan araçlarda mutlak yol yalnızca beyaz listede olabilir.
+    // `head /etc/shadow`, `grep -r root /etc` gibi okuma kaçışları bu yüzden kapanır;
+    // `df -h /`, `ls /home` gibi listeleme araçları bu denetime girmez.
+    if matches!(bin, "head" | "tail" | "grep" | "wc") {
+        for arg in args {
+            if arg.starts_with('/') && !ALLOWED_CAT_FILES.contains(arg) {
+                return Err(format!(
+                    "Güvenlik İlkesi İhlali: '{}' yolu okunamaz; yalnızca sistem telemetri dosyalarına izin verilir.",
+                    arg
+                ));
+            }
         }
     }
 
@@ -1162,7 +1264,6 @@ fn is_private_or_restricted_ip(ip: &IpAddr) -> bool {
                 return true;
             }
             // Özel IPv4 Blokları (RFC 1918)
-            // 10.0.0.0/8
             if octets[0] == 10 {
                 return true;
             }
@@ -1178,14 +1279,28 @@ fn is_private_or_restricted_ip(ip: &IpAddr) -> bool {
             if octets[0] == 0 {
                 return true;
             }
-            // Yayın / Çok noktaya yayın
+            // 100.64.0.0/10 (CGNAT / Shared Address Space)
+            if octets[0] == 100 && (64..=127).contains(&octets[1]) {
+                return true;
+            }
+            // 198.18.0.0/15 (Benchmark Testing)
+            if octets[0] == 198 && (octets[1] == 18 || octets[1] == 19) {
+                return true;
+            }
+            // 240.0.0.0/4 (Reserved / Future Use)
+            if octets[0] >= 240 {
+                return true;
+            }
+            // 127.0.0.0/8 (Loopback)
+            if octets[0] == 127 {
+                return true;
+            }
             if ipv4.is_broadcast() || ipv4.is_multicast() {
                 return true;
             }
             false
         }
         IpAddr::V6(ipv6) => {
-            // IPv4 eşlemeli IPv6 (örn: ::ffff:169.254.169.254)
             if let Some(v4) = ipv6.to_ipv4_mapped() {
                 return is_private_or_restricted_ip(&IpAddr::V4(v4));
             }
@@ -1193,12 +1308,24 @@ fn is_private_or_restricted_ip(ip: &IpAddr) -> bool {
                 return true;
             }
             let seg = ipv6.segments();
+            // ::/128 (Unspecified)
+            if seg.iter().all(|&s| s == 0) {
+                return true;
+            }
+            // ::1/128 (Loopback)
+            if seg[..7].iter().all(|&s| s == 0) && seg[7] == 1 {
+                return true;
+            }
             // fe80::/10 (Link-local)
             if (seg[0] & 0xffc0) == 0xfe80 {
                 return true;
             }
-            // fc00::/7 (Benzersiz Yerel / ULA)
+            // fc00::/7 (ULA)
             if (seg[0] & 0xfe00) == 0xfc00 {
+                return true;
+            }
+            // 2001:db8::/32 (Documentation)
+            if seg[0] == 0x2001 && seg[1] == 0x0db8 {
                 return true;
             }
             false
@@ -1237,18 +1364,28 @@ fn validate_ai_endpoint_url(raw_url: &str) -> Result<String, String> {
     let port = parsed.port_or_known_default().unwrap_or(if scheme == "https" { 443 } else { 80 });
     let socket_addr_str = format!("{}:{}", host_str, port);
 
-    if let Ok(addrs) = socket_addr_str.to_socket_addrs() {
-        for sa in addrs {
-            let ip = sa.ip();
-            if ip.is_loopback() {
-                if !is_localhost {
-                    return Err("Güvenlik İlkesi İhlali: Harici etki alanı yerel döngü (loopback) adresine çözümlenemez.".to_string());
+    if !is_localhost {
+        match socket_addr_str.to_socket_addrs() {
+            Ok(addrs) => {
+                let mut found = false;
+                for sa in addrs {
+                    found = true;
+                    let ip = sa.ip();
+                    if ip.is_loopback() {
+                        return Err("Güvenlik İlkesi İhlali: Harici etki alanı yerel döngü (loopback) adresine çözümlenemez.".to_string());
+                    } else if is_private_or_restricted_ip(&ip) {
+                        return Err(format!(
+                            "Güvenlik İlkesi İhlali: SSRF Koruması devrede. Yasaklı dahili/link-local IP adresi tespit edildi: {}",
+                            ip
+                        ));
+                    }
                 }
-            } else if is_private_or_restricted_ip(&ip) {
-                return Err(format!(
-                    "Güvenlik İlkesi İhlali: SSRF Koruması devrede. Yasaklı dahili/link-local IP adresi tespit edildi: {}",
-                    ip
-                ));
+                if !found {
+                    return Err("Güvenlik İlkesi İhlali: Alan adı geçerli bir IP adresine çözümlenemedi.".to_string());
+                }
+            }
+            Err(e) => {
+                return Err(format!("Güvenlik İlkesi İhlali: Alan adı DNS çözümlemesi başarısız: {}", e));
             }
         }
     }
@@ -1376,9 +1513,17 @@ async fn query_local_ai(
             return Err("Google Gemini API anahtarı bulunamadı. Lütfen API Ayarları panelinden anahtarınızı kaydedin.".to_string());
         }
         let ai_model = model.unwrap_or_else(|| "gemini-2.0-flash".to_string());
+        // Anahtar URL'ye yazılmaz: sorgu satırları proxy, günlük ve hata
+        // ekranlarına aynen düşer. Model adı yol kısmını da dar tutulur.
+        if !ai_model
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-._/".contains(c))
+        {
+            return Err("Geçersiz model adı.".to_string());
+        }
         let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            ai_model, resolved_key
+            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
+            ai_model
         );
         let payload = serde_json::json!({
             "contents": [{
@@ -1386,7 +1531,13 @@ async fn query_local_ai(
             }]
         });
 
-        match client.post(&url).json(&payload).send().await {
+        match client
+            .post(&url)
+            .header("x-goog-api-key", resolved_key.as_str())
+            .json(&payload)
+            .send()
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 if let Ok(json_data) = resp.json::<serde_json::Value>().await {
                     let text = json_data["candidates"][0]["content"]["parts"][0]["text"].as_str().unwrap_or("").to_string();
@@ -1517,45 +1668,46 @@ async fn execute_agent_confirmed_action(command: String, token: String) -> Resul
 async fn get_storage_devices() -> Result<Vec<StorageDisk>, String> {
     #[cfg(target_os = "linux")]
     {
-        let output = Command::new("lsblk").args(["-d", "-b", "-n", "-P", "-o", "NAME,SIZE,MODEL,RM,TYPE"]).output();
+        // JSON formatında parse ederek boşluklu MODEL adlarını doğru yakalıyoruz
+        let output = Command::new("lsblk").args(["-d", "-b", "-J", "-o", "NAME,SIZE,MODEL,RM,TYPE"]).output();
         if let Ok(out) = output {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            let mut disks = Vec::new();
-            for line in stdout.lines() {
-                if !line.contains("TYPE=\"disk\"") {
-                    continue;
-                }
-                let mut name = String::new();
-                let mut size_bytes: u64 = 0;
-                let mut model = "Sabit Disk".to_string();
-                let mut is_removable = false;
-
-                for part in line.split_whitespace() {
-                    if let Some((k, v)) = part.split_once('=') {
-                        let val = v.trim_matches('"');
-                        match k {
-                            "NAME" => name = val.to_string(),
-                            "SIZE" => size_bytes = val.parse().unwrap_or(0),
-                            "MODEL" => if !val.is_empty() { model = val.to_string(); },
-                            "RM" => is_removable = val == "1",
-                            _ => {}
+            if out.status.success() {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                if let Ok(json_data) = serde_json::from_str::<serde_json::Value>(&stdout) {
+                    let mut disks = Vec::new();
+                    if let Some(devices) = json_data["blockdevices"].as_array() {
+                        for dev in devices {
+                            let dtype = dev["type"].as_str().unwrap_or("");
+                            if dtype != "disk" {
+                                continue;
+                            }
+                            let name = dev["name"].as_str().unwrap_or("").to_string();
+                            if name.is_empty() || name.starts_with("loop") || name.starts_with("zram") || name.starts_with("sr") {
+                                continue;
+                            }
+                            let size_bytes = dev["size"].as_u64()
+                                .or_else(|| dev["size"].as_str().and_then(|s| s.parse().ok()))
+                                .unwrap_or(0);
+                            let model = dev["model"].as_str().unwrap_or("Sabit Disk").trim().to_string();
+                            let model = if model.is_empty() { "Sabit Disk".to_string() } else { model };
+                            let is_removable = dev["rm"].as_bool()
+                                .or_else(|| dev["rm"].as_str().map(|s| s == "1"))
+                                .or_else(|| dev["rm"].as_u64().map(|v| v == 1))
+                                .unwrap_or(false);
+                            let size_gb = (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0);
+                            disks.push(StorageDisk {
+                                path: format!("/dev/{}", name),
+                                name,
+                                size_gb: (size_gb * 10.0).round() / 10.0,
+                                model,
+                                is_removable,
+                            });
                         }
                     }
+                    if !disks.is_empty() {
+                        return Ok(disks);
+                    }
                 }
-
-                if !name.is_empty() && !name.starts_with("loop") {
-                    let size_gb = (size_bytes as f64) / (1024.0 * 1024.0 * 1024.0);
-                    disks.push(StorageDisk {
-                        path: format!("/dev/{}", name),
-                        name,
-                        size_gb: (size_gb * 10.0).round() / 10.0,
-                        model,
-                        is_removable,
-                    });
-                }
-            }
-            if !disks.is_empty() {
-                return Ok(disks);
             }
         }
     }
@@ -1672,6 +1824,55 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
             return Err("Kullanıcı parolası güncellenemedi.".to_string());
         }
 
+        // 7b. Canlı oturumun izleri kurulu sisteme taşımaz: rsync /etc'i de
+        //     kopyaladığı için `ankora` hesabının herkese açık bilinen parolası
+        //     ve şifresiz sudo yetkisi kurulan makinede parolasız root açardı.
+        //     Önce otomatik giriş satırı kurulu kullanıcıya bağlanır, ancak
+        //     ondan sonra canlı hesabın parolası kilitlenir.
+        let inittab_path = "/target/etc/inittab";
+        let mut inittab_yazildi = false;
+        if let Ok(icerik) = fs::read_to_string(inittab_path) {
+            let yeni_satir = if payload.autologin {
+                format!("1:2345:respawn:/sbin/getty --autologin {} --noclear 38400 tty1 linux", username)
+            } else {
+                "1:2345:respawn:/sbin/getty 38400 tty1 linux".to_string()
+            };
+            let mut yeni = String::new();
+            for satir in icerik.lines() {
+                if satir.starts_with("1:2345:respawn:/sbin/getty") && satir.contains("tty1") {
+                    yeni.push_str(&yeni_satir);
+                    inittab_yazildi = true;
+                } else {
+                    yeni.push_str(satir);
+                }
+                yeni.push('\n');
+            }
+            if inittab_yazildi {
+                let _ = fs::write(inittab_path, yeni);
+            }
+        }
+
+        if username == "ankora" {
+            // Kurulan kullanıcı canlı hesabın kendisi: parolası 7. adımda
+            // zaten güncellendi, şifresiz yetki parolayla eşdeğer kılınır.
+            let _ = fs::write("/target/etc/sudoers.d/ankora", "ankora ALL=(ALL:ALL) ALL\n");
+        } else {
+            let _ = fs::remove_file("/target/etc/sudoers.d/ankora");
+            let _ = Command::new("chroot")
+                .args(["/target", "gpasswd", "-d", "ankora", "sudo"])
+                .output();
+            let _ = Command::new("chroot")
+                .args(["/target", "sed", "-i", "/^ankora /d", "/etc/sudoers.d/ankora-updater"])
+                .output();
+            if inittab_yazildi {
+                // Otomatik giriş artık canlı hesaba bağlı değil: bilinen parola
+                // geçersiz kılınır, hesap silinmez ki başka referanslar kırılmasın.
+                let _ = Command::new("chroot")
+                    .args(["/target", "usermod", "-L", "ankora"])
+                    .output();
+            }
+        }
+
         // 8. Grub & Temizlik
         run_step("chroot", &["/target", "grub-install", "--target=x86_64-efi", "--efi-directory=/boot/efi", "--bootloader-id=Ankora", "--recheck"])?;
         run_step("chroot", &["/target", "update-grub"])?;
@@ -1733,6 +1934,25 @@ async fn launch_application(exec: String) -> Result<String, String> {
             "Güvenlik İlkesi İhlali: '{}' sistem aracı güvenlik nedeniyle doğrudan başlatılamaz.",
             base_bin
         ));
+    }
+
+    // 3b. Argümanlarda geçen ikili adlar da kara listeye tabidir.
+    // `xterm -e /bin/sh` gibi zincirlerin önü burada kesilir. URL içeren
+    // argümanlar atlanır; `https://site/init` yanlış pozitif üretmesin.
+    for a in args {
+        if a.contains("://") {
+            continue;
+        }
+        let arg_bin = Path::new(*a)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(*a);
+        if FORBIDDEN_LAUNCH_BINARIES.contains(&arg_bin) {
+            return Err(format!(
+                "Güvenlik İlkesi İhlali: '{}' argüman olarak taşınamaz.",
+                arg_bin
+            ));
+        }
     }
 
     if bin_name.contains('/') {
@@ -1891,16 +2111,12 @@ fn optimize_system_memory() -> Result<MemoryTrimResult, String> {
             0
         };
 
-        // 1. Dosya sistemi tamponlarını diske yaz
         let _ = Command::new("sync").output();
 
-        // 2. Çekirdek sayfa ve inode önbelleklerini temizle
-        let _ = fs::write("/proc/sys/vm/drop_caches", "3");
-
-        // 3. Bellek sıkıştırma tetikle (varsa)
+        // Hata durumunu kontrol et — root değilse veya başarısızsa doğru bildir
+        let drop_caches_ok = fs::write("/proc/sys/vm/drop_caches", "3").is_ok();
         let _ = fs::write("/proc/sys/vm/compact_memory", "1");
 
-        // 4. GLIBC boşta kalan heap alanını serbest bırak
         #[cfg(target_env = "gnu")]
         unsafe {
             extern "C" {
@@ -1909,24 +2125,32 @@ fn optimize_system_memory() -> Result<MemoryTrimResult, String> {
             malloc_trim(0);
         }
 
-        let after = get_system_telemetry().unwrap_or(SystemTelemetry {
-            os_name: "Devuan".to_string(),
-            kernel: "Linux 6.1".to_string(),
-            init_system: "SysVinit".to_string(),
-            memory_used_mb: before_used.saturating_sub(45),
-            memory_total_mb: 8192,
-            cpu_cores: 4,
-            uptime_seconds: 0,
-        });
+        if !drop_caches_ok {
+            let current = get_system_telemetry().ok();
+            return Ok(MemoryTrimResult {
+                success: false,
+                freed_mb: 0,
+                current_used_mb: current.as_ref().map(|t| t.memory_used_mb).unwrap_or(before_used),
+                current_total_mb: current.as_ref().map(|t| t.memory_total_mb).unwrap_or(8192),
+                message: "Önbellek temizleme için yeterli yetki yok (root gerekli).".to_string(),
+            });
+        }
 
-        let freed = before_used.saturating_sub(after.memory_used_mb);
+        let after = get_system_telemetry().ok();
+        let after_used = after.as_ref().map(|t| t.memory_used_mb).unwrap_or(before_used);
+        let after_total = after.as_ref().map(|t| t.memory_total_mb).unwrap_or(8192);
+        let freed = before_used.saturating_sub(after_used);
 
         Ok(MemoryTrimResult {
             success: true,
-            freed_mb: if freed > 0 { freed } else { 42 },
-            current_used_mb: after.memory_used_mb,
-            current_total_mb: after.memory_total_mb,
-            message: "Sistem ve uygulama bellek önbellekleri boşaltıldı.".to_string(),
+            freed_mb: freed,
+            current_used_mb: after_used,
+            current_total_mb: after_total,
+            message: if freed > 0 {
+                format!("Sistem önbelleklerinden {} MB bellek serbest bırakıldı.", freed)
+            } else {
+                "Sistem önbellekleri zaten temiz, ek bellek kazanımı sağlanamadı.".to_string()
+            },
         })
     }
 
@@ -2081,7 +2305,18 @@ fn process_github_release(release: GitHubRelease, current_ver: &str) -> UpdateRe
 #[tauri::command]
 async fn check_de_update(repo_override: Option<String>) -> Result<UpdateReleaseInfo, String> {
     let current_ver = env!("CARGO_PKG_VERSION");
-    let target_repo = repo_override.unwrap_or_else(|| "Ankora-Linux/Ayaz".to_string());
+    // Güvenlik: Yalnızca bilinen Ankora-Linux organizasyonu repoları kabul edilir
+    let target_repo = match repo_override {
+        Some(ref r) => {
+            let parts: Vec<&str> = r.split('/').collect();
+            if parts.len() == 2 && parts[0] == "Ankora-Linux" && parts[1].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                r.clone()
+            } else {
+                return Err("Güvenlik İlkesi İhlali: Yalnızca resmi Ankora-Linux deposundan güncelleme alınabilir.".to_string());
+            }
+        }
+        None => "Ankora-Linux/Ayaz".to_string(),
+    };
 
     let client = reqwest::Client::builder()
         .user_agent(format!("ayaz-updater/{}", current_ver))
@@ -2154,11 +2389,13 @@ async fn download_and_apply_de_update(
     expected_sha256: Option<String>,
     sha256_url: Option<String>,
 ) -> Result<String, String> {
-    // Güvenlik doğrulaması: Yalnızca GitHub releases alanından indirmeye izin ver
-    if !download_url.starts_with("https://github.com/")
-        && !download_url.starts_with("https://objects.githubusercontent.com/")
-    {
-        return Err("Güvenlik İlkesi İhlali: İndirme bağlantısı güvenilir GitHub sunucusuna ait değil.".to_string());
+    // Güvenlik doğrulaması: Yalnızca resmi Ankora-Linux deposunun release
+    // alanından indirmeye izin ver. Adresin sahibi webview'e de emanet edilmez.
+    if !download_url.starts_with("https://github.com/Ankora-Linux/") {
+        return Err(
+            "Güvenlik İlkesi İhlali: İndirme bağlantısı resmi Ankora-Linux deposuna ait değil."
+                .to_string(),
+        );
     }
 
     let _ = window.emit("update-progress", UpdateProgressPayload {
@@ -2201,7 +2438,7 @@ async fn download_and_apply_de_update(
     let mut target_sha256 = expected_sha256;
     if target_sha256.is_none() {
         if let Some(ref s_url) = sha256_url {
-            if s_url.starts_with("https://github.com/") || s_url.starts_with("https://objects.githubusercontent.com/") {
+            if s_url.starts_with("https://github.com/Ankora-Linux/") {
                 if let Ok(resp) = client.get(s_url).send().await {
                     if resp.status().is_success() {
                         if let Ok(txt) = resp.text().await {
@@ -2230,13 +2467,28 @@ async fn download_and_apply_de_update(
     }
 
     #[cfg(target_os = "linux")]
-    let deb_path = PathBuf::from("/tmp/ayaz-update.deb");
+    let deb_path = {
+        let staging_dir = PathBuf::from("/var/cache/ayaz-updates");
+        let _ = fs::create_dir_all(&staging_dir);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&staging_dir, fs::Permissions::from_mode(0o700));
+        }
+        staging_dir.join("ayaz-update.deb")
+    };
 
     #[cfg(not(target_os = "linux"))]
     let deb_path = std::env::temp_dir().join("ayaz-update.deb");
 
     fs::write(&deb_path, &bytes)
         .map_err(|e| format!("Geçici güncelleme dosyası diske kaydedilemedi: {}", e))?;
+
+    // Dosya sahipliğini root:root olarak ayarla (helper güvenlik kontrolü için)
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("chown").args(["root:root", &deb_path.to_string_lossy()]).output();
+    }
 
     let _ = window.emit("update-progress", UpdateProgressPayload {
         percent: 80,
@@ -2247,20 +2499,14 @@ async fn download_and_apply_de_update(
     #[cfg(target_os = "linux")]
     {
         let helper_path = Path::new("/usr/local/bin/ayaz-update-helper");
-        let fallback_helper = Path::new("/usr/local/bin/ankora-de-update-helper");
+        let deb_str = deb_path.to_string_lossy().to_string();
 
         let install_status = if helper_path.exists() {
             Command::new("sudo")
-                .args(["/usr/local/bin/ayaz-update-helper", "/tmp/ayaz-update.deb"])
-                .status()
-        } else if fallback_helper.exists() {
-            Command::new("sudo")
-                .args(["/usr/local/bin/ankora-de-update-helper", "/tmp/ayaz-update.deb"])
+                .args(["/usr/local/bin/ayaz-update-helper", &deb_str])
                 .status()
         } else {
-            Command::new("sudo")
-                .args(["dpkg", "-i", "/tmp/ayaz-update.deb"])
-                .status()
+            return Err("Güvenlik İlkesi İhlali: /usr/local/bin/ayaz-update-helper bulunamadı. Güncelleme yalnızca doğrulanmış yardımcı üzerinden kurulabilir.".to_string());
         };
 
         match install_status {
@@ -2297,10 +2543,195 @@ async fn download_and_apply_de_update(
 fn restart_desktop_process() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("pkill").args(["-f", "ayaz"]).spawn();
-        let _ = Command::new("pkill").args(["-f", "ankora-de"]).spawn();
+        // Tam ikili yol eşlemesi ile sadece kendi sürecimizi sonlandır, başka eşleşmeler önlenir
+        let _ = Command::new("pkill").args(["-x", "ayaz-de"]).spawn();
     }
     Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DirectoryItem {
+    pub name: String,
+    pub path: String,
+    pub is_dir: bool,
+    pub size_str: String,
+    pub ext: String,
+    pub is_hidden: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DirectoryListing {
+    pub current_path: String,
+    pub items: Vec<DirectoryItem>,
+    pub home_dir: String,
+}
+
+#[tauri::command]
+async fn list_directory(path: Option<String>) -> Result<DirectoryListing, String> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/home/ankora"));
+    let target_path = match path {
+        Some(p) if !p.trim().is_empty() && Path::new(&p).exists() => PathBuf::from(p),
+        _ => home.clone(),
+    };
+
+    let canonical = fs::canonicalize(&target_path).unwrap_or(target_path);
+    // GÜVENLİK: Kök gezilebilir, ancak başkalarının hesapları ve çekirdek /
+    // aygıt arayüzleri listelenemez (dosya adı sızıntısı).
+    let canon_str = canonical.to_string_lossy().to_string();
+    for r in &["/root", "/proc", "/sys", "/dev", "/boot", "/etc"] {
+        if canon_str == *r || canon_str.starts_with(&format!("{}/", r)) {
+            return Err("Güvenlik İlkesi İhlali: Bu dizin listelenemez.".to_string());
+        }
+    }
+    let mut items = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(&canonical) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            let name = p.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let is_hidden = name.starts_with('.');
+            let is_dir = p.is_dir();
+            let ext = p.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+            let size_str = if is_dir {
+                "-".to_string()
+            } else if let Ok(meta) = entry.metadata() {
+                let bytes = meta.len();
+                if bytes < 1024 {
+                    format!("{} B", bytes)
+                } else if bytes < 1024 * 1024 {
+                    format!("{:.1} KB", bytes as f64 / 1024.0)
+                } else {
+                    format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+                }
+            } else {
+                "-".to_string()
+            };
+
+            items.push(DirectoryItem {
+                name,
+                path: p.to_string_lossy().to_string(),
+                is_dir,
+                size_str,
+                ext,
+                is_hidden,
+            });
+        }
+    }
+
+    items.sort_by(|a, b| {
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    Ok(DirectoryListing {
+        current_path: canonical.to_string_lossy().to_string(),
+        items,
+        home_dir: home.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+async fn create_folder(path: String) -> Result<String, String> {
+    let clean = path.trim();
+    if clean.is_empty() || clean.contains('\0') {
+        return Err("Geçersiz klasör yolu.".to_string());
+    }
+    let p = Path::new(clean);
+    let restricted = [
+        "/bin", "/sbin", "/usr", "/etc", "/boot", "/dev", "/proc", "/sys",
+        "/lib", "/lib64", "/var", "/opt", "/srv", "/root",
+    ];
+    for r in &restricted {
+        if clean == *r || clean.starts_with(&format!("{}/", r)) {
+            return Err("Bu sistem dizininde klasör oluşturulamaz.".to_string());
+        }
+    }
+    fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    Ok(format!("Klasör oluşturuldu: {}", clean))
+}
+
+#[tauri::command]
+async fn open_path(path: String) -> Result<String, String> {
+    let clean = path.trim();
+    if clean.is_empty() || !Path::new(clean).exists() {
+        return Err("Açılacak dosya bulunamadı.".to_string());
+    }
+    // GÜVENLİK: Kurulabilir/çalıştırılabilir paket dosyaları xdg-open'a
+    // verilmez; .deb doğrudan dpkg, .desktop ise çalıştırma anlamına gelir.
+    let lower = clean.to_lowercase();
+    if lower.ends_with(".deb") || lower.ends_with(".desktop") || lower.ends_with(".run")
+        || lower.ends_with(".appimage")
+    {
+        return Err(
+            "Güvenlik Hatası: Çalıştırılabilir dosyalar buradan açılamaz; paketleri Ankora Mağaza üzerinden kurun."
+                .to_string(),
+        );
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("xdg-open").arg(clean).env("DISPLAY", ":0").spawn().map_err(|e| e.to_string())?;
+    }
+    Ok(format!("Açıldı: {}", clean))
+}
+
+#[tauri::command]
+async fn delete_file(path: String) -> Result<String, String> {
+    let clean = path.trim();
+    let p = Path::new(clean);
+    if clean.is_empty() || !p.exists() {
+        return Err("Silinecek dosya bulunamadı.".to_string());
+    }
+    // GÜVENLİK: Denetim kökü çözülmüş gerçek yol üzerinde yapılır; sondaki
+    // eğik çizgi veya kısayol ile eşleştirme aşılamaz. Ev kökü ayrı, evin
+    // içeriği serbesttir — dosya yöneticisi kendi dosyalarını silebilsin.
+    let canonical = fs::canonicalize(p).map_err(|_| "Silinecek dosya bulunamadı.".to_string())?;
+    let canon_str = canonical.to_string_lossy().to_string();
+    let home_str = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("/home/ankora"))
+        .to_string_lossy()
+        .to_string();
+
+    if canon_str == "/" || canon_str == "/home" || canon_str == home_str {
+        return Err("Kritik sistem dosyaları silinemez.".to_string());
+    }
+    let forbidden = [
+        "/bin", "/sbin", "/usr", "/etc", "/boot", "/dev", "/proc", "/sys",
+        "/lib", "/lib64", "/var", "/opt", "/srv", "/root",
+    ];
+    for f in &forbidden {
+        if canon_str == *f || canon_str.starts_with(&format!("{}/", f)) {
+            return Err("Kritik sistem dosyaları silinemez.".to_string());
+        }
+    }
+    if p.is_dir() {
+        fs::remove_dir_all(p).map_err(|e| e.to_string())?;
+    } else {
+        fs::remove_file(p).map_err(|e| e.to_string())?;
+    }
+    Ok(format!("Silindi: {}", clean))
+}
+
+#[tauri::command]
+fn system_poweroff() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("sudo").args(["/sbin/poweroff", "-f"]).spawn()
+            .or_else(|_| Command::new("/sbin/poweroff").arg("-f").spawn());
+    }
+    Ok("Sistem kapatılıyor.".to_string())
+}
+
+#[tauri::command]
+fn system_reboot() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = Command::new("sudo").args(["/sbin/reboot", "-f"]).spawn()
+            .or_else(|_| Command::new("/sbin/reboot").arg("-f").spawn());
+    }
+    Ok("Sistem yeniden başlatılıyor.".to_string())
 }
 
 fn main() {
@@ -2333,7 +2764,13 @@ fn main() {
             set_system_keyboard,
             check_de_update,
             download_and_apply_de_update,
-            restart_desktop_process
+            restart_desktop_process,
+            list_directory,
+            create_folder,
+            open_path,
+            delete_file,
+            system_poweroff,
+            system_reboot
         ])
         .run(tauri::generate_context!())
         .expect("Ankora DE başlatılırken hata oluştu");
@@ -2449,5 +2886,20 @@ mod tests {
 
         let pub_ip: IpAddr = "8.8.8.8".parse().unwrap();
         assert!(!is_private_or_restricted_ip(&pub_ip));
+    }
+
+    #[test]
+    fn test_directory_item_structure() {
+        let item = DirectoryItem {
+            name: "test.txt".to_string(),
+            path: "/home/ankora/test.txt".to_string(),
+            is_dir: false,
+            size_str: "1.2 KB".to_string(),
+            ext: "txt".to_string(),
+            is_hidden: false,
+        };
+        assert_eq!(item.name, "test.txt");
+        assert!(!item.is_dir);
+        assert_eq!(item.ext, "txt");
     }
 }
