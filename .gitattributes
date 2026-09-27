@@ -1,0 +1,12 @@
+# Satir sonu kurali
+#
+# autocrlf=true checkout sirasinda *.sh dosyalarini CRLF'e cevirir. bash'te
+# `\` + CRLF satir birlestirmeyi kirdigi ve bos satiri `$'\r'` komutuna
+# cevirdigi icin derleme ilk satirda dusuyor. Linux betikleri hep LF kalmali.
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Windows tarafi CRLF kalsin (cmd ve PowerShell'in bekledigi format).
+*.ps1   text eol=crlf
+*.bat   text eol=crlf
+*.cmd   text eol=crlf

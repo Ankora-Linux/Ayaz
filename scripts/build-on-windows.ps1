@@ -1,4 +1,4 @@
-# ==============================================================================
+﻿# ==============================================================================
 # Ankora Linux 2.0 (Ayaz DE) - Windows Canlı ISO Derleme Otomasyonu
 # Bu betik Windows ortamından Devuan Daedalus tabanlı canlı ISO imajını
 # WSL2, VirtualBox veya GitHub Actions entegrasyonuyla güvenle derler.
@@ -30,10 +30,12 @@ $wslDistros = @()
 try {
     $rawList = & wsl.exe -l -q 2>$null
     if ($LASTEXITCODE -eq 0 -and $rawList) {
-        $wslInstalled = $true
-        # Unicode null baytlarını temizle (wsl.exe utf-16 çıktısı verir)
-        $cleanList = ($rawList -replace "`0", "").Trim().Split("`r`n", [System.StringSplitOptions]::RemoveEmptyEntries)
-        $wslDistros = $cleanList
+        # Unicode null baytlarını temizle ve boşlukları ayıkla
+        $cleanList = @($rawList | ForEach-Object { ($_ -replace "`0", "").Trim() } | Where-Object { $_ -ne "" })
+        if ($cleanList.Count -gt 0) {
+            $wslInstalled = $true
+            $wslDistros = $cleanList
+        }
     }
 } catch {
     $wslInstalled = $false
@@ -64,7 +66,6 @@ if ($wslInstalled -and ($wslDistros.Count -gt 0)) {
     Write-Host ""
 
     Write-Host "[3/4] ISO Pişirme İşlemi WSL Üzerinde Başlatılıyor..." -ForegroundColor Yellow
-    Write-Host "      (Gerektiğinde WSL sudo parolanız istenebilir)" -ForegroundColor DarkYellow
     Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
 
     # WSL içinde çalıştırılacak derleme komutu
@@ -72,18 +73,47 @@ if ($wslInstalled -and ($wslDistros.Count -gt 0)) {
 set -e
 echo '>>> [WSL] Ankora derleme araçları kontrol ediliyor...'
 export DEBIAN_FRONTEND=noninteractive
-sudo apt-get update -qq
-sudo apt-get install -y --no-install-recommends \
-    debootstrap squashfs-tools xorriso isolinux syslinux-efi \
-    grub-pc-bin grub-efi-amd64-bin mtools dosfstools
+apt-get update -qq
+apt-get install -y --no-install-recommends \
+    debootstrap squashfs-tools xorriso isolinux syslinux-common syslinux-efi \
+    grub-pc-bin grub-efi-amd64-bin mtools dosfstools wget gpgv
+
+# Debootstrap Devuan Daedalus profilini tanımla
+if [ ! -f /usr/share/debootstrap/scripts/daedalus ]; then
+    if [ -f /usr/share/debootstrap/scripts/bookworm ]; then
+        ln -sf bookworm /usr/share/debootstrap/scripts/daedalus
+    else
+        ln -sf sid /usr/share/debootstrap/scripts/daedalus
+    fi
+fi
+
+# Önceki başarısız derleme kalıntılarını temizle
+echo '>>> [WSL] Önceki derleme kalıntıları temizleniyor...'
+umount -lf /var/tmp/ankora-iso-build/chroot/dev/pts 2>/dev/null || true
+umount -lf /var/tmp/ankora-iso-build/chroot/dev 2>/dev/null || true
+umount -lf /var/tmp/ankora-iso-build/chroot/proc 2>/dev/null || true
+umount -lf /var/tmp/ankora-iso-build/chroot/sys 2>/dev/null || true
+rm -rf /var/tmp/ankora-iso-build 2>/dev/null || true
+
+# Disk alanını raporla
+echo '>>> [WSL] Mevcut disk alanı:'
+df -h /
+df -h /var/tmp
 
 cd '$wslRoot'
+sed -i 's/\r$//' scripts/build-iso.sh scripts/*.sh 2>/dev/null || true
 echo '>>> [WSL] scripts/build-iso.sh çalıştırılıyor...'
-sudo bash scripts/build-iso.sh
+bash scripts/build-iso.sh
 "@
 
-    # WSL oturumunu çalıştır
-    wsl.exe -d $chosenDistro bash -c $buildCmd
+    # Kaynak .ps1 dosyası CRLF satır sonlu olduğu için here-string de CRLF
+    # taşır. bash'e LF olarak gitmezse `set -e\r`, `apt-get update -qq\r` ve
+    # boş satırlar (`\r` komutu) yanlış yorumlanır; `\` ile satır birleştirme
+    # de kırıldığı için paket listesi komut olarak çalışır.
+    $buildCmd = $buildCmd.Replace("`r`n", "`n")
+
+    # WSL oturumunu root olarak çalıştır (parola istemeden doğrudan yürütür)
+    wsl.exe -d $chosenDistro -u root bash -c $buildCmd
 
     Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
     Write-Host "[4/4] Derleme Sonucu Doğrulanıyor..." -ForegroundColor Yellow
