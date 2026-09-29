@@ -1,5 +1,6 @@
 # /etc/sudoers.d/ankora-updater
-# Ankora Linux kullanıcısının Ayaz Masaüstü Ortamını GUI üzerinden şifresiz güncelleyebilmesi için izin kuralı.
-pars ALL=(ALL) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ankora-de-update-helper
-ankora ALL=(ALL) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ankora-de-update-helper
-
+# Ankora Ayaz DE update helper permissions
+# GÜVENLIK: Yalnızca belirli güncelleme yardımcılarına sınırlı NOPASSWD erişimi
+# /tmp yerine güvenli staging dizini kullanılır (/var/cache/ayaz-updates/)
+ankora ALL=(root) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper
+pars ALL=(root) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper
