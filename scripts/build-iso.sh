@@ -2182,7 +2182,31 @@ AYAZ_VERSION="${AYAZ_VERSION%%$'\n'*}"
 if [ -z "$AYAZ_VERSION" ]; then
     AYAZ_VERSION="2.0.0"
 fi
-GIT_REV=$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo "bilinmiyor")
+# git yoksa (ör. WSL) .git/HEAD + ref dosyaları doğrudan okunur; revizyon
+# manifestte hiçbir koşulda boş kalmaz.
+GIT_REV="bilinmiyor"
+if command -v git >/dev/null 2>&1; then
+    GIT_REV=$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo "bilinmiyor")
+elif [ -f "$ROOT_DIR/.git/HEAD" ]; then
+    _HEAD_RAW=$(tr -d '[:space:]' < "$ROOT_DIR/.git/HEAD")
+    _GIT_HASH=""
+    case "$_HEAD_RAW" in
+        ref:*)
+            _GIT_REF=${_HEAD_RAW#ref:}
+            if [ -f "$ROOT_DIR/.git/$_GIT_REF" ]; then
+                _GIT_HASH=$(head -c 40 "$ROOT_DIR/.git/$_GIT_REF")
+            elif [ -f "$ROOT_DIR/.git/packed-refs" ]; then
+                _GIT_HASH=$(awk -v r="$_GIT_REF" '$2 == r { print $1; exit }' "$ROOT_DIR/.git/packed-refs")
+            fi
+            ;;
+        *)
+            _GIT_HASH=$_HEAD_RAW
+            ;;
+    esac
+    if [ -n "$_GIT_HASH" ]; then
+        GIT_REV=${_GIT_HASH:0:7}
+    fi
+fi
 BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 mkdir -p "$CHROOT_DIR/usr/share/ayaz"
 cat > "$CHROOT_DIR/usr/share/ayaz/manifest.json" <<MANIFEST_JSON
