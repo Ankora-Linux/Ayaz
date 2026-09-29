@@ -68,6 +68,14 @@
     ipcUrl: (typeof window !== 'undefined' && window.location.origin.includes('49152')) ? '/api/ipc' : 'http://127.0.0.1:49152/api/ipc',
     pendingRequests: new Map(),
     reqIdCounter: 1,
+    // Köprü yolu yalnızca WebKit IPC'si: yanıt gelmezse en fazla bu kadar beklenir.
+    // Uzun süren çağrılar ayrı eşik ister, yoksa kurulum gibi işler yarıda kesilir.
+    longTimeouts: {
+      execute_system_installation: 30 * 60 * 1000,
+      install_deb_package: 15 * 60 * 1000,
+      download_and_apply_de_update: 30 * 60 * 1000,
+      apt_update_clean: 10 * 60 * 1000
+    },
 
     init() {
       if (typeof window !== 'undefined') {
@@ -114,7 +122,7 @@
               this.pendingRequests.delete(id);
               reject(new Error(`İşlem zaman aşımı: '${cmd}'`));
             }
-          }, 30000);
+          }, this.longTimeouts[cmd] || 30000);
         });
       }
 
@@ -1492,14 +1500,16 @@
 
         this.saveInstalledState();
 
-        // Orijinal Debian uygulaması masaüstüne eklenir
+        // Host, .desktop dosyasından kimliği ve görünen adı çözer; onu yok
+        // sayarsak kayıt başka bir id ile eklenir ve sonraki taramada menüde
+        // iki kez görünür. .deb dosya adı ikon olarak kullanılamaz.
+        const resolved = xdgApp || {};
         XdgDesktopEngine.addApplication({
-          id: pkg.id,
-          name: pkg.name,
-          exec: pkg.deb,
-          icon: pkg.deb,
-          cat: pkg.cat,
-          comment: pkg.desc,
+          id: resolved.id || pkg.id,
+          name: resolved.name || pkg.name,
+          exec: resolved.exec || pkg.deb,
+          cat: resolved.cat || pkg.cat,
+          comment: resolved.comment || pkg.desc,
           is_installed_by_user: true
         });
 
@@ -3196,6 +3206,72 @@
   // GELİŞMİŞ SİSTEM AYARLARI (7 PANE SETTINGS MANAGER)
   // ============================================================================
   const SettingsManager = {
+    // Ekran modları xrandr'den okunur; sunucu liste döndürmezse HTML'deki
+    // sabit seçenekler olduğu gibi kalır.
+    async loadDisplayModes() {
+      const selMode = document.getElementById('ctrl-resolution');
+      const selRate = document.getElementById('ctrl-refresh-rate');
+      if (!selMode) return;
+
+      let info = null;
+      try {
+        info = await TauriBridge.invoke('get_display_modes');
+      } catch (e) {
+        return;
+      }
+      if (!info || !Array.isArray(info.modes) || info.modes.length === 0) return;
+
+      const fillRates = (modeObj) => {
+        if (!selRate) return;
+        selRate.innerHTML = '';
+        (modeObj.rates || []).forEach(r => {
+          const opt = document.createElement('option');
+          opt.value = r;
+          opt.textContent = `${parseFloat(r)} Hz`;
+          if (r === info.current_rate) opt.selected = true;
+          selRate.appendChild(opt);
+        });
+      };
+
+      selMode.innerHTML = '';
+      info.modes.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.mode;
+        opt.textContent = `${m.mode.replace('x', ' x ')}${m.current ? ' (aktif)' : ''}`;
+        if (m.mode === info.current_mode) opt.selected = true;
+        selMode.appendChild(opt);
+        if (m.current) fillRates(m);
+      });
+
+      const apply = async (rate) => {
+        try {
+          await TauriBridge.invoke('set_display_mode', {
+            mode: selMode.value, rate, output: info.output
+          });
+        } catch (e) {
+          ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
+        }
+      };
+
+      selMode.onchange = () => {
+        fillRates(info.modes.find(m => m.mode === selMode.value));
+        apply(selRate ? selRate.value : '');
+      };
+      if (selRate) selRate.onchange = () => apply(selRate.value);
+
+      const selScale = document.getElementById('ctrl-scaling');
+      if (selScale && !selScale.dataset.bound) {
+        selScale.dataset.bound = '1';
+        selScale.addEventListener('change', async () => {
+          try {
+            await TauriBridge.invoke('set_display_scale', { percent: Number(selScale.value) });
+          } catch (e) {
+            ReportManager.showToast(`Ölçek uygulanamadı: ${e.message || e}`);
+          }
+        });
+      }
+    },
+
     async init() {
       // 1. Sol Navigasyon Sekme Değişimi
       const navItems = document.querySelectorAll('.settings-nav-item');
@@ -3210,6 +3286,8 @@
           panes.forEach(p => {
             p.classList.toggle('active', p.id === targetPaneId);
           });
+
+          if (targetPaneId === 'pane-set-display') this.loadDisplayModes();
         });
       });
 
@@ -3971,7 +4049,11 @@
         </div>
       `;
       document.body.appendChild(ctxMenu);
+    }
 
+    // Menünün işareti index.html'de hazır duruyor; bu yüzden oluşturma bloğu
+    // çoğu oturumda hiç çalışmaz. Dinleyiciler ayrı blokta, menü varsa bağlanır.
+    if (desktop && ctxMenu) {
       desktop.addEventListener('contextmenu', (e) => {
         if (e.target.closest('.window') || e.target.closest('#taskbar') || e.target.closest('#start-flyout')) return;
         e.preventDefault();
@@ -4728,6 +4810,12 @@
       this.urlInput = document.getElementById('browser-url-input');
       this.loadingBar = document.getElementById('browser-loading-bar');
       this.fallbackCard = document.getElementById('browser-fallback-card');
+      // Sayfa doğrudan siteye açılsaydı X-Frame-Options çerçeveyi kapatır;
+      // ilk yükleme de köprü üzerinden yapılır.
+      // Host, köprü dışına çıkan geçişleri iptal edip hedefi buraya bildirir;
+      // böylece bağlantı, form ve JavaScript geçişleri tek yoldan ilerler.
+      window.__ayazProxyNav = (uri) => { if (uri) this.navigate(uri); };
+      if (this.iframe) this.iframe.src = this.toProxy(this.history[this.historyIndex]);
 
       const btnGo = document.getElementById('btn-browser-go');
       const btnBack = document.getElementById('btn-browser-back');
@@ -4785,6 +4873,16 @@
         });
       }
 
+      const btnExternal = document.getElementById('btn-browser-external');
+      if (btnExternal) {
+        btnExternal.addEventListener('click', () => this.openExternal());
+        // Canlı ISO'da sistem tarayıcısı yoktur; çalışmayan bir denetim
+        // gösterilmez. Sorgu kendiliğinden başarısız olursa buton kalır.
+        TauriBridge.invoke('system_browser_available')
+          .then(ok => { if (ok === false) btnExternal.style.display = 'none'; })
+          .catch(() => {});
+      }
+
       // Bookmark Chips
       const chips = document.querySelectorAll('.bookmark-chip[data-url]');
       chips.forEach(chip => {
@@ -4802,6 +4900,13 @@
           this.finishLoading();
         });
       }
+    },
+
+    // Adres çubuğunda gerçek URL durur; çerçeveye yalnızca köprüden girilir.
+    toProxy(url) {
+      const base = (typeof window !== 'undefined' && window.location.origin.includes('49152'))
+        ? '' : 'http://127.0.0.1:49152';
+      return `${base}/proxy?url=${encodeURIComponent(url)}`;
     },
 
     navigate(input) {
@@ -4830,7 +4935,7 @@
       if (this.iframe) {
         if (this.fallbackCard) this.fallbackCard.style.display = 'none';
         try {
-          this.iframe.src = target;
+          this.iframe.src = this.toProxy(target);
         } catch (err) {
           console.warn('[TARAYICI] Navigasyon hatası:', err);
           if (this.fallbackCard) this.fallbackCard.style.display = 'flex';
@@ -4845,13 +4950,23 @@
       });
     },
 
+    // Bazı siteler çerçevelenmeyi reddeder ve yerleşik görüntüleyici boş kalır;
+    // aynı adres sistem tarayıcısında sorunsuz açılır.
+    openExternal() {
+      const url = (this.urlInput && this.urlInput.value.trim()) || this.history[this.historyIndex];
+      if (!url) return;
+      TauriBridge.invoke('open_url', { url })
+        .then(() => ReportManager.showToast('Sistem tarayıcısında açılıyor...'))
+        .catch((err) => ReportManager.showToast(`Açılamadı: ${err.message || err}`));
+    },
+
     goBack() {
       if (this.historyIndex > 0) {
         this.historyIndex--;
         const url = this.history[this.historyIndex];
         if (this.urlInput) this.urlInput.value = url;
         this.startLoading();
-        if (this.iframe) this.iframe.src = url;
+        if (this.iframe) this.iframe.src = this.toProxy(url);
       }
     },
 
@@ -4861,7 +4976,7 @@
         const url = this.history[this.historyIndex];
         if (this.urlInput) this.urlInput.value = url;
         this.startLoading();
-        if (this.iframe) this.iframe.src = url;
+        if (this.iframe) this.iframe.src = this.toProxy(url);
       }
     },
 

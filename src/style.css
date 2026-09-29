@@ -1309,6 +1309,20 @@ body.is-dragging button {
 /* ==============================================================================
    UYGULAMA: ANKORA TERMİNAL (VS CODE TARZI)
    ============================================================================== */
+
+/* .term-toolbar + .term-viewport birlikte .window-view'in yüksekliğini aşıyordu
+   (toolbar + %100). .window-view { overflow: auto } ikinci bir kaydırma alanı
+   açıyordu: .term-cmdline dibe çekilse bile pencere kenarının altında kalıyor,
+   giriş satırı tıklanamaz oluyordu. Kaydırma tek kabda kalsın. */
+#win-terminal .window-view {
+  display: flex;
+  flex-direction: column;
+}
+#win-terminal .term-viewport {
+  flex: 1;
+  min-height: 0;
+}
+
 .term-viewport {
   height: 100%;
   background: #070709;
@@ -3678,6 +3692,29 @@ body.theme-light .toggle-slider-knob {
   font-size: 12px;
   outline: none;
   cursor: pointer;
+}
+
+/* WebKitGTK, <select>'i yerel temayla çizer: koyu temada beyaz zemin üstünde
+   beyaz metin kalır ve değer okunmaz. Yerel görünüm kapatılıp zemin, metin ve
+   ok buradan verilir; seçenek listesi de aynı renkleri kullanır. */
+select.select-mono,
+select.select-mono-sm,
+select.settings-select-sm,
+select.report-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b8fa3' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  padding-right: 26px;
+}
+
+select.select-mono option,
+select.select-mono-sm option,
+select.settings-select-sm option,
+select.report-select option {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
 }
 
 /* Ağ Banner & Wi-Fi Listesi */

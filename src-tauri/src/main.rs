@@ -2678,6 +2678,24 @@ async fn open_path(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+async fn open_url(url: String) -> Result<bool, String> {
+    let clean = url.trim();
+    // Yalnızca http/https: file:, javascript: gibi şemalar xdg-open'a verilmez.
+    if !clean.starts_with("http://") && !clean.starts_with("https://") {
+        return Err("Yalnızca http/https adresleri açılabilir.".to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(clean)
+            .env("DISPLAY", ":0")
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(true)
+}
+
+#[tauri::command]
 async fn delete_file(path: String) -> Result<String, String> {
     let clean = path.trim();
     let p = Path::new(clean);
@@ -2768,6 +2786,7 @@ fn main() {
             list_directory,
             create_folder,
             open_path,
+            open_url,
             delete_file,
             system_poweroff,
             system_reboot
