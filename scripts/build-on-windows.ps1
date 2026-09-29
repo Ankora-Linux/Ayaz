@@ -113,13 +113,29 @@ bash scripts/build-iso.sh
     $buildCmd = $buildCmd.Replace("`r`n", "`n")
 
     # WSL oturumunu root olarak çalıştır (parola istemeden doğrudan yürütür)
+    $buildStart = Get-Date
     wsl.exe -d $chosenDistro -u root bash -c $buildCmd
+    $buildExit = $LASTEXITCODE
 
     Write-Host "----------------------------------------------------------------------" -ForegroundColor Gray
     Write-Host "[4/4] Derleme Sonucu Doğrulanıyor..." -ForegroundColor Yellow
 
+    # Derleme erken bitse bile dist klasöründe eski ISO durur. Yalnızca dosya
+    # varlığına bakılıp "üretildi" denirse başarısız derleme gizlenir.
+    if ($buildExit -ne 0) {
+        Write-Host ""
+        Write-Host "[HATA] Derleme başarısız oldu (çıkış kodu: $buildExit)." -ForegroundColor Red
+        Write-Host "       dist klasöründeki ISO önceki derlemeden kalmıştır, yeniden kullanmayın." -ForegroundColor Red
+        exit 1
+    }
+
     if (Test-Path $IsoPath) {
         $isoItem = Get-Item $IsoPath
+        if ($isoItem.LastWriteTime -lt $buildStart) {
+            Write-Host ""
+            Write-Host "[HATA] ISO yeniden üretilmedi; dosya önceki derlemeden kalmış." -ForegroundColor Red
+            exit 1
+        }
         $isoSizeMB = [math]::Round($isoItem.Length / 1MB, 2)
         $sha256 = (Get-FileHash -Path $IsoPath -Algorithm SHA256).Hash
 

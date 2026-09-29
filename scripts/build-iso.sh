@@ -84,6 +84,13 @@ umount -lf "$CHROOT_DIR/dev/pts" 2>/dev/null || true
 umount -lf "$CHROOT_DIR/dev" 2>/dev/null || true
 umount -lf "$CHROOT_DIR/proc" 2>/dev/null || true
 umount -lf "$CHROOT_DIR/sys" 2>/dev/null || true
+# Test ya da önceki derlemeden kalan bağ noktaları (X11 soket tmpfs'i dahil)
+# da çözülür. Bunlar hâlâ bağlıyken rm -rf salt-okunur dosya sistemi
+# hatasıyla durur ve derleme başlamadan biter.
+awk -v p="$CHROOT_DIR" 'index($2, p "/") == 1 { print $2 }' /proc/mounts 2>/dev/null \
+    | sort -r | while IFS= read -r m; do
+        umount -lf "$m" 2>/dev/null || true
+    done || true
 rm -rf "$WORK_DIR"
 mkdir -p "$CHROOT_DIR" "$IMAGE_DIR/live" "$IMAGE_DIR/isolinux" "$IMAGE_DIR/boot/grub" "$ROOT_DIR/dist"
 
@@ -99,8 +106,14 @@ debootstrap --arch=amd64 \
 mkdir -p "$CHROOT_DIR/etc/apt/trusted.gpg.d" "$CHROOT_DIR/usr/share/keyrings"
 cp -f /usr/share/keyrings/devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
 cp -f /usr/share/keyrings/devuan* "$CHROOT_DIR/usr/share/keyrings/" 2>/dev/null || true
-# Baz sistemler anahtarlığı yalnızca /etc/apt/trusted.gpg.d altında tutar
-cp -f /etc/apt/trusted.gpg.d/devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
+# Baz sistemler anahtarlığı yalnızca /etc/apt/trusted.gpg.d altında tutar.
+# Ama bu dosyalar devuan-keyring paketinin conffile'larıyla aynı yolda
+# çakışır: önceden konursa dpkg conffile sorusunda stdin'de eof alır, paketi
+# yarı bırakır ve sonraki apt-get'i `set -e` ile durdurur. Yalnızca yukarıdaki
+# kopyalama hiçbir şey koymadıysa yedeğe başvur.
+if ! ls "$CHROOT_DIR/etc/apt/trusted.gpg.d/"devuan*.gpg >/dev/null 2>&1; then
+    cp -f /etc/apt/trusted.gpg.d/devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
+fi
 
 mount --bind /dev "$CHROOT_DIR/dev"
 mount --bind /dev/pts "$CHROOT_DIR/dev/pts"
@@ -143,6 +156,14 @@ path-include /usr/share/locale/tr/*
 path-include /usr/share/locale/en/*
 path-include /usr/share/locale/locale.alias
 NOLOCALE
+
+# Non-interactive derlemede dpkg'nin conffile sorusu stdin'de eof verir ve
+# paketi yarı bırakır; `DEBIAN_FRONTEND=noninteractive` bu soruyu susturmaz,
+# çünkü soru debconf değil dpkg'nin kendisine ait. Sorunun varsayılanı olan
+# "mevcut dosyayı koru" seçeneğini sessizce uygula.
+cat << 'CONFOPT' > /etc/apt/apt.conf.d/01-build-confold
+Dpkg::Options { "--force-confdef"; "--force-confold"; };
+CONFOPT
 
 # Depo kaynakları
 cat << 'SOURCES' > /etc/apt/sources.list
@@ -239,6 +260,7 @@ apt-get install -y --no-install-recommends \
     grub-pc-bin \
     xdg-utils \
     file \
+    scrot \
     xterm
 
 # Son temizlik
@@ -413,8 +435,9 @@ else
     cp -r "$ROOT_DIR/src/"* "$CHROOT_DIR/usr/share/ayaz/"
     cat << 'AYAZ_PY' > "$CHROOT_DIR/usr/bin/ayaz"
 #!/usr/bin/env python3
-import sys, os, subprocess, json, threading, shutil, re, shlex, hmac
+import sys, os, subprocess, json, threading, shutil, re, shlex, hmac, gzip, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import urllib.parse, urllib.request
 
 # GPU Donanım Hızlandırma ve WebKit Ortam Değişkenleri
 os.environ["GDK_BACKEND"] = "x11"
@@ -571,7 +594,53 @@ def execute_ayaz_command(cmd, args):
         )
         if proc.returncode != 0:
             raise Exception(f'Kurulum başarısız: {proc.stderr or proc.stdout}')
-        return {'id': pkg, 'name': pkg, 'exec': pkg, 'cat': 'util'}
+
+        # Kurulan paketin .desktop girdisi kullanıcı dizinine kopyalanır; Başlat
+        # menüsü ve masaüstü ikonu yeniden başlatma sonrasında da korunur.
+        # Dosya adları paket adıyla birebir örtüşmeyebilir (debian-xterm.desktop,
+        # mate-terminal.desktop); önek ve ek sonu da denenir. Kimlik ve görünen
+        # ad .desktop içinden alınır, yoksa taramanın döndürdüğü kayıtla
+        # eşleşmez ve menüde iki kez görünür.
+        app_id = app_name = app_exec = pkg
+        user_app_dir = os.path.expanduser('~/.local/share/applications')
+        try:
+            os.makedirs(user_app_dir, exist_ok=True)
+            sys_dir = '/usr/share/applications'
+            if os.path.isdir(sys_dir):
+                matches = [
+                    os.path.join(sys_dir, fn) for fn in os.listdir(sys_dir)
+                    if fn.endswith('.desktop') and (
+                        fn[:-8] == pkg
+                        or fn[:-8].startswith(pkg + '-')
+                        or fn[:-8].endswith('-' + pkg)
+                    )
+                ]
+                src = sorted(matches, key=len)[0] if matches else None
+                if src:
+                    hidden = False
+                    in_entry = False
+                    with open(src, encoding='utf-8', errors='replace') as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if line.startswith('['):
+                                in_entry = (line == '[Desktop Entry]')
+                            elif in_entry:
+                                if line.startswith('Name='):
+                                    app_name = line.split('=', 1)[1]
+                                elif line.startswith('Exec='):
+                                    parts = line.split('=', 1)[1].split()
+                                    if parts:
+                                        app_exec = parts[0]
+                                elif line.startswith(('Hidden=True', 'NoDisplay=True')):
+                                    hidden = True
+                    if not hidden:
+                        app_id = os.path.basename(src)[:-8]
+                        shutil.copy2(src, os.path.join(user_app_dir, os.path.basename(src)))
+        except Exception:
+            pass
+
+        return {'id': app_id, 'name': app_name, 'exec': app_exec,
+                'cat': 'util', 'is_installed_by_user': True}
 
     elif cmd == 'remove_deb_package':
         pkg = args.get('packageName', '').strip()
@@ -913,6 +982,36 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         subprocess.Popen(['xdg-open', target_path], env=env, start_new_session=True)
         return f"Açıldı: {target_path}"
 
+    elif cmd == 'open_url':
+        url = str(args.get('url', '')).strip()
+        if '\0' in url or not re.match(r'^https?://', url):
+            raise Exception('Yalnızca http/https adresleri açılabilir')
+        env = os.environ.copy()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        subprocess.Popen(['xdg-open', url], env=env, start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    elif cmd == 'system_browser_available':
+        # Canlı ISO'ya hiçbir tarayıcı kurulmaz; xdg-mime bu durumda boş satır
+        # ve rc=0 döner. Kayıtlı bir .desktop yoksa "Dış Tarayıcıda Aç"
+        # denetimi çalışmaz, gizlenir.
+        try:
+            out = subprocess.run(
+                ['xdg-mime', 'query', 'default', 'x-scheme-handler/https'],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, timeout=10
+            )
+            handler = (out.stdout or '').strip()
+        except Exception:
+            return True
+        if not handler.endswith('.desktop'):
+            return False
+        dirs = ['/usr/share/applications', '/usr/local/share/applications',
+                os.path.expanduser('~/.local/share/applications')]
+        return any(os.path.exists(os.path.join(d, handler)) for d in dirs)
+
     elif cmd == 'delete_file':
         target_path = args.get('path', '').strip()
         if not target_path or '\0' in target_path or not os.path.exists(target_path):
@@ -938,6 +1037,7 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
     elif cmd == 'scan_xdg_applications':
         apps = []
         app_dirs = ['/usr/share/applications', os.path.expanduser('~/.local/share/applications')]
+        user_app_dir = app_dirs[1]
         for ad in app_dirs:
             if os.path.exists(ad):
                 for fname in os.listdir(ad):
@@ -975,7 +1075,8 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                                 'name': name,
                                 'exec': exec_cmd,
                                 'cat': cat,
-                                'comment': comment
+                                'comment': comment,
+                                'is_installed_by_user': ad == user_app_dir
                             })
                         except Exception:
                             continue
@@ -1110,6 +1211,85 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             pass
         return f"Parlaklık ayarlandı: %{clamped}"
 
+    elif cmd == 'get_display_modes':
+        # Çıktı listelemeyen sunucularda (Xvfb vb.) boş döner; arayüz sabit
+        # listeye düşerek çalışmayı sürdürür.
+        info = {'output': None, 'current_mode': None, 'current_rate': None, 'modes': []}
+        try:
+            p = subprocess.run(['xrandr', '--query'], stdout=subprocess.PIPE,
+                               stderr=subprocess.DEVNULL, text=True, timeout=10)
+        except Exception:
+            return info
+
+        output = None
+        for line in p.stdout.splitlines():
+            if output is None:
+                cm = re.match(r'^(\S+)\s+connected\b', line)
+                if cm:
+                    output = cm.group(1)
+                    info['output'] = output
+                    sm = re.search(r'(\d+x\d+)\+\d+\+\d+', line)
+                    if sm:
+                        info['current_mode'] = sm.group(1)
+                continue
+
+            mm = re.match(r'^\s+(\d+x\d+)\s+(.+)$', line)
+            if mm:
+                rates = []
+                for tok in mm.group(2).split():
+                    marked = '*' in tok
+                    r = tok.replace('*', '').replace('+', '')
+                    if re.match(r'^\d+(\.\d+)?$', r):
+                        rates.append(r)
+                        if marked:
+                            info['current_rate'] = r
+                info['modes'].append({
+                    'mode': mm.group(1),
+                    'rates': rates,
+                    'current': mm.group(1) == info['current_mode']
+                })
+            elif line and not line[0].isspace():
+                break
+        return info
+
+    elif cmd == 'set_display_mode':
+        mode = str(args.get('mode', '')).strip()
+        rate = str(args.get('rate', '')).strip()
+        output = str(args.get('output', '')).strip()
+        if not re.match(r'^\d+x\d+$', mode):
+            raise Exception('Geçersiz çözünürlük biçimi')
+        if output and not re.match(r'^[A-Za-z0-9_-]+$', output):
+            raise Exception('Geçersiz ekran çıkışı')
+        cmd_args = ['xrandr']
+        if output:
+            cmd_args += ['--output', output, '--mode', mode]
+        else:
+            cmd_args += ['--size', mode]
+        if rate and re.match(r'^\d+(\.\d+)?$', rate):
+            cmd_args += ['--rate', rate]
+        try:
+            p = subprocess.run(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, timeout=15)
+        except Exception as e:
+            raise Exception(f'Ekran modu ayarlanamadı: {e}')
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Ekran modu uygulanamadı')
+        return True
+
+    elif cmd == 'set_display_scale':
+        try:
+            pct = float(args.get('percent', 100))
+        except (TypeError, ValueError):
+            raise Exception('Geçersiz ölçek değeri')
+        if not 50 <= pct <= 300:
+            raise Exception('Ölçek %50 ile %300 arasında olmalı')
+        dpi = int(round(96 * pct / 100.0))
+        p = subprocess.run(['xrandr', '--dpi', str(dpi)], stdout=subprocess.PIPE,
+                           stderr=subprocess.PIPE, text=True, timeout=10)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Ölçek uygulanamadı')
+        return True
+
     elif cmd == 'save_ai_credential':
         prov = (args.get('provider') or '').strip().lower()
         key = (args.get('apiKey') or args.get('api_key') or '').strip()
@@ -1213,7 +1393,9 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         subprocess.Popen(['pkill', '-x', 'ayaz'])
         return True
 
-    return f"{cmd} işlendi"
+    # Bilinmeyen komut sessizce "işlendi" derse arayüz hiçbir zaman hata görmez;
+    # köprü ile uyuşmayan her çağrı gerçek bir hata olarak döner.
+    raise Exception(f"Bilinmeyen komut: {cmd}")
 
 
 class AyazIpcHandler(BaseHTTPRequestHandler):
@@ -1248,8 +1430,109 @@ class AyazIpcHandler(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type, X-Ayaz-Token')
         self.end_headers()
 
+    # Uzak siteler X-Frame-Options / frame-ancestors ile çerçeveyi reddeder;
+    # bu köprü başlıkları yeniden üretmediği için yerleşik görüntüleyici her
+    # http/https adresini açabilir. Yerel ve özel ağ adresleri alınmaz.
+    LOCAL_HOST = re.compile(
+        r'^(localhost|127(\.\d+){3}|0\.0\.0\.0|10(\.\d+){3}|192\.168(\.\d+){2}|'
+        r'169\.254(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|\[?::1\]?)$', re.I)
+
+    def _proxy_error(self, code, message):
+        body = (
+            '<!DOCTYPE html><meta charset="utf-8">'
+            '<body style="margin:0;background:#181a24;color:#e8eaf2;'
+            'font:14px/1.6 system-ui,sans-serif;display:flex;align-items:center;'
+            'justify-content:center;height:100vh;text-align:center">'
+            '<div><p style="font-size:16px;margin:0 0 8px">Sayfa açılamadı</p>'
+            '<p style="opacity:.72;margin:0">' + message + '</p></div></body>'
+        ).encode('utf-8')
+        self.send_response(code)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_proxy(self):
+        try:
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        except Exception:
+            params = {}
+        url = (params.get('url') or [''])[0].strip()
+        if not re.match(r'^https?://', url):
+            self._proxy_error(400, 'Yalnızca http/https adresleri görüntülenebilir.')
+            return
+        host = urllib.parse.urlparse(url).hostname or ''
+        if self.LOCAL_HOST.match(host):
+            self._proxy_error(403, 'Yerel ağ adresleri görüntülenemez.')
+            return
+
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 '
+                          '(KHTML, like Gecko) Version/16.5 Safari/605.1.15',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'tr,en;q=0.8',
+        })
+        # Bağlantı koptuğu için bir kez daha denenir; bazı sunucular ilk isteği
+        # reddedip ikincisini kabul eder. Başarılı denemede döngü hemen biter.
+        raw = final_url = ctype = None
+        last_err = None
+        for attempt in range(2):
+            try:
+                resp = urllib.request.urlopen(req, timeout=20)
+                raw = resp.read(4 * 1024 * 1024)
+                final_url = resp.geturl()
+                ctype = resp.headers.get('Content-Type') or 'text/html; charset=utf-8'
+                if (resp.headers.get('Content-Encoding') or '').lower() == 'gzip':
+                    try:
+                        raw = gzip.decompress(raw)
+                    except Exception:
+                        pass
+                break
+            except Exception as e:
+                last_err = e
+                if attempt == 0:
+                    time.sleep(0.5)
+        if raw is None:
+            detail = str(last_err).strip() or type(last_err).__name__
+            self._proxy_error(502, f'Uzak sunucu yanıt vermedi: {detail}')
+            return
+
+        if 'html' not in ctype.lower():
+            self.send_response(200)
+            self.send_header('Content-Type', ctype)
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+            return
+
+        # <base> göreli alt kaynakları çözümler. Geçişlerin tümü host'taki
+        # decide-policy üzerinde toplandığı için ayrıca betik enjekte edilmez.
+        inject = (
+            '<base href="' + final_url.replace('&', '&amp;').replace('"', '&quot;') + '">'
+        ).encode('utf-8')
+
+        # <base> belgenin BAŞINA eklenir. Tarayıcı göreli adresleri
+        # ayrıştırma anındaki tabanla çözdüğü için </head>'den sonraki bir base
+        # ilk <link rel=stylesheet'>leri kaçırmış, stil istekleri köprü adresine
+        # (404) gidiyordu.
+        low = raw.lower()
+        marker = (re.search(rb'<head[^>]*>', low)
+                  or re.search(rb'<body[^>]*>', low)
+                  or re.search(rb'<!doctype[^>]*>', low))
+        pos = marker.end() if marker else 0
+        raw = raw[:pos] + inject + raw[pos:]
+
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def do_GET(self):
         clean_path = self.path.split('?')[0].split('#')[0]
+        if clean_path == '/proxy':
+            self._serve_proxy()
+            return
         if clean_path in ('/', ''):
             clean_path = '/index.html'
 
@@ -1387,6 +1670,11 @@ class AyazDesktop(Gtk.Window):
         except Exception:
             pass
 
+        # Uzak sayfanın kendi JavaScript'i ham bir adrese atladığında çerçeve
+        # XFO kuralıyla boş kalır. Bütün geçişler burada toplanır: köprü
+        # dışındaki hedefler iptal edilip arayüze bildirilir.
+        self.webview.connect('decide-policy', self.on_decide_policy)
+
         content_mgr = self.webview.get_user_content_manager()
         content_mgr.register_script_message_handler("ayazIpc")
         content_mgr.connect("script-message-received::ayazIpc", self.on_script_message)
@@ -1409,27 +1697,75 @@ class AyazDesktop(Gtk.Window):
         self.show_all()
 
     def on_script_message(self, manager, js_result):
-        val = js_result.get_value()
+        # WebKit2 >= 2.50'te JavascriptResult.get_value() kaldırıldı, get_js_value()
+        # JSC.Value döndürür. Hata bu satırın dışına çıkarsa istek yanısız kalır ve
+        # JS tarafındaki her çağrı 30 saniyede zaman aşımına uğrar.
         try:
+            if hasattr(js_result, 'get_js_value'):
+                val = js_result.get_js_value()
+            else:
+                val = js_result.get_value()
             raw_str = val.to_string()
             data = json.loads(raw_str)
             req_id = data.get('id') if data.get('id') is not None else data.get('req_id')
             cmd = data.get('cmd')
             args = data.get('args', {})
-
-            def run_worker():
-                try:
-                    res = execute_ayaz_command(cmd, args)
-                    payload = json.dumps({'id': req_id, 'result': res})
-                    js_code = f"if (window.__AYAZ_RESOLVE__) window.__AYAZ_RESOLVE__({payload});"
-                except Exception as err:
-                    payload = json.dumps({'id': req_id, 'error': str(err)})
-                    js_code = f"if (window.__AYAZ_REJECT__) window.__AYAZ_REJECT__({payload});"
-                GLib.idle_add(lambda: self.webview.run_javascript(js_code, None, None, None))
-
-            threading.Thread(target=run_worker, daemon=True).start()
         except Exception as e:
-            pass
+            print(f"[IPC] mesaj cozulemedi: {e}", flush=True)
+            return
+
+        def run_worker():
+            try:
+                res = execute_ayaz_command(cmd, args)
+                payload = json.dumps({'id': req_id, 'result': res})
+                js_code = f"if (window.__AYAZ_RESOLVE__) window.__AYAZ_RESOLVE__({payload});"
+            except Exception as err:
+                payload = json.dumps({'id': req_id, 'error': str(err)})
+                js_code = f"if (window.__AYAZ_REJECT__) window.__AYAZ_REJECT__({payload});"
+
+            def deliver():
+                try:
+                    self.webview.run_javascript(js_code, None, None, None)
+                except Exception as e:
+                    print(f"[IPC] run_javascript hatasi: {e}", flush=True)
+                return False
+
+            GLib.idle_add(deliver)
+
+        threading.Thread(target=run_worker, daemon=True).start()
+
+    PROXY_PREFIX = f'http://127.0.0.1:{PORT}/proxy'
+
+    def on_decide_policy(self, view, decision, decision_type):
+        # Köprüye giden her şey olduğu gibi geçer; http/https olan diğer her
+        # hedef iptal edilir ve hedef adres arayüze bildirilir. Arayüz adresi
+        # köprü üzerinden yeniden açtığı için bağlantı, form ve JavaScript
+        # geçişleri aynı yoldan ilerler.
+        uri = ''
+        if isinstance(decision, WebKit2.NavigationPolicyDecision):
+            try:
+                req = decision.get_navigation_action().get_request()
+            except Exception:
+                req = None
+            if req is None:
+                try:
+                    req = decision.get_request()
+                except Exception:
+                    req = None
+            if req is not None:
+                uri = req.get_uri() if hasattr(req, 'get_uri') else str(req.to_string())
+
+        if not uri.startswith(('http://', 'https://')) or uri.startswith(self.PROXY_PREFIX):
+            decision.use()
+            return
+
+        decision.ignore()
+        try:
+            self.webview.run_javascript(
+                "if (window.__ayazProxyNav) window.__ayazProxyNav(%s);"
+                % json.dumps(uri), None, None, None)
+        except Exception as e:
+            print(f"[TARAYICI] gecis bildirimi gonderilemedi: {e}", flush=True)
 
 if __name__ == "__main__":
     t = threading.Thread(target=start_ipc_server, daemon=True)
@@ -1494,14 +1830,29 @@ fi
 cp -v "$KERNEL_FILE" "$IMAGE_DIR/live/vmlinuz"
 cp -v "$INITRD_FILE" "$IMAGE_DIR/live/initrd"
 
-# initrd içinde live-boot modüllerinin varlığını doğrula
+# initrd içinde live-boot modüllerinin varlığını doğrula.
+# lsinitramfs host'ta kurulu olmayabilir (initramfs-tools-core chroot'a ait);
+# yoksa cpio ile initrd'yi doğrudan listele, o da yoksa doğrulamayı atla.
 echo "[DOĞRULAMA] initrd içindeki live-boot modülleri kontrol ediliyor..."
-if lsinitramfs "$IMAGE_DIR/live/initrd" 2>/dev/null | grep -q "live"; then
+# pipefail açık: erken kapanan okuyucu (grep -q, head) yazan tarafı SIGPIPE ile
+# öldürür ve 141 kodu tüm betiği sonlandırır. Bu yüzden boru yok — dosya girdili
+# grep ve tüm girdiyi okuyup tüketen sed kullanılır.
+if command -v lsinitramfs >/dev/null 2>&1; then
+    INITRD_LIST=$(lsinitramfs "$IMAGE_DIR/live/initrd" 2>/dev/null || true)
+elif command -v cpio >/dev/null 2>&1; then
+    INITRD_LIST=$(zcat "$IMAGE_DIR/live/initrd" 2>/dev/null | cpio -t 2>/dev/null || true)
+else
+    INITRD_LIST=""
+fi
+
+if [ -z "$INITRD_LIST" ]; then
+    echo "[BİLGİ] initrd içeriği listelenemedi (lsinitramfs/cpio host'ta yok), doğrulama atlandı."
+elif grep -q "live" <<< "$INITRD_LIST"; then
     echo "[OK] live-boot modülleri initrd içinde mevcut."
 else
     echo "[UYARI] live-boot modülleri initrd içinde bulunamadı. Boot sorunları yaşanabilir."
-    echo "        lsinitramfs çıktısı (ilk 20 satır):"
-    lsinitramfs "$IMAGE_DIR/live/initrd" 2>/dev/null | head -20 || true
+    echo "        initrd listesi (ilk 20 satır):"
+    printf '%s\n' "$INITRD_LIST" | sed -n '1,20p'
 fi
 
 # Sanal bağlantıları kaldır

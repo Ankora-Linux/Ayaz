@@ -35,10 +35,13 @@ fi
 
 # 3. Tauri CLI ile .deb derlemesi
 echo "[2/4] Tauri ile .deb paketi derleniyor..."
-npm run tauri build -- --target deb
+npm run tauri build -- --bundles deb
+
 
 # 4. Derlenen paketin kontrolü
-DEB_FILE=$(find src-tauri/target/release/bundle/deb/ -name "*.deb" 2>/dev/null | head -n 1)
+# pipefail açık: head erken çıkarsa find SIGPIPE ile 141 döner ve betik,
+# açıklayıcı "[HATA]" mesajı basmadan sessizce ölür.
+DEB_FILE=$(find src-tauri/target/release/bundle/deb/ -name "*.deb" 2>/dev/null | head -n 1 || true)
 
 if [ -n "$DEB_FILE" ] && [ -f "$DEB_FILE" ]; then
     echo "[3/4] Paket başarıyla oluşturuldu:"

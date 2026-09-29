@@ -51,6 +51,7 @@ jobs:
             squashfs-tools \
             xorriso \
             isolinux \
+            syslinux-common \
             syslinux-efi \
             grub-pc-bin \
             grub-efi-amd64-bin \
@@ -78,6 +79,7 @@ jobs:
 
       - name: Ankora Linux Canlı ISO Kalıbını Pişir (build-iso.sh)
         run: |
+          sed -i 's/\r$//' scripts/*.sh
           sudo bash scripts/build-iso.sh
 
       - name: ISO Bütünlük ve Boyut Denetimi
