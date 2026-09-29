@@ -2089,7 +2089,7 @@
       </div>
     </div>
 
-    <!-- 2.1 MAĞAZADAN YÜKLENEN UYGULAMALAR (INSTALLED FROM STORE) -->
+    <!-- 2.0 MAĞAZADAN YÜKLENEN UYGULAMALAR (INSTALLED FROM STORE) -->
     <div class="start-section-heading" id="start-installed-heading" style="display: none; margin-top: 14px;">
       <span class="heading-title">Yüklü Uygulamalar (Mağaza)</span>
       <span class="heading-sub" id="start-installed-count">0 Uygulama</span>

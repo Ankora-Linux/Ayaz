@@ -75,19 +75,115 @@ fi
 
 echo "[AYAZ GÜNCELLEYİCİ] Güvenlik doğrulamaları geçildi. Kurulum: $CANONICAL_PATH (paket: $PKG_NAME)"
 
-# 7. Dpkg ile Ayaz DE paketini kur
-dpkg -i "$CANONICAL_PATH" || {
-    echo "[UYARI] Eksik bağımlılıklar tamamlanıyor (apt-get install -f)..."
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -f -y -qq
+# ==============================================================================
+# ATOMİK KURULUM DURUM MAKİNESİ
+#   installing -> committed  (kurulum doğrulandı)
+#   installing -> failed     (hata, önceki sürüme geri alındı)
+#   installing -> broken     (hata, geri alma mümkün değil — elle müdahale)
+# Durum dosyası: $STAGING_DIR/update-state
+# ==============================================================================
+STATE_FILE="$STAGING_DIR/update-state"
+PREV_VERSION=$(dpkg-query -W -f='${Version}' "$PKG_NAME" 2>/dev/null || echo "")
+PKG_VERSION=$(dpkg-deb --showformat='${Version}' -W "$CANONICAL_PATH" 2>/dev/null || echo "unknown")
+EXPECTED_VERSION="${2:-}"
+
+# Sürüm karşılaştırması paket eki (+deb1, -1) ve epoch farkına duyarlı olsun;
+# release etiketi "v" ile yazılmış olabilir.
+norm_ver() {
+    local v="$1"
+    v="${v#*:}"
+    v="${v#v}"
+    v="${v%%-*}"
+    v="${v%%+*}"
+    printf '%s' "$v"
 }
 
-# 8. Senkronize et
-sync
+write_state() {
+    {
+        echo "state=$1"
+        echo "note=$2"
+        echo "package=$PKG_NAME"
+        echo "previous=${PREV_VERSION:-none}"
+        echo "new=${PKG_VERSION:-unknown}"
+        echo "expected=${EXPECTED_VERSION:-any}"
+        echo "time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    } > "$STATE_FILE"
+    chmod 600 "$STATE_FILE"
+}
 
-# 9. Geçici kurulum paketini güvenle temizle
+# Geri alma deb'i: kurulu sürümün deb'i depodan indirilir (varsa saklanır).
+ROLLBACK_DEB="$STAGING_DIR/rollback-${PKG_NAME}.deb"
+if [[ -n "$PREV_VERSION" && "$(norm_ver "$PREV_VERSION")" != "$(norm_ver "$PKG_VERSION")" ]]; then
+    echo "[AYAZ GÜNCELLEYİCİ] Geri alma kopyası hazırlanıyor ($PKG_NAME=$PREV_VERSION)..."
+    TMP_DL=$(mktemp -d "$STAGING_DIR/.dl-XXXXXX")
+    if (cd "$TMP_DL" && apt-get download -qq "$PKG_NAME=$PREV_VERSION" >/dev/null 2>&1); then
+        DL_FILE=$(find "$TMP_DL" -maxdepth 1 -name '*.deb' -print -quit)
+        if [[ -n "$DL_FILE" && -f "$DL_FILE" ]]; then
+            mv -f "$DL_FILE" "$ROLLBACK_DEB"
+            chown root:root "$ROLLBACK_DEB"
+            chmod 0600 "$ROLLBACK_DEB"
+        fi
+    fi
+    rm -rf "$TMP_DL"
+fi
+
+write_state "installing" "kurulum başlıyor"
+
+rollback_now() {
+    # Yalnızca tam olarak kurulu sürümün kopyası geri alınır.
+    if [[ -f "$ROLLBACK_DEB" ]]; then
+        RB_VER=$(dpkg-deb -f "$ROLLBACK_DEB" Version 2>/dev/null || echo "")
+        if [[ "$(norm_ver "$RB_VER")" == "$(norm_ver "$PREV_VERSION")" ]]; then
+            echo "[AYAZ GÜNCELLEYİCİ] Geri alınıyor: $ROLLBACK_DEB ($RB_VER)"
+            dpkg -i "$ROLLBACK_DEB" >/dev/null 2>&1 || true
+            apt-get install -f -y -qq >/dev/null 2>&1 || true
+            return 0
+        fi
+        echo "[UYARI] Geri alma deb'i beklenen sürüme uymuyor ($RB_VER != $PREV_VERSION); kullanılmıyor." >&2
+    fi
+    return 1
+}
+
+# 7. Dpkg ile Ayaz DE paketini kur (set -e altında hata yakalanır)
+DPKG_RC=0
+dpkg -i "$CANONICAL_PATH" || DPKG_RC=$?
+if [[ $DPKG_RC -ne 0 ]]; then
+    echo "[UYARI] dpkg hata verdi (kod $DPKG_RC); eksik bağımlılıklar deneniyor (apt-get install -f)..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq || true
+    apt-get install -f -y -qq || true
+fi
+
+# 8. Kurulum sonucunu doğrula: paket kurulu olmalı, veriliyse beklenen
+#    sürümle (paket eki farkları hariç) eşleşmeli.
+INSTALLED_STATE=$(dpkg-query -W -f='${Status}' "$PKG_NAME" 2>/dev/null || echo "yok")
+INSTALLED_VERSION=$(dpkg-query -W -f='${Version}' "$PKG_NAME" 2>/dev/null || echo "")
+VERSION_OK=1
+if [[ -n "$EXPECTED_VERSION" ]] && \
+   [[ "$(norm_ver "$INSTALLED_VERSION")" != "$(norm_ver "$EXPECTED_VERSION")" ]]; then
+    VERSION_OK=0
+fi
+
+if [[ "$INSTALLED_STATE" != "install ok installed" || $VERSION_OK -eq 0 ]]; then
+    write_state "broken" "doğrulama başarısız: durum='$INSTALLED_STATE' sürüm='${INSTALLED_VERSION:-yok}'"
+    if rollback_now; then
+        write_state "failed" "geri alındı: önceki=${PREV_VERSION:-none} bozuk=${INSTALLED_VERSION:-yok}"
+        echo "[HATA] Güncelleme doğrulanamadı; önceki sürüme geri alındı (durum: $STATE_FILE)." >&2
+        rm -f "$CANONICAL_PATH"
+        exit 7
+    fi
+    write_state "broken" "geri alma mümkün değil; elle müdahale gerekli"
+    echo "[HATA] Güncelleme doğrulanamadı ve geri alınamadı (durum: $STATE_FILE)." >&2
+    exit 8
+fi
+
+# 9. Senkronize et, durumu onayla
+sync
+write_state "committed" "kurulu sürüm: $INSTALLED_VERSION"
+
+# 10. Güncellemenin kendi deb'i temizlenir; geri alma deb'i bir sonraki
+#     başarılı güncelleme'ye kadar saklanır.
 rm -f "$CANONICAL_PATH"
 
-echo "[AYAZ GÜNCELLEYİCİ] Ayaz Masaüstü Ortamı başarıyla güncellendi."
+echo "[AYAZ GÜNCELLEYİCİ] Ayaz Masaüstü Ortamı $INSTALLED_VERSION sürümüne güncellendi (durum: committed)."
 exit 0

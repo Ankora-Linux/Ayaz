@@ -459,6 +459,118 @@ IPC_TOKEN = secrets.token_hex(32)
 # Ardışık başarısız token denemelerini sayar; aşımında kapı tamamen kapanır
 IPC_STATE = {'bad': 0}
 
+# Radyo (Wi-Fi/Bluetooth) ve ağ durumu: nmcli varsa o, yoksa rfkill.
+def _run_capture(cmd_args):
+    # Sabit argümanlı tek komut; kabuk yorumlaması yok, aracı yoksa None.
+    try:
+        proc = subprocess.run(
+            cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, timeout=15
+        )
+    except Exception:
+        return None
+    if proc.returncode != 0:
+        return None
+    return proc.stdout
+
+def _rfkill_enabled(out):
+    for line in out.splitlines():
+        t = line.strip()
+        if t.startswith('Soft blocked:'):
+            return t.endswith('no')
+    return False
+
+def _radio_state():
+    state = {
+        'available': False, 'backend': '', 'wifi_enabled': False,
+        'bluetooth_enabled': False, 'wifi_ssid': ''
+    }
+    wifi = _run_capture(['nmcli', 'radio', 'wifi'])
+    if wifi is not None:
+        bt = _run_capture(['nmcli', 'radio', 'bluetooth']) or ''
+        state['available'] = True
+        state['backend'] = 'nmcli'
+        state['wifi_enabled'] = wifi.strip() == 'enabled'
+        state['bluetooth_enabled'] = bt.strip() == 'enabled'
+        if state['wifi_enabled']:
+            listing = _run_capture(['nmcli', '-t', '-f', 'ACTIVE,SSID', 'dev', 'wifi', 'list'])
+            if listing:
+                for line in listing.splitlines():
+                    parts = line.split(':', 1)
+                    if len(parts) == 2 and parts[0] == 'yes' and parts[1]:
+                        state['wifi_ssid'] = parts[1].replace('\\:', ':').replace('\\\\', '\\')
+                        break
+        return state
+    wl = _run_capture(['rfkill', 'list', 'wifi'])
+    if wl is not None:
+        state['available'] = True
+        state['backend'] = 'rfkill'
+        state['wifi_enabled'] = _rfkill_enabled(wl)
+        bl = _run_capture(['rfkill', 'list', 'bluetooth'])
+        if bl is not None:
+            state['bluetooth_enabled'] = _rfkill_enabled(bl)
+    return state
+
+def _battery_state():
+    # Masaüstü makinelerde BAT* yoktur; None döner ve arayüzde gizlenir.
+    try:
+        for name in sorted(os.listdir('/sys/class/power_supply')):
+            if not name.startswith('BAT'):
+                continue
+            base = os.path.join('/sys/class/power_supply', name)
+            pct = None
+            status = None
+            try:
+                with open(os.path.join(base, 'capacity')) as f:
+                    pct = int(f.read().strip())
+            except Exception:
+                pass
+            try:
+                with open(os.path.join(base, 'status')) as f:
+                    status = f.read().strip()
+            except Exception:
+                pass
+            return {'percent': pct, 'status': status}
+    except Exception:
+        pass
+    return {'percent': None, 'status': None}
+
+# /proc/stat sayaçları iki okuma arası okunur; ilk örnekte 0.0 döner.
+_CPU_PREV = {'total': None, 'idle': None}
+
+def _cpu_percent():
+    try:
+        with open('/proc/stat') as f:
+            parts = f.readline().split()
+        vals = [int(x) for x in parts[1:] if x.isdigit()]
+        if len(vals) < 4:
+            return None
+        total = sum(vals)
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+    except Exception:
+        return None
+    prev_total = _CPU_PREV['total']
+    prev_idle = _CPU_PREV['idle']
+    pct = 0.0
+    if prev_total is not None and total > prev_total:
+        dt = total - prev_total
+        di = idle - prev_idle
+        pct = max(0.0, min(100.0, 100.0 * (1.0 - di / dt)))
+    _CPU_PREV['total'] = total
+    _CPU_PREV['idle'] = idle
+    return round(pct, 1)
+
+def _disk_usage():
+    # Kök bölünüm: (kullanılan GB, toplam GB, %); okunamazsa None.
+    try:
+        import shutil
+        du = shutil.disk_usage('/')
+        g = 1024 ** 3
+        pct = int(round(100.0 * du.used / du.total)) if du.total else 0
+        return (round(du.used / g, 1), round(du.total / g, 1), pct)
+    except Exception:
+        return None
+
 def execute_ayaz_command(cmd, args):
     global TERM_CWD
     home_dir = os.path.expanduser('~')
@@ -467,6 +579,17 @@ def execute_ayaz_command(cmd, args):
 
     if not os.path.exists(TERM_CWD):
         TERM_CWD = home_dir
+
+    if cmd == 'report_console':
+        # Teşhis kaydı: konsol/CSP ihlalleri (/tmp/ayaz-console.log).
+        line = str(args.get('line', ''))[:500].strip()
+        if line:
+            try:
+                with open('/tmp/ayaz-console.log', 'a', encoding='utf-8') as fh:
+                    fh.write(line + '\n')
+            except Exception:
+                pass
+        return None
 
     if cmd == 'run_terminal_command':
         command = args.get('command', '').strip()
@@ -664,6 +787,149 @@ def execute_ayaz_command(cmd, args):
     elif cmd == 'system_reboot':
         subprocess.Popen(['/sbin/reboot', '-f'])
         return 'Sistem yeniden başlatılıyor'
+
+    elif cmd == 'get_radio_state':
+        return _radio_state()
+
+    elif cmd == 'set_radio_state':
+        kind = str(args.get('kind', '')).strip()
+        enabled = bool(args.get('enabled'))
+        if kind not in ('wifi', 'bluetooth'):
+            raise Exception('Geçersiz radyo türü.')
+        onoff = 'on' if enabled else 'off'
+        if _run_capture(['nmcli', 'radio', kind, onoff]) is not None:
+            return _radio_state()
+        verb = 'unblock' if enabled else 'block'
+        if _run_capture(['rfkill', verb, kind]) is not None:
+            return _radio_state()
+        raise Exception('Ağ yöneticisi bulunamadı: sistemde nmcli veya rfkill yok.')
+
+    elif cmd == 'scan_wifi_networks':
+        _run_capture(['nmcli', 'dev', 'wifi', 'rescan'])
+        out = _run_capture(['nmcli', '-t', '-f', 'ACTIVE,SSID,SIGNAL', 'dev', 'wifi', 'list'])
+        if out is None:
+            raise Exception('Kablosuz tarama için NetworkManager (nmcli) kurulu olmalı.')
+        networks = []
+        for line in out.splitlines():
+            parts = line.split(':', 2)
+            if len(parts) < 3:
+                continue
+            active, ssid, signal = parts
+            ssid = ssid.replace('\\:', ':').replace('\\\\', '\\')
+            if not ssid:
+                continue
+            try:
+                sig = int(signal)
+            except ValueError:
+                sig = 0
+            networks.append({'ssid': ssid, 'signal': sig, 'active': active == 'yes'})
+        return networks
+
+    elif cmd == 'wifi_connect':
+        ssid = str(args.get('ssid', '')).strip()
+        # SSID tek argüman (kabuk yok); IEEE sınırı 32 bayttır.
+        if not ssid or len(ssid.encode('utf-8')) > 32:
+            raise Exception('Geçersiz ağ adı (SSID).')
+        try:
+            proc = subprocess.run(
+                ['nmcli', 'dev', 'wifi', 'connect', ssid],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=30
+            )
+        except Exception:
+            raise Exception('nmcli bulunamadı: kablosuz bağlantı için NetworkManager gerekli.')
+        if proc.returncode == 0:
+            return f'Bağlanıldı: {ssid}'
+        err = (proc.stderr or '').strip()
+        raise Exception(err or f'Bağlanılamadı: {ssid}')
+
+    elif cmd == 'get_network_info':
+        info = {'interface': '', 'ip': '', 'prefix': 0, 'gateway': '',
+                'dns': [], 'connected': False}
+        out = _run_capture(['ip', '-o', '-4', 'addr', 'show', 'scope', 'global'])
+        if out:
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) < 4 or parts[2] != 'inet':
+                    continue
+                cidr = parts[3]
+                if '/' not in cidr:
+                    continue
+                ip, prefix = cidr.split('/', 1)
+                info['interface'] = parts[1]
+                info['ip'] = ip
+                try:
+                    info['prefix'] = int(prefix)
+                except ValueError:
+                    info['prefix'] = 0
+                info['connected'] = True
+                break
+        rt = _run_capture(['ip', 'route', 'show', 'default'])
+        if rt:
+            for line in rt.splitlines():
+                if ' via ' in line:
+                    info['gateway'] = line.split(' via ', 1)[1].split()[0]
+                    break
+        try:
+            with open('/etc/resolv.conf') as f:
+                for line in f:
+                    if line.startswith('nameserver'):
+                        fields = line.split(None, 1)
+                        if len(fields) == 2 and fields[1].strip():
+                            info['dns'].append(fields[1].strip())
+        except Exception:
+            pass
+        return info
+
+    elif cmd == 'get_processes':
+        out = _run_capture(['ps', '-eo', 'pid=,user=,pcpu=,rss=,stat=,comm='])
+        if out is None:
+            raise Exception('Süreç listesi okunamadı (ps bulunamadı).')
+        status_map = {'R': 'Çalışıyor', 'S': 'Uyuyor', 'D': 'Beklemede',
+                      'Z': 'Zombi', 'T': 'Durduruldu', 't': 'Durduruldu',
+                      'I': 'Boşta'}
+        procs = []
+        for line in out.splitlines():
+            f = line.split()
+            if len(f) < 6:
+                continue
+            try:
+                pid = int(f[0])
+            except ValueError:
+                continue
+            try:
+                cpu = float(f[2])
+            except ValueError:
+                cpu = 0.0
+            try:
+                mem_mb = float(f[3]) / 1024.0
+            except ValueError:
+                mem_mb = 0.0
+            procs.append({
+                'pid': pid, 'user': f[1], 'cpu': cpu, 'mem_mb': mem_mb,
+                'status': status_map.get(f[4][:1], 'Bilinmiyor'),
+                'name': ' '.join(f[5:])
+            })
+        procs.sort(key=lambda p: p['cpu'], reverse=True)
+        return procs[:300]
+
+    elif cmd == 'kill_process':
+        try:
+            pid = int(args.get('pid', 0))
+        except (TypeError, ValueError):
+            raise Exception('Geçersiz PID.')
+        if pid <= 1:
+            raise Exception('PID 1 (init) ve altındaki süreçler sonlandırılamaz.')
+        if pid == os.getpid() or pid == os.getppid():
+            raise Exception('Görev Yöneticisi kendi sürecini sonlandıramaz.')
+        proc = subprocess.run(
+            ['kill', '-TERM', str(pid)],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+        )
+        if proc.returncode != 0:
+            err = (proc.stderr or '').strip()
+            raise Exception(err or f'PID {pid} sonlandırılamadı.')
+        return f'SIGTERM gönderildi (PID {pid}).'
 
     elif cmd == 'get_storage_devices':
         try:
@@ -888,6 +1154,8 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         except Exception:
             pass
 
+        bat = _battery_state()
+        du = _disk_usage()
         return {
             'os_name': 'Devuan GNU/Linux 5 (daedalus)',
             'kernel': kernel,
@@ -895,7 +1163,13 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             'memory_used_mb': mem_used,
             'memory_total_mb': mem_total,
             'cpu_cores': os.cpu_count() or 4,
-            'uptime_seconds': uptime_s
+            'uptime_seconds': uptime_s,
+            'battery_percent': bat['percent'],
+            'battery_status': bat['status'],
+            'cpu_percent': _cpu_percent(),
+            'disk_percent': du[2] if du else None,
+            'disk_used_gb': du[0] if du else None,
+            'disk_total_gb': du[1] if du else None
         }
 
     elif cmd == 'optimize_system_memory':
@@ -1643,7 +1917,7 @@ def start_ipc_server():
 class AyazDesktop(Gtk.Window):
     def __init__(self):
         super().__init__(title="Ayaz — Ankora Linux")
-        self.connect("destroy", Gtk.main_quit)
+        self.connect("destroy", self.on_destroy)
         self.maximize()
         self.fullscreen()
         
@@ -1679,16 +1953,21 @@ class AyazDesktop(Gtk.Window):
         content_mgr.register_script_message_handler("ayazIpc")
         content_mgr.connect("script-message-received::ayazIpc", self.on_script_message)
         try:
+            # Token yalnız ana çerçeveye enjekte edilir: köprü (iframe)
+            # sayfalarında window.__AYAZ_IPC_TOKEN__ bulunmaz, messageHandler
+            # yolu token doğrulaması olmadan açılmaz.
             token_script = WebKit2.UserScript.new(
                 f"window.__AYAZ_IPC_TOKEN__ = '{IPC_TOKEN}';",
-                WebKit2.UserContentInjectedFrames.ALL_FRAMES,
+                WebKit2.UserContentInjectedFrames.TOP_FRAME,
                 WebKit2.UserScriptInjectionTime.START,
                 None,
                 None
             )
-            content_mgr.add_user_script(token_script)
-        except Exception:
-            pass
+            content_mgr.add_script(token_script)
+        except Exception as e:
+            # Enjeksiyon sessizce düşerse tüm IPC istekleri token reddi yer;
+            # hata loga yazılır ki kırık köprü görünür kalsın.
+            print(f"[IPC] token script enjekte edilemedi: {e}", flush=True)
 
         # Doğrudan yerel dosya üzerinden açma - Sıfır ağ bağımlılığı, anında ve hatasız başlatma
         path = os.path.abspath("/usr/share/ayaz/index.html")
@@ -1714,6 +1993,16 @@ class AyazDesktop(Gtk.Window):
             print(f"[IPC] mesaj cozulemedi: {e}", flush=True)
             return
 
+        # GÜVENLİK: messageHandler yolu da token ister. Token yalnız ana
+        # çerçeveye enjekte edildiğinden köprüdeki uzak sayfalar bu kapıyı
+        # açamaz; geçersiz denemeler kapıyı kalıcı olarak kapatır.
+        req_token = data.get('token', '')
+        if not isinstance(req_token, str) or not hmac.compare_digest(req_token, IPC_TOKEN):
+            IPC_STATE['bad'] += 1
+            print("[IPC] gecersiz token: messageHandler istegi reddedildi", flush=True)
+            return
+        IPC_STATE['bad'] = 0
+
         def run_worker():
             try:
                 res = execute_ayaz_command(cmd, args)
@@ -1735,6 +2024,18 @@ class AyazDesktop(Gtk.Window):
         threading.Thread(target=run_worker, daemon=True).start()
 
     PROXY_PREFIX = f'http://127.0.0.1:{PORT}/proxy'
+
+    def on_destroy(self, *args):
+        # Pencere kapanırken arayüz temiz çıkış işareti düşer; oturum çökme
+        # sayacı yalnız gerçekten beklenmedik kapanışlarda artar.
+        try:
+            self.webview.run_javascript(
+                'window.__ayazCleanExit && window.__ayazCleanExit();',
+                None, None, None)
+        except Exception:
+            pass
+        time.sleep(0.3)
+        Gtk.main_quit()
 
     def on_decide_policy(self, view, decision, decision_type):
         # Köprüye giden her şey olduğu gibi geçer; http/https olan diğer her
@@ -1771,6 +2072,24 @@ if __name__ == "__main__":
     t = threading.Thread(target=start_ipc_server, daemon=True)
     t.start()
     app = AyazDesktop()
+
+    def _sig_exit(signum, frame):
+        # SIGTERM/SIGINT ile kapanışta da temiz çıkış işareti düşülür.
+        try:
+            app.webview.run_javascript(
+                'window.__ayazCleanExit && window.__ayazCleanExit();',
+                None, None, None)
+        except Exception:
+            pass
+        time.sleep(0.5)
+        Gtk.main_quit()
+
+    try:
+        import signal as _signal
+        _signal.signal(_signal.SIGTERM, _sig_exit)
+        _signal.signal(_signal.SIGINT, _sig_exit)
+    except Exception:
+        pass
     Gtk.main()
 AYAZ_PY
     chmod +x "$CHROOT_DIR/usr/bin/ayaz"
@@ -1854,6 +2173,30 @@ else
     echo "        initrd listesi (ilk 20 satır):"
     printf '%s\n' "$INITRD_LIST" | sed -n '1,20p'
 fi
+
+# ISO manifest'i: kök dosya sisteminin imaj künyesi. Ayarlar > Hakkında da
+# bu dosyadan okur; sürüm, derleme tarihi ve git özeti burada saklanır.
+echo "[MANIFEST] Sistem künyesi yazılıyor..."
+AYAZ_VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$ROOT_DIR/src-tauri/tauri.conf.json")
+AYAZ_VERSION="${AYAZ_VERSION%%$'\n'*}"
+if [ -z "$AYAZ_VERSION" ]; then
+    AYAZ_VERSION="2.0.0"
+fi
+GIT_REV=$(git -C "$ROOT_DIR" rev-parse --short HEAD 2>/dev/null || echo "bilinmiyor")
+BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+mkdir -p "$CHROOT_DIR/usr/share/ayaz"
+cat > "$CHROOT_DIR/usr/share/ayaz/manifest.json" <<MANIFEST_JSON
+{
+  "product": "Ayaz DE (Ankora Linux)",
+  "version": "${AYAZ_VERSION}",
+  "build_date": "${BUILD_DATE}",
+  "git_revision": "${GIT_REV}",
+  "architecture": "amd64",
+  "base": "Devuan GNU/Linux (Daedalus)",
+  "init_system": "SysVinit",
+  "image_type": "hybrid live ISO"
+}
+MANIFEST_JSON
 
 # Sanal bağlantıları kaldır
 umount -lf "$CHROOT_DIR/dev/pts" 2>/dev/null || true
@@ -1946,7 +2289,48 @@ if [ -f "$IMAGE_DIR/EFI/boot/bootx64.efi" ]; then
     fi
 fi
 
-# 10. Xorriso ile Hibrit ISO İmajının Derlenmesi
+# 10. ISO Önyükleme Manifest'i: boot zinciri künyesi + paket envanteri.
+#     ISO kökünde durur (Windows'tan bağlanınca da okunur); kurulu paketler
+#     ve önyükleme dosyalarının SHA-256 toplamları sırayla listelenir.
+echo "[MANIFEST] ISO önyükleme manifest'i yazılıyor..."
+{
+    echo "# Ayaz DE - ISO Manifest"
+    echo "# surum: ${AYAZ_VERSION}"
+    echo "# derleme: ${BUILD_DATE}"
+    echo "# git: ${GIT_REV}"
+    echo "# mimari: amd64"
+    echo ""
+    echo "[boot-files]"
+} > "$IMAGE_DIR/ayaz-manifest.txt"
+
+add_manifest_hash() {
+    local abs="$1" label="$2"
+    if [ -f "$abs" ]; then
+        printf '%s  %s\n' "$(sha256sum "$abs" | cut -d' ' -f1)" "$label" >> "$IMAGE_DIR/ayaz-manifest.txt"
+    else
+        printf 'YOK  %s\n' "$label" >> "$IMAGE_DIR/ayaz-manifest.txt"
+    fi
+}
+
+add_manifest_hash "$IMAGE_DIR/live/vmlinuz" "/live/vmlinuz"
+add_manifest_hash "$IMAGE_DIR/live/initrd" "/live/initrd"
+add_manifest_hash "$IMAGE_DIR/isolinux/isolinux.bin" "/isolinux/isolinux.bin"
+add_manifest_hash "$IMAGE_DIR/isolinux/isolinux.cfg" "/isolinux/isolinux.cfg"
+add_manifest_hash "$IMAGE_DIR/boot/grub/grub.cfg" "/boot/grub/grub.cfg"
+add_manifest_hash "$IMAGE_DIR/EFI/boot/bootx64.efi" "/EFI/boot/bootx64.efi"
+add_manifest_hash "$IMAGE_DIR/boot/grub/efi.img" "/boot/grub/efi.img"
+add_manifest_hash "$IMAGE_DIR/live/filesystem.squashfs" "/live/filesystem.squashfs"
+
+{
+    echo ""
+    echo "[packages]"
+} >> "$IMAGE_DIR/ayaz-manifest.txt"
+# dpkg -l yalnız /var/lib/dpkg okur; chroot içinde /proc mount'u gerekmez.
+chroot "$CHROOT_DIR" dpkg -l 2>/dev/null | awk '/^ii/{print $2" "$3}' >> "$IMAGE_DIR/ayaz-manifest.txt" || true
+
+echo "[OK] Manifest yazıldı: ayaz-manifest.txt ($(wc -l < "$IMAGE_DIR/ayaz-manifest.txt") satır)"
+
+# 11. Xorriso ile Hibrit ISO İmajının Derlenmesi
 echo "[7/8] Xorriso ile bootable hibrit ISO oluşturuluyor..."
 ISOHDPFX=$(find /usr/lib/ISOLINUX /usr/lib/syslinux -name "isohdpfx.bin" 2>/dev/null | head -n 1 || true)
 

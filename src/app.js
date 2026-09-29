@@ -116,7 +116,11 @@
         return await new Promise((resolve, reject) => {
           const id = ++this.reqIdCounter;
           this.pendingRequests.set(id, { resolve, reject });
-          window.webkit.messageHandlers.ayazIpc.postMessage(JSON.stringify({ id, cmd, args: args || {} }));
+          // Token yalnız ana enjekte edilir; köprü (iframe) sayfaları bu yola
+          // token olmadan erişemez.
+          window.webkit.messageHandlers.ayazIpc.postMessage(JSON.stringify({
+            id, cmd, args: args || {}, token: window.__AYAZ_IPC_TOKEN__ || ''
+          }));
           setTimeout(() => {
             if (this.pendingRequests.has(id)) {
               this.pendingRequests.delete(id);
@@ -264,8 +268,21 @@
             memory_used_mb: 110,
             memory_total_mb: 8192,
             cpu_cores: 4,
-            uptime_seconds: 7200
+            uptime_seconds: 7200,
+            // Backend yoksa pil/CPU/disk alanları boş kalır; arayüz gizler.
+            battery_percent: null,
+            battery_status: null,
+            cpu_percent: null,
+            disk_percent: null,
+            disk_used_gb: null,
+            disk_total_gb: null
           };
+
+        case 'get_processes':
+          throw new Error('Süreç listesi yalnızca yerel sistem üzerinden okunabilir (köprü kapalı).');
+
+        case 'kill_process':
+          throw new Error('Süreç sonlandırma yalnızca yerel sistem üzerinden yapılabilir (köprü kapalı).');
 
         case 'optimize_system_memory':
           return {
@@ -350,6 +367,25 @@
     }
   };
   TauriBridge.init();
+
+  // Teşhis: konsol/CSP ihlalleri yerel sisteme yazılır (/tmp/ayaz-console.log).
+  // Yalnız WebKit IPC yolu varsa iletilir; hata konsola da düşer, yutulmaz.
+  const consoleReport = (kind, detail) => {
+    if (!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ayazIpc)) return;
+    try {
+      window.webkit.messageHandlers.ayazIpc.postMessage(JSON.stringify({
+        id: 0,
+        cmd: 'report_console',
+        args: { line: `${new Date().toISOString()} [${kind}] ${detail}` },
+        token: window.__AYAZ_IPC_TOKEN__ || ''
+      }));
+    } catch (err) {}
+  };
+  window.addEventListener('error', (ev) => consoleReport('hata', ev.message || String(ev)));
+  window.addEventListener('unhandledrejection', (ev) => consoleReport('soz', String(ev.reason)));
+  window.addEventListener('securitypolicyviolation', (ev) => {
+    consoleReport('csp', `${ev.violatedDirective || ''} ${ev.blockedURI || ''}`.trim());
+  });
 
   // ============================================================================
   // 1. GERÇEK TAURI NATIVE WINDOW MANAGER
@@ -578,6 +614,7 @@
       if (winId === 'win-updater' && typeof UpdaterManager !== 'undefined' && !UpdaterManager.latestRelease) {
         UpdaterManager.checkForUpdates();
       }
+      SessionManager.touch();
     },
 
     close(win) {
@@ -587,17 +624,20 @@
         OfficeManager.clearFrame();
       }
       this.syncTabs();
+      SessionManager.touch();
     },
 
     minimize(win) {
       win.classList.add('minimized');
       win.classList.remove('active');
       this.syncTabs();
+      SessionManager.touch();
     },
 
     toggleMaximize(win) {
       win.classList.toggle('maximized');
       this.bringToFront(win);
+      SessionManager.touch();
     },
 
     snapWindow(win, layout) {
@@ -679,6 +719,7 @@
           win.style.height = `${sh * 0.5}px`;
           break;
       }
+      SessionManager.touch();
     },
 
     cascadeWindows() {
@@ -709,6 +750,7 @@
           this.bringToFront(w);
         });
       }
+      SessionManager.touch();
     },
 
     syncTabs() {
@@ -764,6 +806,7 @@
         win.classList.toggle('ws-hide', ws !== this.active);
       });
       this.syncDots();
+      SessionManager.touch();
     },
 
     next() { this.set(this.active + 1 > this.max ? 1 : this.active + 1); },
@@ -2954,7 +2997,8 @@
           try {
             await TauriBridge.invoke('system_reboot');
           } catch (e) {
-            try { await TauriBridge.invoke('run_terminal_command', { command: 'sudo /sbin/reboot -f || reboot' }); } catch (err) {}
+            // Yedek komut izin listesinden geçmez; hata görünürde bildirilir.
+            ReportManager.showToast(`Yeniden başlatılamadı: ${e.message || e}`);
           }
         });
       }
@@ -3316,6 +3360,7 @@
       const fillRates = (modeObj) => {
         if (!selRate) return;
         selRate.innerHTML = '';
+        if (!modeObj) return;
         (modeObj.rates || []).forEach(r => {
           const opt = document.createElement('option');
           opt.value = r;
@@ -3346,8 +3391,9 @@
       };
 
       selMode.onchange = () => {
-        fillRates(info.modes.find(m => m.mode === selMode.value));
-        apply(selRate ? selRate.value : '');
+        const nextMode = info.modes.find(m => m.mode === selMode.value);
+        fillRates(nextMode);
+        if (nextMode && selRate && selRate.value) apply(selRate.value);
       };
       if (selRate) selRate.onchange = () => apply(selRate.value);
 
@@ -3618,10 +3664,17 @@
         if (t) items.push({ title: t, desc: (desc || '').trim(), kind, run });
       };
 
+      // Sabit kartlar pencere kimliği, kurulu uygulama kartları XDG kimliği
+      // taşır; XDG kartlarında WindowManager.open hedefi bulamaz.
       document.querySelectorAll('.pinned-app-card[data-open]').forEach(card => {
+        const target = card.getAttribute('data-open');
+        const appId = card.getAttribute('data-app-id');
         push(card.querySelector('.app-title')?.textContent || card.textContent,
-          card.querySelector('.app-desc')?.textContent, 'Uygulama',
-          () => WindowManager.open(card.getAttribute('data-open')));
+          card.querySelector('.app-desc')?.textContent, 'Uygulama', () => {
+            const app = appId ? XdgDesktopEngine.installedApps.find(a => a.id === appId) : null;
+            if (app) XdgDesktopEngine.launchApp(app);
+            else if (target) WindowManager.open(target);
+          });
       });
 
       document.querySelectorAll('.recent-doc-row[data-file]').forEach(row => {
@@ -3645,9 +3698,12 @@
         });
       });
 
-      document.querySelectorAll('.desktop-item[data-open]').forEach(item => {
-        push(item.textContent, 'Masaüstü simgesi', 'Masaüstü',
-          () => WindowManager.open(item.getAttribute('data-open')));
+      // Masaüstü simgeleri data-app-id taşır; XDG motoru üzerinden başlar.
+      document.querySelectorAll('.desktop-item[data-app-id]').forEach(item => {
+        const app = XdgDesktopEngine.installedApps.find(a => a.id === item.getAttribute('data-app-id'));
+        push(item.textContent, 'Masaüstü simgesi', 'Masaüstü', () => {
+          if (app) XdgDesktopEngine.launchApp(app);
+        });
       });
 
       document.querySelectorAll('.settings-nav-item').forEach(item => {
@@ -3728,12 +3784,6 @@
     // çağrı başına eklenirse biriken tıklamalar açık kalmayı engellerdi.
     document.getElementById('workspace-overview')?.addEventListener('click', (e) => {
       if (!e.target.closest('.overview-card')) WorkspaceManager.closeOverview();
-    });
-
-    // Masaüstündeki simgeler (varsa dinamik simgeler)
-    document.querySelectorAll('.desktop-item').forEach(item => {
-      const target = item.getAttribute('data-open');
-      if (target) item.addEventListener('click', () => WindowManager.open(target));
     });
 
     const startBtn = document.getElementById('start-btn');
@@ -3909,14 +3959,10 @@
       { id: 'quick-files-btn', win: 'win-files' },
       { id: 'quick-browser-btn', win: 'win-browser' },
       { id: 'quick-store-btn', win: 'win-store' },
-      { id: 'quick-taskmgr-btn', win: 'win-taskmgr' },
-      { id: 'quick-notepad-btn', win: 'win-notepad' },
       { id: 'quick-calc-btn', win: 'win-calc' },
       { id: 'quick-ai-btn', win: 'win-ai' },
       { id: 'quick-settings-btn', win: 'win-settings' },
-      { id: 'tray-anchor-btn', win: 'win-welcome' },
-      { id: 'tray-ai-btn', win: 'win-ai' },
-      { id: 'tray-settings-btn', win: 'win-settings' }
+      { id: 'tray-anchor-btn', win: 'win-welcome' }
     ];
 
     pinMap.forEach(item => {
@@ -4194,7 +4240,8 @@
         try {
           await TauriBridge.invoke('system_reboot');
         } catch (e) {
-          try { await TauriBridge.invoke('run_terminal_command', { command: 'sudo /sbin/reboot -f || reboot' }); } catch (err) {}
+          // Yedek komut izin listesinden geçmez; hata görünürde bildirilir.
+          ReportManager.showToast(`Yeniden başlatılamadı: ${e.message || e}`);
         }
       });
     }
@@ -4206,7 +4253,8 @@
         try {
           await TauriBridge.invoke('system_poweroff');
         } catch (e) {
-          try { await TauriBridge.invoke('run_terminal_command', { command: 'sudo /sbin/poweroff -f || poweroff' }); } catch (err) {}
+          // Yedek komut izin listesinden geçmez; hata görünürde bildirilir.
+          ReportManager.showToast(`Kapatılamadı: ${e.message || e}`);
         }
       });
     }
@@ -4549,7 +4597,8 @@
         await TauriBridge.invoke('download_and_apply_de_update', {
           downloadUrl: this.latestRelease.download_url,
           expectedSha256: this.latestRelease.expected_sha256 || null,
-          sha256Url: this.latestRelease.sha256_url || null
+          sha256Url: this.latestRelease.sha256_url || null,
+          expectedVersion: this.latestRelease.latest_version || null
         });
 
         if (progressFill) progressFill.style.width = '100%';
@@ -4612,17 +4661,9 @@
   // 12. GÖREV YÖNETİCİSİ (WIN-TASKMGR - TASK MANAGER)
   // ============================================================================
   const TaskManager = {
-    processes: [
-      { pid: 1, name: 'init (sysvinit)', user: 'root', cpu: 0.1, mem: '1.4 MB', status: 'Çalışıyor' },
-      { pid: 142, name: 'nodm (display-mgr)', user: 'root', cpu: 0.0, mem: '3.2 MB', status: 'Uyuyor' },
-      { pid: 218, name: 'Xorg (display-server)', user: 'root', cpu: 1.8, mem: '42.6 MB', status: 'Çalışıyor' },
-      { pid: 320, name: 'ayaz-desktop', user: 'ankora', cpu: 1.2, mem: '84.0 MB', status: 'Çalışıyor' },
-      { pid: 355, name: 'tauri-runtime', user: 'ankora', cpu: 0.9, mem: '38.5 MB', status: 'Çalışıyor' },
-      { pid: 480, name: 'pipewire-pulse', user: 'ankora', cpu: 0.4, mem: '14.2 MB', status: 'Uyuyor' },
-      { pid: 512, name: 'dbus-daemon', user: 'messagebus', cpu: 0.0, mem: '2.8 MB', status: 'Uyuyor' },
-      { pid: 640, name: 'bash (interactive)', user: 'ankora', cpu: 0.0, mem: '4.8 MB', status: 'Beklemede' },
-      { pid: 710, name: 'eudev-daemon', user: 'root', cpu: 0.0, mem: '2.1 MB', status: 'Uyuyor' }
-    ],
+    // Liste başlangıçta boştur; ilk tick() sistemden gerçek süreçleri çeker.
+    processes: [],
+    loadError: null,
     timer: null,
     selectedPid: null,
 
@@ -4660,14 +4701,20 @@
 
       const btnKill = document.getElementById('taskmgr-btn-kill');
       if (btnKill) {
-        btnKill.addEventListener('click', () => {
-          if (this.selectedPid) {
-            const target = this.processes.find(p => p.pid === this.selectedPid);
-            this.processes = this.processes.filter(p => p.pid !== this.selectedPid);
-            Terminal.log(`[GÖREV YÖNETİCİSİ] Görev sonlandırıldı: ${target ? target.name : ''} (PID: ${this.selectedPid})`, 'muted');
+        btnKill.addEventListener('click', async () => {
+          if (!this.selectedPid) return;
+          const pid = this.selectedPid;
+          const target = this.processes.find(p => p.pid === pid);
+          btnKill.disabled = true;
+          try {
+            const msg = await TauriBridge.invoke('kill_process', { pid });
+            ReportManager.showToast(msg || `Sonlandırıldı: PID ${pid}`);
+            Terminal.log(`[GÖREV YÖNETİCİSİ] ${msg || `Sonlandırıldı: PID ${pid}`} (${target ? target.name : ''})`, 'muted');
+          } catch (err) {
+            ReportManager.showToast(`Sonlandırılamadı: ${err.message || err}`);
+          } finally {
             this.selectedPid = null;
-            btnKill.disabled = true;
-            this.render();
+            await this.tick();
           }
         });
       }
@@ -4693,35 +4740,68 @@
       }
     },
 
-    tick() {
-      const cpuBase = 3 + Math.floor(Math.random() * 8);
-      const memBase = 108 + Math.floor(Math.random() * 14);
-      const procCount = this.processes.length + 32;
-
-      if (this.valCpu) this.valCpu.textContent = `${cpuBase}%`;
-      if (this.barCpu) this.barCpu.style.width = `${cpuBase}%`;
-
-      if (this.valMem) this.valMem.textContent = `${Math.min(100, Math.round((memBase / 8192) * 100))}%`;
-      if (this.barMem) this.barMem.style.width = `${Math.min(100, Math.round((memBase / 8192) * 100))}%`;
-      if (this.subMem) this.subMem.textContent = `${memBase} MB / 8.0 GB Kullanımda`;
-
-      if (this.valProc) this.valProc.textContent = `${procCount} Aktif`;
-
-      if (this.valDisk) this.valDisk.textContent = '18%';
-      if (this.barDisk) this.barDisk.style.width = '18%';
-      if (this.subDisk) this.subDisk.textContent = '14.2 GB / 50.0 GB';
-
-      this.processes.forEach(p => {
-        if (p.name.includes('ayaz')) p.cpu = parseFloat((1.0 + Math.random() * 1.2).toFixed(1));
-        if (p.name.includes('Xorg')) p.cpu = parseFloat((1.2 + Math.random() * 1.5).toFixed(1));
-      });
+    async tick() {
+      try {
+        const [tele, procs] = await Promise.all([
+          TauriBridge.invoke('get_system_telemetry'),
+          TauriBridge.invoke('get_processes')
+        ]);
+        this.loadError = null;
+        this.applyTelemetry(tele);
+        if (Array.isArray(procs)) {
+          this.processes = procs;
+          if (this.valProc) this.valProc.textContent = `${procs.length} Aktif`;
+        }
+      } catch (err) {
+        this.loadError = err.message || String(err);
+        if (this.valProc) this.valProc.textContent = '—';
+      }
       const search = document.getElementById('taskmgr-search');
       this.render(search ? search.value : '');
+    },
+
+    applyTelemetry(tele) {
+      if (!tele) return;
+
+      const cpu = typeof tele.cpu_percent === 'number' ? Math.round(tele.cpu_percent) : null;
+      if (this.valCpu) this.valCpu.textContent = cpu === null ? '—' : `${cpu}%`;
+      if (this.barCpu) this.barCpu.style.width = `${cpu || 0}%`;
+
+      const usedMb = tele.memory_used_mb || 0;
+      const totalMb = tele.memory_total_mb || 1;
+      const memPct = Math.min(100, Math.round((usedMb / totalMb) * 100));
+      if (this.valMem) this.valMem.textContent = `${memPct}%`;
+      if (this.barMem) this.barMem.style.width = `${memPct}%`;
+      if (this.subMem) this.subMem.textContent = `${usedMb} MB / ${(totalMb / 1024).toFixed(1)} GB Kullanımda`;
+
+      if (typeof tele.disk_percent === 'number') {
+        if (this.valDisk) this.valDisk.textContent = `${tele.disk_percent}%`;
+        if (this.barDisk) this.barDisk.style.width = `${tele.disk_percent}%`;
+        if (this.subDisk) this.subDisk.textContent = `${tele.disk_used_gb} GB / ${tele.disk_total_gb} GB`;
+      } else {
+        if (this.valDisk) this.valDisk.textContent = '—';
+        if (this.barDisk) this.barDisk.style.width = '0%';
+        if (this.subDisk) this.subDisk.textContent = 'Bilgi yok';
+      }
     },
 
     render(query = '') {
       if (!this.tableBody) return;
       this.tableBody.innerHTML = '';
+
+      if (this.loadError) {
+        const errRow = document.createElement('tr');
+        errRow.innerHTML = `<td colspan="6" style="padding:14px; color:#f59e0b;">Süreç listesi okunamadı: ${escapeHtml(this.loadError)}</td>`;
+        this.tableBody.appendChild(errRow);
+        return;
+      }
+      if (this.processes.length === 0) {
+        const emptyRow = document.createElement('tr');
+        emptyRow.innerHTML = '<td colspan="6" style="padding:14px; color:#94a3b8;">Henüz süreç okunmadı…</td>';
+        this.tableBody.appendChild(emptyRow);
+        return;
+      }
+
       const q = query.toLowerCase().trim();
 
       const filtered = this.processes.filter(p => {
@@ -4733,13 +4813,17 @@
         if (this.selectedPid === p.pid) tr.style.background = 'rgba(37, 99, 235, 0.15)';
         tr.style.cursor = 'pointer';
 
+        const statusColor = p.status === 'Zombi' ? '#ef4444'
+          : (p.status === 'Çalışıyor' ? '#10b981' : '#94a3b8');
+        const memMb = typeof p.mem_mb === 'number' ? p.mem_mb : 0;
+
         tr.innerHTML = `
           <td class="mono">${p.pid}</td>
           <td><strong>${escapeHtml(p.name)}</strong></td>
           <td class="mono">${escapeHtml(p.user)}</td>
           <td class="mono">${p.cpu}%</td>
-          <td class="mono">${escapeHtml(p.mem)}</td>
-          <td><span style="font-size: 10.5px; color: #10b981;">● ${escapeHtml(p.status || 'Çalışıyor')}</span></td>
+          <td class="mono">${memMb.toFixed(1)} MB</td>
+          <td><span style="font-size: 10.5px; color: ${statusColor};">● ${escapeHtml(p.status || 'Bilinmiyor')}</span></td>
         `;
 
         tr.addEventListener('click', () => {
@@ -5272,9 +5356,6 @@
   const MemoryManager = {
     isEcoMode: false,
     pollTimer: null,
-    trayWidget: null,
-    trayText: null,
-    trayDot: null,
 
     init() {
 
@@ -5290,14 +5371,7 @@
         });
       }
 
-      // 2. Tray Widget Tıklama: Hızlı RAM Temizleme
-      if (this.trayWidget) {
-        this.trayWidget.addEventListener('click', () => {
-          this.optimizeRam();
-        });
-      }
-
-      // 3. Ayarlar Penceresi RAM Temizleme Butonu
+      // 2. Ayarlar Penceresi RAM Temizleme Butonu
       const btnCleanRam = document.getElementById('btn-clean-ram');
       if (btnCleanRam) {
         btnCleanRam.addEventListener('click', () => {
@@ -5305,7 +5379,7 @@
         });
       }
 
-      // 4. Periyodik Hafif Telemetre Sorgusu (5 saniyede bir, sayfa odakta iken)
+      // 3. Periyodik Hafif Telemetre Sorgusu (5 saniyede bir, sayfa odakta iken)
       this.updateTelemetry();
       this.pollTimer = setInterval(() => {
         if (!document.hidden) {
@@ -5332,24 +5406,41 @@
         const tele = await TauriBridge.invoke('get_system_telemetry');
         if (!tele) return;
 
+        // Pil: sistemde pil yoksa (masaüstü/VM) grup ve QS footer'ı gizlenir;
+        // yüzdeler /sys'ten okunan gerçek değerlerdir, süre tahmini üretilmez.
+        const pctBatt = tele.battery_percent;
+        const statusMap = {
+          Charging: 'Şarj oluyor', Discharging: 'Boşalıyor',
+          Full: 'Dolu', 'Not charging': 'Şarj olmuyor'
+        };
+        const stName = statusMap[tele.battery_status] || tele.battery_status || '';
+        const batGroup = document.getElementById('tray-battery-btn');
+        if (batGroup) {
+          if (typeof pctBatt === 'number') {
+            batGroup.style.display = '';
+            const pctText = batGroup.querySelector('.battery-pct-text');
+            if (pctText) pctText.textContent = `${pctBatt}%`;
+            batGroup.title = stName ? `Pil Durumu: %${pctBatt} (${stName})` : `Pil Durumu: %${pctBatt}`;
+          } else {
+            batGroup.style.display = 'none';
+          }
+        }
+        const qsBattBox = document.getElementById('qs-battery-status');
+        const qsBattText = document.getElementById('qs-battery-text');
+        if (qsBattBox) {
+          if (typeof pctBatt === 'number') {
+            qsBattBox.style.display = '';
+            if (qsBattText) {
+              qsBattText.textContent = stName ? `%${pctBatt} Kalan Pil (${stName})` : `%${pctBatt} Kalan Pil`;
+            }
+          } else {
+            qsBattBox.style.display = 'none';
+          }
+        }
+
         const usedMb = tele.memory_used_mb || 110;
         const totalMb = tele.memory_total_mb || 8192;
         const pct = Math.min(100, Math.round((usedMb / totalMb) * 100));
-
-        // Tray Widget Güncelleme
-        if (this.trayText && this.trayWidget && !this.trayWidget.classList.contains('purging')) {
-          const displayStr = usedMb > 1024 ? `${(usedMb / 1024).toFixed(1)} GB` : `${usedMb} MB`;
-          this.trayText.textContent = displayStr;
-        }
-
-        if (this.trayDot) {
-          this.trayDot.classList.remove('warn', 'danger');
-          if (pct >= 80) {
-            this.trayDot.classList.add('danger');
-          } else if (pct >= 50) {
-            this.trayDot.classList.add('warn');
-          }
-        }
 
         // Ayarlar Penceresi Güncelleme
         const labelSettings = document.getElementById('label-ram-settings-usage');
@@ -5368,11 +5459,6 @@
     },
 
     async optimizeRam() {
-      if (this.trayWidget) {
-        this.trayWidget.classList.add('purging');
-        if (this.trayText) this.trayText.textContent = 'Temizleniyor...';
-      }
-
       const btnCleanRam = document.getElementById('btn-clean-ram');
       if (btnCleanRam) {
         btnCleanRam.disabled = true;
@@ -5408,10 +5494,6 @@
 
       Terminal.log(`[BELLEK] Sistem ve uygulama önbellekleri boşaltıldı. Yaklaşık ${freedMb} MB bellek serbest bırakıldı.`, 'success');
 
-      if (this.trayText) {
-        this.trayText.textContent = `✓ ${freedMb} MB`;
-      }
-
       if (btnCleanRam) {
         btnCleanRam.textContent = `Temizlendi (${freedMb} MB) ✓`;
         setTimeout(() => {
@@ -5421,7 +5503,6 @@
       }
 
       setTimeout(() => {
-        if (this.trayWidget) this.trayWidget.classList.remove('purging');
         this.updateTelemetry();
       }, 2500);
     }
@@ -5444,19 +5525,8 @@
       e.preventDefault();
       MemoryManager.optimizeRam();
     }
-    // Escape -> Başlat veya Menüyü Gizle
-    else if (e.key === 'Escape') {
-      const flyout = document.getElementById('start-flyout');
-      const startBtn = document.getElementById('start-btn');
-      if (flyout && flyout.classList.contains('open')) {
-        flyout.classList.remove('open');
-        if (startBtn) startBtn.classList.remove('active');
-      }
-      const ctxMenu = document.getElementById('desktop-context-menu');
-      if (ctxMenu && ctxMenu.classList.contains('open')) {
-        ctxMenu.classList.remove('open');
-      }
-    }
+    // Esc: başlangıç menüsü ve genel görünüm kapatma initDesktopControls
+    // dinleyicisinde tek elden yapılır; burada tekrarı yok.
   });
 
   // ============================================================================
@@ -5536,8 +5606,9 @@
         btnRestart.addEventListener('click', async () => {
           try {
             await TauriBridge.invoke('system_reboot');
-          } catch (e) {
-            try { await TauriBridge.invoke('run_terminal_command', { command: 'sudo /sbin/reboot -f || reboot' }); } catch (err) {}
+          } catch (err) {
+            // Yedek komut izin listesinden geçmez; kilit ekranında görünür hatadır.
+            this.showError(`Yeniden başlatılamadı: ${err.message || err}`);
           }
         });
       }
@@ -5547,8 +5618,9 @@
         btnShutdown.addEventListener('click', async () => {
           try {
             await TauriBridge.invoke('system_poweroff');
-          } catch (e) {
-            try { await TauriBridge.invoke('run_terminal_command', { command: 'sudo /sbin/poweroff -f || poweroff' }); } catch (err) {}
+          } catch (err) {
+            // Yedek komut izin listesinden geçmez; kilit ekranında görünür hatadır.
+            this.showError(`Kapatılamadı: ${err.message || err}`);
           }
         });
       }
@@ -6179,6 +6251,410 @@
     }
   };
 
+  // ============================================================================
+  // GERÇEK AĞ DURUMU: Wi-Fi / Bluetooth radyoları ve ağ panosu
+  // ============================================================================
+  const RadioManager = {
+    busy: false,
+
+    init() {
+      const qsWifi = document.getElementById('qs-wifi-toggle');
+      const qsBt = document.getElementById('qs-bt-toggle');
+      if (qsWifi) qsWifi.addEventListener('click', () => this.toggle('wifi'));
+      if (qsBt) qsBt.addEventListener('click', () => this.toggle('bluetooth'));
+
+      const scanBtn = document.getElementById('btn-wifi-scan');
+      if (scanBtn) scanBtn.addEventListener('click', () => this.scan(true));
+
+      // Ağ panosu her geçişte sistemden tazelenir.
+      document.querySelectorAll('.settings-nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+          if (item.getAttribute('data-pane') === 'pane-set-network') {
+            setTimeout(() => this.refreshPane(), 80);
+          }
+        });
+      });
+
+      this.loadState();
+    },
+
+    async loadState() {
+      try {
+        this.renderState(await TauriBridge.invoke('get_radio_state'));
+      } catch (err) {
+        this.renderState(null);
+      }
+    },
+
+    renderState(st) {
+      const qsWifi = document.getElementById('qs-wifi-toggle');
+      const qsBt = document.getElementById('qs-bt-toggle');
+      const subOf = (el) => (el ? el.querySelector('.qs-tile-sub') : null);
+
+      if (!st || !st.available) {
+        if (qsWifi) {
+          qsWifi.classList.remove('active');
+          qsWifi.disabled = true;
+          qsWifi.title = 'Ağ yöneticisi bulunamadı (nmcli/rfkill kurulu değil)';
+        }
+        if (subOf(qsWifi)) subOf(qsWifi).textContent = 'Yönetici yok';
+        if (qsBt) {
+          qsBt.classList.remove('active');
+          qsBt.disabled = true;
+          qsBt.title = 'Ağ/bluetooth yöneticisi bulunamadı (nmcli/rfkill kurulu değil)';
+        }
+        if (subOf(qsBt)) subOf(qsBt).textContent = 'Yönetici yok';
+        const trayWifi = document.getElementById('tray-wifi-btn');
+        if (trayWifi) trayWifi.title = 'Kablosuz Ağ (Wi-Fi): yönetici bulunamadı';
+        return;
+      }
+
+      if (qsWifi) {
+        qsWifi.disabled = false;
+        qsWifi.classList.toggle('active', !!st.wifi_enabled);
+        qsWifi.title = st.wifi_enabled ? 'Wi-Fi Ağını Kapat' : 'Wi-Fi Ağını Aç';
+      }
+      if (subOf(qsWifi)) {
+        subOf(qsWifi).textContent = !st.wifi_enabled ? 'Kapalı' : (st.wifi_ssid || 'Açık');
+      }
+      if (qsBt) {
+        qsBt.disabled = false;
+        qsBt.classList.toggle('active', !!st.bluetooth_enabled);
+        qsBt.title = st.bluetooth_enabled ? "Bluetooth'u Kapat" : "Bluetooth'u Aç";
+      }
+      if (subOf(qsBt)) subOf(qsBt).textContent = st.bluetooth_enabled ? 'Açık' : 'Kapalı';
+
+      const trayWifi = document.getElementById('tray-wifi-btn');
+      if (trayWifi) {
+        trayWifi.title = !st.wifi_enabled ? 'Kablosuz Ağ (Wi-Fi): Kapalı'
+          : (st.wifi_ssid ? `Kablosuz Ağ (Wi-Fi): ${st.wifi_ssid}` : 'Kablosuz Ağ (Wi-Fi): Açık');
+      }
+    },
+
+    async toggle(kind) {
+      if (this.busy) return;
+      this.busy = true;
+      try {
+        // İstenen durum düğmeden değil, sistem durumundan türetilir.
+        const before = await TauriBridge.invoke('get_radio_state');
+        const wasEnabled = kind === 'wifi' ? !!before.wifi_enabled : !!before.bluetooth_enabled;
+        const after = await TauriBridge.invoke('set_radio_state', { kind, enabled: !wasEnabled });
+        this.renderState(after);
+        if (kind === 'wifi') {
+          if (!after.wifi_enabled) this.renderWifiList([]);
+          else this.scan(false);
+          Terminal.log(`[AĞ] Wi-Fi ${after.wifi_enabled ? 'etkin' : 'devre dışı'}.`, 'cmd');
+        } else {
+          Terminal.log(`[BLUETOOTH] Adaptör ${after.bluetooth_enabled ? 'açık' : 'kapalı'}.`, 'cmd');
+        }
+      } catch (err) {
+        ReportManager.showToast(`${kind === 'wifi' ? 'Wi-Fi' : 'Bluetooth'} değiştirilemedi: ${err.message || err}`);
+        this.loadState();
+      } finally {
+        this.busy = false;
+      }
+    },
+
+    async refreshPane() {
+      await this.loadState();
+      await this.loadNetInfo();
+      await this.scan(false);
+    },
+
+    async loadNetInfo() {
+      const name = document.getElementById('net-banner-name');
+      const detail = document.getElementById('net-banner-detail');
+      const tag = document.getElementById('net-banner-tag');
+      const set = (id, text) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+      };
+      try {
+        const info = await TauriBridge.invoke('get_network_info');
+        const maskOf = (p) => {
+          if (!p || p < 1 || p > 32) return '—';
+          const v = (0xFFFFFFFF << (32 - p)) >>> 0;
+          return [24, 16, 8, 0].map(s => (v >>> s) & 255).join('.');
+        };
+        if (info && info.connected) {
+          if (name) name.textContent = `${info.interface} — ${info.ip}/${info.prefix}`;
+          if (detail) detail.textContent = info.gateway
+            ? `Ağ geçidi ${info.gateway} • ${info.dns.length} DNS sunucusu`
+            : 'Ağ geçidi bulunamadı';
+          if (tag) tag.style.display = '';
+          set('net-cell-ip', info.ip || '—');
+          set('net-cell-gw', info.gateway || '—');
+          set('net-cell-mask', `/${info.prefix} (${maskOf(info.prefix)})`);
+          set('net-cell-dns', (info.dns && info.dns.length) ? info.dns.join(', ') : '—');
+        } else {
+          if (name) name.textContent = 'Bağlı arayüz yok';
+          if (detail) detail.textContent = 'IPv4 adresi atanmış bir arayüz algılanmadı.';
+          if (tag) tag.style.display = 'none';
+          set('net-cell-ip', '—');
+          set('net-cell-gw', '—');
+          set('net-cell-mask', '—');
+          set('net-cell-dns', '—');
+        }
+      } catch (err) {
+        if (name) name.textContent = 'Ağ bilgisi okunamadı';
+        if (detail) detail.textContent = err.message || String(err);
+        if (tag) tag.style.display = 'none';
+      }
+    },
+
+    async scan(rescan) {
+      const list = document.getElementById('wifi-network-list');
+      const btn = document.getElementById('btn-wifi-scan');
+      if (!list) return;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = rescan ? 'Taranıyor…' : 'Yükleniyor…';
+      }
+      try {
+        const networks = await TauriBridge.invoke('scan_wifi_networks');
+        this.renderWifiList(Array.isArray(networks) ? networks : []);
+      } catch (err) {
+        this.renderWifiList(null, err.message || String(err));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Ağları Tara';
+        }
+      }
+    },
+
+    renderWifiList(networks, errorText) {
+      const list = document.getElementById('wifi-network-list');
+      if (!list) return;
+      list.textContent = '';
+      const note = (text) => {
+        const row = document.createElement('div');
+        row.className = 'wifi-row';
+        const meta = document.createElement('div');
+        meta.className = 'wifi-row-meta';
+        const span = document.createElement('span');
+        span.textContent = text;
+        meta.appendChild(span);
+        row.appendChild(meta);
+        list.appendChild(row);
+      };
+      if (errorText) {
+        note(errorText);
+        return;
+      }
+      if (!networks || networks.length === 0) {
+        note('Kablosuz ağ görünmüyor. Wi-Fi açıkken "Ağları Tara" ile yeniden deneyin.');
+        return;
+      }
+      networks.forEach(n => {
+        const row = document.createElement('div');
+        row.className = 'wifi-row' + (n.active ? ' connected' : '');
+        const meta = document.createElement('div');
+        meta.className = 'wifi-row-meta';
+        const strong = document.createElement('strong');
+        strong.textContent = n.ssid;
+        const sub = document.createElement('span');
+        sub.textContent = n.active ? `Bağlı • Sinyal %${n.signal}` : `Sinyal %${n.signal}`;
+        meta.appendChild(strong);
+        meta.appendChild(sub);
+        row.appendChild(meta);
+        if (!n.active) {
+          const btn = document.createElement('button');
+          btn.className = 'btn-pkg-sm';
+          btn.textContent = 'Bağlan';
+          btn.addEventListener('click', () => this.connect(n.ssid, btn));
+          row.appendChild(btn);
+        }
+        list.appendChild(row);
+      });
+    },
+
+    async connect(ssid, btn) {
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Bağlanıyor…';
+      }
+      try {
+        const msg = await TauriBridge.invoke('wifi_connect', { ssid });
+        ReportManager.showToast(msg || `Bağlanıldı: ${ssid}`);
+        await this.loadState();
+        await this.scan(false);
+      } catch (err) {
+        ReportManager.showToast(`Bağlanılamadı: ${err.message || err}`);
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Bağlan';
+        }
+      }
+    }
+  };
+
+  // ============================================================================
+  // OTURUM: AÇILIŞTA GERİ YÜKLEME, ÇÖKME SAYAÇI VE GÜVENLİ KİP
+  // ============================================================================
+  const SessionManager = {
+    storageKey: 'ankora_session_state',
+    runningKey: 'ankora_session_running',
+    crashKey: 'ankora_crash_count',
+    crashCount: 0,
+    restored: false,
+    saveTimer: null,
+
+    // boot() içinde ilk çağrılır: önceki açılışın nasıl bittiğini okur ve
+    // temiz çıkış işaretini bağlar. Kayıtlar yalnız restore() çalıştıktan
+    // sonra yazılır; aksi hâlde geri yüklemeden önceki boş açılış eski
+    // oturumun yerine yazabilirdi.
+    begin() {
+      try {
+        if (SafeStorage.getItem(this.runningKey) === '1') {
+          this.crashCount = (parseInt(SafeStorage.getItem(this.crashKey) || '0', 10) || 0) + 1;
+          SafeStorage.setItem(this.crashKey, String(this.crashCount));
+        } else {
+          this.crashCount = 0;
+          SafeStorage.removeItem(this.crashKey);
+        }
+        SafeStorage.setItem(this.runningKey, '1');
+      } catch (err) {}
+
+      // Sürükleme ve boyutlandırma bitiminde son geometri kaydedilir.
+      document.addEventListener('mouseup', () => this.touch());
+      window.addEventListener('pagehide', () => this.shutdown());
+
+      // Kapanış sırasında (sayfa boşaltılırken ya da masaüstü oturumu
+      // SIGTERM ile biterken) temiz çıkış işareti konur.
+      window.__ayazCleanExit = () => {
+        try {
+          SafeStorage.setItem(this.runningKey, '0');
+          SafeStorage.removeItem(this.crashKey);
+        } catch (err) {}
+      };
+    },
+
+    shutdown() {
+      this.saveNow();
+      if (typeof window.__ayazCleanExit === 'function') window.__ayazCleanExit();
+    },
+
+    touch() {
+      if (!this.restored) return;
+      clearTimeout(this.saveTimer);
+      this.saveTimer = setTimeout(() => this.saveNow(), 400);
+    },
+
+    saveNow() {
+      if (!this.restored) return;
+      try {
+        const wins = [];
+        WindowManager.windows.forEach(win => {
+          // Kurulum sihirbazı bir sonraki açılışta kendiliğinden dönmez.
+          if (!win.classList.contains('open') || win.id === 'win-installer') return;
+          wins.push({
+            id: win.id,
+            ws: parseInt(win.getAttribute('data-ws'), 10) || 1,
+            min: win.classList.contains('minimized'),
+            max: win.classList.contains('maximized'),
+            left: win.style.left,
+            top: win.style.top,
+            width: win.style.width,
+            height: win.style.height
+          });
+        });
+        const active = document.querySelector('.window.active:not(.minimized)');
+        SafeStorage.setItem(this.storageKey, JSON.stringify({
+          v: 1,
+          ws: WorkspaceManager.active,
+          wsCount: WorkspaceManager.count,
+          active: active ? active.id : null,
+          wins
+        }));
+      } catch (err) {}
+    },
+
+    restore() {
+      let state = null;
+      try {
+        const raw = SafeStorage.getItem(this.storageKey);
+        if (raw) state = JSON.parse(raw);
+      } catch (err) { state = null; }
+      this.restored = true;
+      if (!state || state.v !== 1 || !Array.isArray(state.wins)) return;
+
+      // Art arda iki beklenmedik kapanış: pencereler bu açılışta geri
+      // yüklenmez, güvenli kip bildirimi çıkar.
+      if (this.crashCount >= 2) {
+        this.showSafeNotice(state);
+        return;
+      }
+      this.apply(state);
+    },
+
+    apply(state) {
+      state.wins.forEach(w => {
+        const win = document.getElementById(w.id);
+        if (!win || !win.classList.contains('window')) return;
+        ['left', 'top', 'width', 'height'].forEach(prop => {
+          const val = w[prop];
+          if (typeof val === 'string' && val) win.style[prop] = this.clampGeometry(prop, val);
+        });
+        win.classList.add('open');
+        win.classList.toggle('minimized', !!w.min);
+        win.classList.toggle('maximized', !!w.max);
+        win.setAttribute('data-ws', String(w.ws || 1));
+      });
+
+      if (state.wsCount) {
+        WorkspaceManager.count = Math.min(Math.max(1, state.wsCount), WorkspaceManager.max);
+      }
+      WorkspaceManager.set(state.ws || WorkspaceManager.active);
+      WindowManager.syncTabs();
+
+      const focus = state.active ? document.getElementById(state.active) : null;
+      if (focus && focus.classList.contains('open') &&
+          !focus.classList.contains('minimized') && !focus.classList.contains('ws-hide')) {
+        WindowManager.bringToFront(focus);
+      }
+    },
+
+    // Ekran çözünürlüğü değişmişse piksel değerleri ekrana sıkıştırılır;
+    // vw/vh/calc gibi göreli değerler kendilikinden uyar.
+    clampGeometry(prop, val) {
+      if (!/^-?\d+(\.\d+)?px$/.test(val)) return val;
+      const n = parseFloat(val);
+      if (prop === 'left') return `${Math.max(0, Math.min(n, window.innerWidth - 120))}px`;
+      if (prop === 'top') return `${Math.max(0, Math.min(n, window.innerHeight - 100))}px`;
+      if (prop === 'width') return `${Math.max(300, n)}px`;
+      if (prop === 'height') return `${Math.max(260, n)}px`;
+      return val;
+    },
+
+    showSafeNotice(state) {
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      backdrop.id = 'safe-mode-notice';
+      backdrop.innerHTML = `
+        <div class="modal-sheet">
+          <div class="modal-title">Güvenli kip</div>
+          <p style="font-size: 12px; color: var(--text-secondary);" id="safe-mode-desc"></p>
+          <div class="modal-actions">
+            <button class="btn-pkg" id="safe-mode-dismiss">Boş devam et</button>
+            <button class="btn-pkg" id="safe-mode-restore" style="background: var(--text-primary); color: var(--bg-deep);">Pencereleri geri yükle</button>
+          </div>
+        </div>`;
+      backdrop.querySelector('#safe-mode-desc').textContent =
+        `Son iki açılış beklenmedik şekilde bitti (toplam ${this.crashCount} beklenmedik kapanış). ` +
+        'Pencereler bu açılışta geri yüklenmedi.';
+      document.body.appendChild(backdrop);
+      const close = (restoreWindows) => {
+        SafeStorage.removeItem(this.crashKey);
+        backdrop.remove();
+        if (restoreWindows) this.apply(state);
+      };
+      backdrop.querySelector('#safe-mode-dismiss').addEventListener('click', () => close(false));
+      backdrop.querySelector('#safe-mode-restore').addEventListener('click', () => close(true));
+      requestAnimationFrame(() => backdrop.classList.add('open'));
+    }
+  };
+
   // SİSTEMİ ÇALIŞTIR (HATA İZOLASYONLU VE DOM GÜVENCELİ BOOTSTRAP)
   function safeInit(name, fn) {
     try {
@@ -6195,6 +6671,10 @@
   }
 
   function boot() {
+    // Oturum işareti en başta okunur: çökme sayacı ve geri yükleme
+    // kararı diğer modüllerden önce belirlenir.
+    safeInit('Session', () => SessionManager.begin());
+
     // 1. Temel pencere yöneticisini ve masaüstü kontrollerini ÖNCELİKLİ ve GARANTİ olarak başlat
     safeInit('WindowManager', () => WindowManager.init());
     safeInit('DesktopControls', () => initDesktopControls());
@@ -6217,8 +6697,13 @@
     safeInit('BrowserManager', () => BrowserManager.init());
     safeInit('WidgetManager', () => WidgetManager.init());
     safeInit('MemoryManager', () => MemoryManager.init());
+    safeInit('Radio', () => RadioManager.init());
     safeInit('ReportManager', () => ReportManager.init());
     safeInit('LockManager', () => LockManager.init());
+
+    // 3. Kayıtlı oturum geri yüklenir; çökme sayacı eşiği aşıldıysa
+    // SessionManager.restore bunu kendi içinde değerlendirir.
+    safeInit('SessionRestore', () => SessionManager.restore());
   }
 
   if (document.readyState === 'loading') {

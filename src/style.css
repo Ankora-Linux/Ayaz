@@ -361,12 +361,6 @@ body.theme-light .start-btn.active {
   border-color: rgba(37, 99, 235, 0.4);
 }
 
-body.theme-light .tray-ram-widget {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: rgba(0, 0, 0, 0.08);
-  color: #0f172a;
-}
-
 /* Başlat Menüsü - Açık Tema */
 body.theme-light .start-flyout {
   background: rgba(255, 255, 255, 0.95);
@@ -4894,73 +4888,6 @@ body.theme-light .ai-entry.user {
 .updater-buttons {
   display: flex;
   gap: 8px;
-}
-
-/* ==============================================================================
-   RAM MONİTÖRÜ VE HIZLI OPTİMİZASYON WIDGETI (TASKBAR & TRAY)
-   ============================================================================== */
-.tray-ram-widget {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: var(--radius-ui);
-  cursor: pointer;
-  transition: all 0.15s ease;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-primary);
-  user-select: none;
-}
-
-.tray-ram-widget:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: var(--accent-active);
-  transform: translateY(-1px);
-}
-
-.tray-ram-widget:active {
-  transform: translateY(0) scale(0.96);
-}
-
-.tray-ram-icon {
-  width: 13px;
-  height: 13px;
-  color: var(--accent-active);
-  flex-shrink: 0;
-}
-
-.tray-ram-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #10b981;
-  box-shadow: 0 0 6px #10b981;
-  transition: background 0.3s ease, box-shadow 0.3s ease;
-}
-
-.tray-ram-dot.warn {
-  background: #f59e0b;
-  box-shadow: 0 0 6px #f59e0b;
-}
-
-.tray-ram-dot.danger {
-  background: #ef4444;
-  box-shadow: 0 0 6px #ef4444;
-}
-
-.tray-ram-widget.purging {
-  border-color: #10b981;
-  color: #10b981;
-  animation: pulsePurge 0.4s ease;
-}
-
-@keyframes pulsePurge {
-  0% { transform: scale(0.95); opacity: 0.7; }
-  50% { transform: scale(1.05); }
-  100% { transform: scale(1); opacity: 1; }
 }
 
 /* ==============================================================================

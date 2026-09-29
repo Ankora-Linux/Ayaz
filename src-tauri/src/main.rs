@@ -233,6 +233,13 @@ pub struct SystemTelemetry {
     pub memory_total_mb: u64,
     pub cpu_cores: usize,
     pub uptime_seconds: u64,
+    pub battery_percent: Option<u8>,
+    pub battery_status: Option<String>,
+    // /proc/stat iki okuma arası; ilk örnekte 0.0 döner.
+    pub cpu_percent: f64,
+    pub disk_percent: Option<u8>,
+    pub disk_used_gb: f64,
+    pub disk_total_gb: f64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -271,6 +278,42 @@ pub struct MemoryTrimResult {
     pub current_used_mb: u64,
     pub current_total_mb: u64,
     pub message: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct RadioState {
+    pub available: bool,
+    pub backend: String,
+    pub wifi_enabled: bool,
+    pub bluetooth_enabled: bool,
+    pub wifi_ssid: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct WifiNetwork {
+    pub ssid: String,
+    pub signal: u8,
+    pub active: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct NetworkInfo {
+    pub interface: String,
+    pub ip: String,
+    pub prefix: u8,
+    pub gateway: String,
+    pub dns: Vec<String>,
+    pub connected: bool,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct ProcessInfo {
+    pub pid: i32,
+    pub user: String,
+    pub cpu: f64,
+    pub mem_mb: f64,
+    pub status: String,
+    pub name: String,
 }
 
 fn get_ankora_config_dir() -> PathBuf {
@@ -1995,6 +2038,60 @@ async fn launch_application(exec: String) -> Result<String, String> {
 // ============================================================================
 // 9. DİĞER SİSTEM AYARLARI VE GERÇEK TELEMETRİ - BULGU #4
 // ============================================================================
+// /proc/stat ilk satırındaki kümülatif sayaçlar: (toplam, boşta).
+fn read_cpu_counters() -> Option<(u64, u64)> {
+    let s = fs::read_to_string("/proc/stat").ok()?;
+    let line = s.lines().next()?;
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.first() != Some(&"cpu") {
+        return None;
+    }
+    let vals: Vec<u64> = parts[1..].iter().filter_map(|v| v.parse().ok()).collect();
+    if vals.len() < 4 {
+        return None;
+    }
+    let total: u64 = vals.iter().sum();
+    let idle = vals[3] + *vals.get(4).unwrap_or(&0);
+    Some((total, idle))
+}
+
+// İki çağrı arasındaki farktan doluluk yüzdesi; ilk çağrıda 0.0 döner.
+fn sample_cpu_percent() -> f64 {
+    static PREV: Mutex<Option<(u64, u64)>> = Mutex::new(None);
+    let cur = match read_cpu_counters() {
+        Some(c) => c,
+        None => return 0.0,
+    };
+    let mut prev = PREV.lock().unwrap();
+    let pct = match *prev {
+        Some((pt, pi)) if cur.0 > pt => {
+            let dt = cur.0 - pt;
+            let di = cur.1.saturating_sub(pi);
+            100.0 * (1.0 - (di as f64 / dt as f64))
+        }
+        _ => 0.0,
+    };
+    *prev = Some(cur);
+    pct.clamp(0.0, 100.0)
+}
+
+// Kök bölünümün kullanımı: (kullanılan GB, toplam GB, %).
+fn read_disk_usage() -> Option<(f64, f64, u8)> {
+    let out = run_capture("df", &["-Pk", "/"])?;
+    for line in out.lines().skip(1) {
+        let f: Vec<&str> = line.split_whitespace().collect();
+        if f.len() < 5 {
+            continue;
+        }
+        let total_kb = f[1].parse::<u64>().ok()?;
+        let used_kb = f[2].parse::<u64>().ok()?;
+        let pct = f[4].trim_end_matches('%').parse::<u8>().unwrap_or(0);
+        let g = 1024.0 * 1024.0;
+        return Some((used_kb as f64 / g, total_kb as f64 / g, pct.min(100)));
+    }
+    None
+}
+
 #[tauri::command]
 fn get_system_telemetry() -> Result<SystemTelemetry, String> {
     #[cfg(target_os = "linux")]
@@ -2052,6 +2149,31 @@ fn get_system_telemetry() -> Result<SystemTelemetry, String> {
             "SysVinit (systemd-free)".to_string()
         };
 
+        // 6. Pil (/sys/class/power_supply) — pil yoksa (masaüstü) None kalır.
+        let mut battery_percent: Option<u8> = None;
+        let mut battery_status: Option<String> = None;
+        if let Ok(entries) = fs::read_dir("/sys/class/power_supply") {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if !name.starts_with("BAT") {
+                    continue;
+                }
+                if let Ok(cap) = fs::read_to_string(entry.path().join("capacity")) {
+                    battery_percent = cap.trim().parse::<u8>().ok();
+                }
+                if let Ok(st) = fs::read_to_string(entry.path().join("status")) {
+                    battery_status = Some(st.trim().to_string());
+                }
+                break;
+            }
+        }
+
+        // 7. Disk kullanımı (df -Pk /) — tek örnek, üç alana dağıtılır.
+        let (disk_used_gb, disk_total_gb, disk_percent) = match read_disk_usage() {
+            Some(d) => (d.0, d.1, Some(d.2)),
+            None => (0.0, 0.0, None),
+        };
+
         Ok(SystemTelemetry {
             os_name,
             kernel,
@@ -2060,6 +2182,12 @@ fn get_system_telemetry() -> Result<SystemTelemetry, String> {
             memory_total_mb,
             cpu_cores: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
             uptime_seconds,
+            battery_percent,
+            battery_status,
+            cpu_percent: sample_cpu_percent(),
+            disk_percent,
+            disk_used_gb,
+            disk_total_gb,
         })
     }
 
@@ -2073,6 +2201,12 @@ fn get_system_telemetry() -> Result<SystemTelemetry, String> {
             memory_total_mb: 8192,
             cpu_cores: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
             uptime_seconds: 7200,
+            battery_percent: None,
+            battery_status: None,
+            cpu_percent: 0.0,
+            disk_percent: None,
+            disk_used_gb: 0.0,
+            disk_total_gb: 0.0,
         })
     }
 }
@@ -2302,6 +2436,23 @@ fn process_github_release(release: GitHubRelease, current_ver: &str) -> UpdateRe
     }
 }
 
+// protocol_4 güncelleme istemcisi: sürüm beslemesinin JSON uç noktası.
+// Yapılandırma dosyası yoksa/boşsa GitHub API'ye düşülür (önceki davranış).
+// Uç nokta yalnız sürüm bilgisini besler; indirme adresi yine
+// download_and_apply_de_update içinde Ankora-Linux deposuyla sınırlıdır.
+fn protocol_4_endpoint(target_repo: &str) -> String {
+    let default_url = format!("https://api.github.com/repos/{}/releases/latest", target_repo);
+    let path = get_ankora_config_dir().join("update-endpoint");
+    if let Ok(val) = fs::read_to_string(&path) {
+        let val = val.trim();
+        // Yalnızca https uç noktaları kabul edilir; boşluk taşıyamaz.
+        if val.starts_with("https://") && !val.contains(char::whitespace) {
+            return val.to_string();
+        }
+    }
+    default_url
+}
+
 #[tauri::command]
 async fn check_de_update(repo_override: Option<String>) -> Result<UpdateReleaseInfo, String> {
     let current_ver = env!("CARGO_PKG_VERSION");
@@ -2324,12 +2475,14 @@ async fn check_de_update(repo_override: Option<String>) -> Result<UpdateReleaseI
         .build()
         .map_err(|e| format!("HTTP istemcisi başlatılamadı: {}", e))?;
 
-    let url = format!("https://api.github.com/repos/{}/releases/latest", target_repo);
+    let url = protocol_4_endpoint(&target_repo);
     let resp = client.get(&url).send().await;
 
     match resp {
         Ok(response) => {
-            if response.status() == reqwest::StatusCode::NOT_FOUND {
+            if response.status() == reqwest::StatusCode::NOT_FOUND
+                && url.starts_with("https://api.github.com/")
+            {
                 // Eğer Ankora-Linux/Ayaz reposunda henüz release yoksa, Ankora-Linux ana reposunu dene
                 if target_repo == "Ankora-Linux/Ayaz" {
                     let fallback_url = "https://api.github.com/repos/Ankora-Linux/Ankora-Linux/releases/latest";
@@ -2388,6 +2541,7 @@ async fn download_and_apply_de_update(
     download_url: String,
     expected_sha256: Option<String>,
     sha256_url: Option<String>,
+    expected_version: Option<String>,
 ) -> Result<String, String> {
     // Güvenlik doğrulaması: Yalnızca resmi Ankora-Linux deposunun release
     // alanından indirmeye izin ver. Adresin sahibi webview'e de emanet edilmez.
@@ -2501,9 +2655,22 @@ async fn download_and_apply_de_update(
         let helper_path = Path::new("/usr/local/bin/ayaz-update-helper");
         let deb_str = deb_path.to_string_lossy().to_string();
 
+        // Yardımcıya beklenen sürüm de iletilir: kurulum sonunda kurulu
+        // sürüm bu değerle doğrulanır, uyuşmazlıkta geri alma tetiklenir.
+        let mut helper_args: Vec<String> = vec![
+            "/usr/local/bin/ayaz-update-helper".to_string(),
+            deb_str,
+        ];
+        if let Some(ref ev) = expected_version {
+            let ev = ev.trim();
+            if !ev.is_empty() {
+                helper_args.push(ev.to_string());
+            }
+        }
+
         let install_status = if helper_path.exists() {
             Command::new("sudo")
-                .args(["/usr/local/bin/ayaz-update-helper", &deb_str])
+                .args(&helper_args)
                 .status()
         } else {
             return Err("Güvenlik İlkesi İhlali: /usr/local/bin/ayaz-update-helper bulunamadı. Güncelleme yalnızca doğrulanmış yardımcı üzerinden kurulabilir.".to_string());
@@ -2752,6 +2919,256 @@ fn system_reboot() -> Result<String, String> {
     Ok("Sistem yeniden başlatılıyor.".to_string())
 }
 
+// ============================================================================
+// 10. GERÇEK RADYO DENETİMİ (Wi-Fi / Bluetooth) — nmcli varsa o, yoksa rfkill
+// ============================================================================
+// Komutlar argümansız/sabit argümanlı çalıştırılır; kabuk yorumlaması yoktur.
+fn run_capture(cmd: &str, args: &[&str]) -> Option<String> {
+    let out = Command::new(cmd).args(args).output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+// `rfkill list <tür>` çıktısında "Soft blocked: no" → etkin (engelli değil).
+fn rfkill_enabled(list_output: &str) -> Option<bool> {
+    for line in list_output.lines() {
+        let t = line.trim();
+        if t.starts_with("Soft blocked:") {
+            return Some(t.ends_with("no"));
+        }
+    }
+    None
+}
+
+#[tauri::command]
+fn get_radio_state() -> RadioState {
+    let mut state = RadioState {
+        available: false,
+        backend: String::new(),
+        wifi_enabled: false,
+        bluetooth_enabled: false,
+        wifi_ssid: String::new(),
+    };
+
+    if let Some(wifi) = run_capture("nmcli", &["radio", "wifi"]) {
+        let bt = run_capture("nmcli", &["radio", "bluetooth"]).unwrap_or_default();
+        state.available = true;
+        state.backend = "nmcli".to_string();
+        state.wifi_enabled = wifi.trim() == "enabled";
+        state.bluetooth_enabled = bt.trim() == "enabled";
+        if state.wifi_enabled {
+            if let Some(list) = run_capture("nmcli", &["-t", "-f", "ACTIVE,SSID", "dev", "wifi", "list"]) {
+                for line in list.lines() {
+                    let mut parts = line.splitn(2, ':');
+                    let active = parts.next().unwrap_or("");
+                    let ssid = parts.next().unwrap_or("");
+                    if active == "yes" && !ssid.is_empty() {
+                        state.wifi_ssid = ssid.to_string();
+                        break;
+                    }
+                }
+            }
+        }
+        return state;
+    }
+
+    if let Some(wifi_list) = run_capture("rfkill", &["list", "wifi"]) {
+        state.available = true;
+        state.backend = "rfkill".to_string();
+        state.wifi_enabled = rfkill_enabled(&wifi_list).unwrap_or(false);
+        if let Some(bt_list) = run_capture("rfkill", &["list", "bluetooth"]) {
+            state.bluetooth_enabled = rfkill_enabled(&bt_list).unwrap_or(false);
+        }
+    }
+
+    state
+}
+
+#[tauri::command]
+fn set_radio_state(kind: String, enabled: bool) -> Result<RadioState, String> {
+    let k = match kind.trim() {
+        "wifi" => "wifi",
+        "bluetooth" => "bluetooth",
+        _ => return Err("Geçersiz radyo türü.".to_string()),
+    };
+    let onoff = if enabled { "on" } else { "off" };
+
+    if run_capture("nmcli", &["radio", k, onoff]).is_some() {
+        return Ok(get_radio_state());
+    }
+    let verb = if enabled { "unblock" } else { "block" };
+    if run_capture("rfkill", &[verb, k]).is_some() {
+        return Ok(get_radio_state());
+    }
+    Err("Ağ yöneticisi bulunamadı: sistemde nmcli veya rfkill yok.".to_string())
+}
+
+#[tauri::command]
+fn scan_wifi_networks() -> Result<Vec<WifiNetwork>, String> {
+    // Yeniden tarama isteği başarısız olsa bile mevcut liste okunur.
+    let _ = run_capture("nmcli", &["dev", "wifi", "rescan"]);
+    let out = run_capture("nmcli", &["-t", "-f", "ACTIVE,SSID,SIGNAL", "dev", "wifi", "list"])
+        .ok_or_else(|| "Kablosuz tarama için NetworkManager (nmcli) kurulu olmalı.".to_string())?;
+    let mut networks = Vec::new();
+    for line in out.lines() {
+        let mut parts = line.splitn(3, ':');
+        let active = parts.next().unwrap_or("");
+        // nmcli -t, özel karakterleri ters eğik çizgiyle kaçırır (":" -> "\:").
+        let ssid = parts.next().unwrap_or("").replace("\\:", ":").replace("\\\\", "\\");
+        let signal = parts.next().unwrap_or("").parse::<u8>().unwrap_or(0);
+        if ssid.is_empty() {
+            continue;
+        }
+        networks.push(WifiNetwork {
+            ssid,
+            signal,
+            active: active == "yes",
+        });
+    }
+    Ok(networks)
+}
+
+#[tauri::command]
+fn wifi_connect(ssid: String) -> Result<String, String> {
+    let clean = ssid.trim();
+    // SSID tek argüman olarak geçilir (kabuk yok); IEEE sınırı 32 bayttır.
+    if clean.is_empty() || clean.len() > 32 {
+        return Err("Geçersiz ağ adı (SSID).".to_string());
+    }
+    let out = Command::new("nmcli").args(["dev", "wifi", "connect", clean]).output()
+        .map_err(|_| "nmcli bulunamadı: kablosuz bağlantı için NetworkManager gerekli.".to_string())?;
+    if out.status.success() {
+        return Ok(format!("Bağlanıldı: {}", clean));
+    }
+    let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    Err(if err.is_empty() {
+        format!("Bağlanılamadı: {}", clean)
+    } else {
+        err
+    })
+}
+
+#[tauri::command]
+fn get_processes() -> Result<Vec<ProcessInfo>, String> {
+    let out = run_capture("ps", &["-eo", "pid=,user=,pcpu=,rss=,stat=,comm="])
+        .ok_or_else(|| "Süreç listesi okunamadı (ps bulunamadı).".to_string())?;
+    let mut list: Vec<ProcessInfo> = out
+        .lines()
+        .filter_map(|line| {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            if f.len() < 6 {
+                return None;
+            }
+            let status = match f[4].chars().next().unwrap_or('S') {
+                'R' => "Çalışıyor",
+                'S' => "Uyuyor",
+                'D' => "Beklemede",
+                'Z' => "Zombi",
+                'T' | 't' => "Durduruldu",
+                'I' => "Boşta",
+                _ => "Bilinmiyor",
+            };
+            Some(ProcessInfo {
+                pid: f[0].parse::<i32>().ok()?,
+                user: f[1].to_string(),
+                cpu: f[2].parse::<f64>().unwrap_or(0.0),
+                // rss KB cinsinden; arayüz MB gösterir.
+                mem_mb: f[3].parse::<f64>().unwrap_or(0.0) / 1024.0,
+                status: status.to_string(),
+                name: f[5..].join(" "),
+            })
+        })
+        .collect();
+    list.sort_by(|a, b| b.cpu.partial_cmp(&a.cpu).unwrap_or(std::cmp::Ordering::Equal));
+    list.truncate(300);
+    Ok(list)
+}
+
+#[tauri::command]
+fn kill_process(pid: i32) -> Result<String, String> {
+    if pid <= 1 {
+        return Err("PID 1 (init) ve altındaki süreçler sonlandırılamaz.".to_string());
+    }
+    if pid == std::process::id() as i32 {
+        return Err("Görev Yöneticisi kendi sürecini sonlandıramaz.".to_string());
+    }
+    let out = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .output()
+        .map_err(|_| "kill komutu çalıştırılamadı.".to_string())?;
+    if out.status.success() {
+        Ok(format!("SIGTERM gönderildi (PID {}).", pid))
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        Err(if err.is_empty() {
+            format!("PID {} sonlandırılamadı.", pid)
+        } else {
+            err
+        })
+    }
+}
+
+#[tauri::command]
+fn get_network_info() -> NetworkInfo {
+    let mut info = NetworkInfo {
+        interface: String::new(),
+        ip: String::new(),
+        prefix: 0,
+        gateway: String::new(),
+        dns: Vec::new(),
+        connected: false,
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        // Örnek satır: "2: eth0    inet 192.168.1.105/24 brd ... scope global ..."
+        if let Some(out) = run_capture("ip", &["-o", "-4", "addr", "show", "scope", "global"]) {
+            for line in out.lines() {
+                let mut parts = line.split_whitespace();
+                let _idx = parts.next();
+                let name = parts.next().unwrap_or("");
+                let kind = parts.next().unwrap_or("");
+                let cidr = parts.next().unwrap_or("");
+                if name.is_empty() || kind != "inet" {
+                    continue;
+                }
+                let mut it = cidr.split('/');
+                let ip = it.next().unwrap_or("");
+                if ip.is_empty() {
+                    continue;
+                }
+                info.interface = name.to_string();
+                info.ip = ip.to_string();
+                info.prefix = it.next().unwrap_or("").parse::<u8>().unwrap_or(0);
+                info.connected = true;
+                break;
+            }
+        }
+        if let Some(rt) = run_capture("ip", &["route", "show", "default"]) {
+            if let Some(pos) = rt.find("via ") {
+                let gw = rt[pos + 4..].split_whitespace().next().unwrap_or("");
+                if !gw.is_empty() {
+                    info.gateway = gw.to_string();
+                }
+            }
+        }
+        if let Ok(resolv) = fs::read_to_string("/etc/resolv.conf") {
+            for line in resolv.lines() {
+                if let Some(ns) = line.strip_prefix("nameserver") {
+                    let ns = ns.trim();
+                    if !ns.is_empty() {
+                        info.dns.push(ns.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    info
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -2789,7 +3206,14 @@ fn main() {
             open_url,
             delete_file,
             system_poweroff,
-            system_reboot
+            system_reboot,
+            get_radio_state,
+            set_radio_state,
+            scan_wifi_networks,
+            wifi_connect,
+            get_network_info,
+            get_processes,
+            kill_process
         ])
         .run(tauri::generate_context!())
         .expect("Ankora DE başlatılırken hata oluştu");
