@@ -1055,6 +1055,14 @@ html, body {
   transform: scale(0.9) translate3d(0, 24px, 0) !important;
 }
 
+/* Başka çalışma alanındaki açık pencere bu alanda görünmez, ama açık sayılır. */
+.window.open.ws-hide {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: scale(0.96) translate3d(0, 10px, 0);
+}
+
 /* Yüksek Akıcılık Sürükleme (Smooth GPU Dragging) */
 body.is-dragging {
   user-select: none !important;
@@ -2490,7 +2498,7 @@ body.theme-light .toggle-slider-knob {
   right: 0;
   width: 100%;
   height: var(--taskbar-height);
-  background: rgba(14, 16, 23, 0.84);
+  background: rgba(0, 0, 0, 0.9);
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   /* Üst kenarda tek hairline: yüzeye kalınlık verir, parlama yok. */
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 -2px 10px rgba(0, 0, 0, 0.5);
@@ -2510,6 +2518,15 @@ body.theme-light .toggle-slider-knob {
   min-width: 0;
 }
 
+/* Başlat, hızlı başlatıcılar ve açık pencereler ortada toplanır; sol ve sağ
+   gruplar eşit genişlikte yer tuttuğu için küme ekranda tam ortada durur. */
+.taskbar-center-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .start-btn {
   width: 36px;
   height: 34px;
@@ -2526,15 +2543,14 @@ body.theme-light .toggle-slider-knob {
   flex-shrink: 0;
 }
 
-/* Vurgu tek renk: DESIGN.md'deki mavi. Eski cyan + parlama bu yüzden kalktı. */
 .start-btn:hover {
-  background: var(--accent-hover);
-  border-color: rgba(37, 99, 235, 0.45);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .start-btn.active {
-  background: rgba(37, 99, 235, 0.2);
-  border-color: rgba(37, 99, 235, 0.55);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .start-glyph-logo {
@@ -2564,12 +2580,12 @@ body.theme-light .toggle-slider-knob {
   height: 32px;
   padding: 0;
   border-radius: 9px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  border: 1px solid transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(255, 255, 255, 0.82);
   cursor: pointer;
   transition: background-color 0.16s ease, border-color 0.16s ease,
     color 0.16s ease, transform 0.16s cubic-bezier(0.16, 1, 0.3, 1);
@@ -2629,7 +2645,6 @@ body.theme-light .toggle-slider-knob {
   color: var(--text-primary);
 }
 
-/* Aktif sekmeyi yalnızca alttaki mavi çubuk işaretler; ikinci bir çizgi yok. */
 .task-tab.active {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.15);
@@ -2641,8 +2656,10 @@ body.theme-light .toggle-slider-knob {
 .taskbar-tray {
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
 }
 
 .tray-cell {
@@ -2669,19 +2686,19 @@ body.theme-light .toggle-slider-knob {
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Sağ: Wi-Fi, ses ve pil tek tek okunur; kapsül zemini kalktı. */
 .tray-status-island,
 .tray-status-group {
   display: flex;
   align-items: center;
-  padding: 4px 7px;
-  border-radius: 9px;
+  padding: 0;
+  border-radius: 0;
   color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
-  gap: 8px;
-  /* Sağ blok kalıcı bir ada olarak okunur; boşlukta kaybolmaz. */
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
+  gap: 2px;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: color 0.16s ease;
 }
 
 .tray-status-island:hover,
@@ -2695,6 +2712,127 @@ body.theme-light .toggle-slider-knob {
   display: flex;
   align-items: center;
   gap: 4px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease;
+}
+
+.tray-island-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+/* Çalışma alanı göstergesi: kaç alan varsa o kadar nokta, aktif olan vurgulu */
+.taskbar-ws-dots {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+}
+
+.ws-dot {
+  width: 7px;
+  height: 7px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.28);
+  cursor: pointer;
+  transition: background-color 0.16s ease, transform 0.16s ease;
+}
+
+.ws-dot:hover {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.ws-dot.active {
+  background: var(--accent-active, #3b82f6);
+  transform: scale(1.35);
+}
+
+/* Super + Tab genel görünümü */
+.workspace-overview {
+  position: fixed;
+  inset: 0;
+  z-index: 99996;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 40px;
+  background: rgba(0, 0, 0, 0.74);
+  backdrop-filter: blur(7px);
+}
+
+.workspace-overview[hidden] {
+  display: none;
+}
+
+.overview-grid {
+  /* Flex + ortalama: pencere sayısı azken kartlar solda değil, ekranda ortada durur. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  width: min(880px, 92vw);
+}
+
+.overview-card {
+  flex: 0 1 200px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+
+.overview-card:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-2px);
+}
+
+.overview-glyph {
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  font-size: 19px;
+  font-weight: 700;
+  background: rgba(37, 99, 235, 0.22);
+  color: #93c5fd;
+}
+
+.overview-title {
+  font-size: 12.5px;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-empty {
+  width: 100%;
+  text-align: center;
+  padding: 26px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.overview-hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary);
 }
 
 .battery-pct-text {
@@ -2784,7 +2922,8 @@ body.theme-light .toggle-slider-knob {
 .start-flyout {
   position: fixed;
   bottom: calc(var(--taskbar-height) + 8px);
-  left: 10px;
+  /* Başlat butonu ortada; menü de aynı eksende açılır, küçük ekranda kenara yapışır. */
+  left: max(10px, calc(50% - 290px));
   width: 580px;
   max-width: calc(100vw - 20px);
   max-height: calc(100vh - var(--taskbar-height) - 20px);
@@ -2975,6 +3114,90 @@ body.theme-light .toggle-slider-knob {
   padding: 2px 6px;
   border-radius: 4px;
   pointer-events: none;
+}
+
+/* Evrensel arama sonuç listesi: sorgu doluken menünün bölümlerinin yerine geçer */
+.start-search-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 12px 6px;
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.start-search-results[hidden] {
+  display: none;
+}
+
+.search-result-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.search-result-row:hover,
+.search-result-row:focus-visible {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.result-glyph {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(37, 99, 235, 0.18);
+  color: #93c5fd;
+}
+
+.result-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.result-title {
+  font-size: 12.5px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.result-kind {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.search-empty {
+  padding: 18px 8px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--text-secondary);
 }
 
 /* Bölüm Başlıkları */
@@ -4875,18 +5098,6 @@ select:focus-visible {
   gap: 6px;
   cursor: pointer;
   transition: background-color 0.16s ease, border-color 0.16s ease, color 0.16s ease;
-}
-
-.task-tab.active::after {
-  content: '';
-  position: absolute;
-  bottom: 3px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 16px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--accent-active, #2563eb);
 }
 
 /* ==============================================================================

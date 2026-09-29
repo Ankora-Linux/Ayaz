@@ -225,15 +225,15 @@
             return {
               reply: `${prefix}Ağ arabirimleri ve etkin IP adresleri taranıyor.`,
               has_action: true,
-              action_command: 'ip addr show',
-              action_desc: 'Ağ arabirimlerini ve IP yapılandırmasını listeleme'
+              action_command: 'hostname -I',
+              action_desc: 'Etkin arayüzlerin IP adreslerini listeleme'
             };
           } else if (p.includes('teftiş') || p.includes('çekirdek') || p.includes('telemetri')) {
             return {
               reply: `${prefix}Çekirdek telemetrisi, init sistemi ve donanım mimarisi taranıyor.`,
               has_action: true,
-              action_command: 'uname -a && uptime',
-              action_desc: 'Sistem çekirdeği ve çalışma süresini teftiş etme'
+              action_command: 'uname -a',
+              action_desc: 'Sistem çekirdeği bilgisini listeleme'
             };
           }
 
@@ -569,6 +569,7 @@
       const win = typeof winId === 'string' ? document.getElementById(winId) : winId;
       if (!win) return;
 
+      WorkspaceManager.adopt(win);
       win.classList.remove('minimized');
       win.classList.add('open');
       this.bringToFront(win);
@@ -715,7 +716,9 @@
       this.tabsContainer.innerHTML = '';
 
       this.windows.forEach(win => {
-        if (win.classList.contains('open')) {
+        // Başka çalışma alanındaki açık pencereler görev çubuğunda görünmez;
+        // oralara dönüş noktalarla yapılır.
+        if (win.classList.contains('open') && !win.classList.contains('ws-hide')) {
           const tab = document.createElement('div');
           tab.className = `task-tab ${win.classList.contains('active') && !win.classList.contains('minimized') ? 'active' : ''}`;
 
@@ -737,6 +740,95 @@
           this.tabsContainer.appendChild(tab);
         }
       });
+    }
+  };
+
+  // ============================================================================
+  // 1b. SANAL ÇALIŞMA ALANLARI (VIRTUAL DESKS)
+  // ============================================================================
+  const WorkspaceManager = {
+    active: 1,
+    count: 4,
+    max: 6,
+
+    // Yeni açılan pencere, kullanıcının o an bulunduğu alanda belirir.
+    adopt(win) {
+      win.setAttribute('data-ws', String(this.active));
+      win.classList.remove('ws-hide');
+    },
+
+    set(n) {
+      this.active = Math.min(Math.max(1, n || 1), this.max);
+      document.querySelectorAll('.window.open').forEach(win => {
+        const ws = parseInt(win.getAttribute('data-ws'), 10) || 1;
+        win.classList.toggle('ws-hide', ws !== this.active);
+      });
+      this.syncDots();
+    },
+
+    next() { this.set(this.active + 1 > this.max ? 1 : this.active + 1); },
+    prev() { this.set(this.active - 1 < 1 ? this.max : this.active - 1); },
+
+    // Ctrl + Super + N: boş bir alan açılır; alan sayısı maksimuma kadar büyür.
+    grow() {
+      if (this.count >= this.max) return;
+      this.count += 1;
+      this.set(this.count);
+    },
+
+    syncDots() {
+      const host = document.getElementById('taskbar-ws-dots');
+      if (!host) return;
+      host.innerHTML = '';
+      for (let i = 1; i <= this.count; i++) {
+        const dot = document.createElement('button');
+        dot.type = 'button';
+        dot.className = `ws-dot${i === this.active ? ' active' : ''}`;
+        dot.title = `Çalışma alanı ${i}`;
+        dot.setAttribute('aria-label', `Çalışma alanı ${i}`);
+        dot.setAttribute('aria-current', i === this.active ? 'true' : 'false');
+        dot.addEventListener('click', () => this.set(i));
+        host.appendChild(dot);
+      }
+    },
+
+    toggleOverview() {
+      const ov = document.getElementById('workspace-overview');
+      const grid = document.getElementById('overview-grid');
+      if (!ov || !grid) return;
+      if (!ov.hidden) { this.closeOverview(); return; }
+
+      grid.textContent = '';
+      const wins = WindowManager.windows.filter(w =>
+        w.classList.contains('open') && !w.classList.contains('ws-hide'));
+
+      if (wins.length === 0) {
+        grid.innerHTML = '<div class="overview-empty">Açık pencere yok</div>';
+      }
+
+      wins.forEach(win => {
+        const titleSpan = win.querySelector('.window-meta span');
+        const title = titleSpan ? titleSpan.textContent.split('—')[0].trim() : 'Pencere';
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'overview-card';
+        card.innerHTML = '<span class="overview-glyph"></span><span class="overview-title"></span>';
+        card.querySelector('.overview-glyph').textContent = title.charAt(0).toLocaleUpperCase('tr');
+        card.querySelector('.overview-title').textContent = title;
+        card.addEventListener('click', () => {
+          this.closeOverview();
+          win.classList.remove('minimized');
+          WindowManager.bringToFront(win);
+        });
+        grid.appendChild(card);
+      });
+
+      ov.hidden = false;
+    },
+
+    closeOverview() {
+      const ov = document.getElementById('workspace-overview');
+      if (ov) ov.hidden = true;
     }
   };
 
@@ -2999,7 +3091,7 @@
       const savedWp = SafeStorage.getItem('ankora_wallpaper') || 'wallpaper-nordic.svg';
       const savedRadius = SafeStorage.getItem('ankora_corner_radius') || '6px';
       const savedGlass = SafeStorage.getItem('ankora_window_glass') || 'solid';
-      const savedAlign = SafeStorage.getItem('ankora_taskbar_align') || 'left';
+      const savedAlign = SafeStorage.getItem('ankora_taskbar_align') || 'center';
       const savedHeight = SafeStorage.getItem('ankora_taskbar_height') || '44px';
       const savedAnim = SafeStorage.getItem('ankora_anim_speed') || 'smooth';
 
@@ -3498,7 +3590,146 @@
     }
   };
 
+  // ============================================================================
+  // EVRENSEL BAŞLATICI ARAMASI (LAUNCHER SEARCH)
+  // ============================================================================
+
+  // Türkçe küçük harfe indirger, harf dönüşümlerini ve ayraçları uygular:
+  // "magaza" ile "Mağaza", "wifi" ile "Wi-Fi" aynı anahtara düşer.
+  const launcherNorm = (s) => (s || '')
+    .toLocaleLowerCase('tr')
+    .replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's')
+    .replace(/ö/g, 'o').replace(/ç/g, 'c').replace(/ı/g, 'i').replace(/â/g, 'a')
+    .replace(/[\s\-_.()/,:]+/g, '');
+
+  // Arama kutusu doluken menünün kendi bölümleri gizlenir ve tek sonuç listesi
+  // açılır. Profil ile güç eylemleri her durumda erişilebilir kalır.
+  const LauncherSearch = {
+    sectionSel: '.start-section-heading, #start-pinned-grid, #dynamic-start-apps, .start-dual-section',
+    hits: [],
+
+    // Kaynaklar her sorguda DOM'dan okunur; sabitlenenler, kurulu uygulamalar,
+    // son belgeler, kısayollar, masaüstü simgeleri ve ayar panelleri bu yolla
+    // ayrı bir kayıt tablosu olmadan güncel kalır.
+    collect() {
+      const items = [];
+      const push = (title, desc, kind, run) => {
+        const t = (title || '').replace(/\s+/g, ' ').trim();
+        if (t) items.push({ title: t, desc: (desc || '').trim(), kind, run });
+      };
+
+      document.querySelectorAll('.pinned-app-card[data-open]').forEach(card => {
+        push(card.querySelector('.app-title')?.textContent || card.textContent,
+          card.querySelector('.app-desc')?.textContent, 'Uygulama',
+          () => WindowManager.open(card.getAttribute('data-open')));
+      });
+
+      document.querySelectorAll('.recent-doc-row[data-file]').forEach(row => {
+        const file = row.getAttribute('data-file');
+        push(row.textContent, 'Son kullanılan belge', 'Belge', () => {
+          WindowManager.open('win-office');
+          OfficeManager.openDocumentByName(file);
+        });
+      });
+
+      document.querySelectorAll('.shortcut-action-row').forEach(row => {
+        const open = row.getAttribute('data-open');
+        const action = row.getAttribute('data-action');
+        push(row.textContent, 'Hızlı kısayol', 'Kısayol', () => {
+          if (open) {
+            WindowManager.open(open);
+          } else if (action === 'quick-clean') {
+            WindowManager.open('win-terminal');
+            Terminal.runCommand('apt-get clean && rm -rf /tmp/*');
+          }
+        });
+      });
+
+      document.querySelectorAll('.desktop-item[data-open]').forEach(item => {
+        push(item.textContent, 'Masaüstü simgesi', 'Masaüstü',
+          () => WindowManager.open(item.getAttribute('data-open')));
+      });
+
+      document.querySelectorAll('.settings-nav-item').forEach(item => {
+        const pane = item.getAttribute('data-pane');
+        push(item.textContent, 'Sistem ayarları', 'Ayar', () => {
+          WindowManager.open('win-settings');
+          if (pane) {
+            setTimeout(() => document.querySelector(`.settings-nav-item[data-pane="${pane}"]`)?.click(), 60);
+          }
+        });
+      });
+
+      return items;
+    },
+
+    render(value) {
+      const box = document.getElementById('start-search-results');
+      const flyout = document.getElementById('start-flyout');
+      if (!box || !flyout) return;
+
+      const query = (value || '').trim();
+      const sections = flyout.querySelectorAll(this.sectionSel);
+
+      if (!query) {
+        box.hidden = true;
+        box.textContent = '';
+        this.hits = [];
+        sections.forEach(el => { el.style.display = ''; });
+        return;
+      }
+
+      sections.forEach(el => { el.style.display = 'none'; });
+      box.hidden = false;
+
+      const nq = launcherNorm(query);
+      this.hits = this.collect().filter(it =>
+        launcherNorm(it.title).includes(nq) || launcherNorm(it.desc).includes(nq)
+      ).slice(0, 8);
+
+      if (this.hits.length === 0) {
+        box.innerHTML = '<div class="search-empty">Eşleşen sonuç yok</div>';
+        return;
+      }
+
+      box.innerHTML = this.hits.map((it, i) => `
+        <div class="search-result-row" role="option" data-i="${i}" tabindex="-1">
+          <span class="result-glyph">${it.title.trim().charAt(0).toLocaleUpperCase('tr')}</span>
+          <span class="result-text">
+            <span class="result-title">${it.title.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>
+            <span class="result-desc">${(it.desc || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>
+          </span>
+          <span class="result-kind">${it.kind}</span>
+        </div>`).join('');
+    },
+
+    run(index) {
+      const hit = this.hits[index];
+      if (!hit) return;
+      hit.run();
+      // Sorgu ve gizli bölümler temiz kalmaz: bir sonraki açılış normal menüdür.
+      const input = document.getElementById('start-search');
+      if (input) {
+        input.value = '';
+        this.render('');
+      }
+      const flyout = document.getElementById('start-flyout');
+      const startBtn = document.getElementById('start-btn');
+      flyout?.classList.remove('open');
+      startBtn?.classList.remove('active');
+    }
+  };
+
   function initDesktopControls() {
+    // Çalışma alanı noktaları menüden bağımsız, ilk açılışta çizilir.
+    WorkspaceManager.syncDots();
+
+    // Genel görünümde kart dışına tıklamak da kapatır; dinleyici bir kez,
+    // çağrı başına eklenirse biriken tıklamalar açık kalmayı engellerdi.
+    document.getElementById('workspace-overview')?.addEventListener('click', (e) => {
+      if (!e.target.closest('.overview-card')) WorkspaceManager.closeOverview();
+    });
+
     // Masaüstündeki simgeler (varsa dinamik simgeler)
     document.querySelectorAll('.desktop-item').forEach(item => {
       const target = item.getAttribute('data-open');
@@ -3515,6 +3746,12 @@
       const isOpen = typeof forceState === 'boolean' ? forceState : !startFlyout.classList.contains('open');
       startFlyout.classList.toggle('open', isOpen);
       if (startBtn) startBtn.classList.toggle('active', isOpen);
+      if (startSearch) {
+        // Menü her açılışta temiz başlar: önceki sorgu alttaki bölümleri gizli
+        // bırakmasın.
+        if (!isOpen) startSearch.value = '';
+        LauncherSearch.render(startSearch.value);
+      }
       if (isOpen && startSearch) {
         setTimeout(() => {
           try { startSearch.focus(); } catch (err) {}
@@ -3539,11 +3776,41 @@
 
     // Klavye Kısayolları (Super/Meta ve Esc)
     document.addEventListener('keydown', (e) => {
-      // Esc -> Başlat menüsünü ve bağlam menüsünü kapat
+      // Esc -> Başlat menüsünü, genel görünümü ve bağlam menüsünü kapat
       if (e.key === 'Escape') {
         toggleStart(false);
+        WorkspaceManager.closeOverview();
         const ctx = document.getElementById('desktop-context-menu');
         if (ctx) ctx.classList.remove('open');
+        return;
+      }
+
+      // Süper tuşunun WebKit'e ulaşmadığı ortamlar için ikiz mod: Ctrl + Alt.
+      // Mevcut Ctrl+Alt+R/S/M/T kısayollarıyla çakışmaz (yalnız oklar, N ve Tab).
+      const wsMod = (e.metaKey && e.ctrlKey) || (e.ctrlKey && e.altKey);
+
+      // Sol/Sağ -> çalışma alanları arasında geç
+      if (wsMod && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        if (e.key === 'ArrowRight') WorkspaceManager.next(); else WorkspaceManager.prev();
+        return;
+      }
+
+      // N -> yeni çalışma alanı
+      if (wsMod && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        WorkspaceManager.grow();
+        return;
+      }
+
+      // Tab -> açık pencerelerin genel görünümü.
+      // WebKitGTK bazı ortamlarda Ctrl+Alt+Tab olayını sayfaya hiç ulaştırmıyor
+      // (v7 testinde Space okundu, Tab okunamadı); bu yüzden e.code ile ikiz
+      // Ctrl+Alt+G (G = Genel Görünüm) de bağlandı. e.code tuş yerleşiminden
+      // bağımsızdır.
+      if (wsMod && (e.code === 'Tab' || e.code === 'KeyG')) {
+        e.preventDefault();
+        WorkspaceManager.toggleOverview();
         return;
       }
 
@@ -3618,41 +3885,21 @@
       });
     });
 
-    // 4. Arama Kutusu Filtreleme
+    // 4. Evrensel Arama (LauncherSearch)
     if (startSearch) {
       startSearch.addEventListener('input', (e) => {
-        const q = e.target.value.toLowerCase().trim();
-        const cards = document.querySelectorAll('.pinned-app-card');
-        const docs = document.querySelectorAll('.recent-doc-row');
-
-        cards.forEach(card => {
-          const text = card.textContent.toLowerCase();
-          card.style.display = text.includes(q) ? 'flex' : 'none';
-        });
-
-        docs.forEach(doc => {
-          const text = doc.textContent.toLowerCase();
-          doc.style.display = text.includes(q) ? 'flex' : 'none';
-        });
-
-        const headingInstalled = document.getElementById('start-installed-heading');
-        if (headingInstalled) {
-          if (q.length > 0) {
-            const hasVisibleDynamic = Array.from(document.querySelectorAll('.dynamic-installed-app')).some(c => c.style.display !== 'none');
-            headingInstalled.style.display = hasVisibleDynamic ? 'flex' : 'none';
-          } else {
-            headingInstalled.style.display = (typeof XdgDesktopEngine !== 'undefined' && XdgDesktopEngine.installedApps.length > 0) ? 'flex' : 'none';
-          }
-        }
+        LauncherSearch.render(e.target.value);
       });
 
       startSearch.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
-          const firstVisible = document.querySelector('.pinned-app-card:not([style*="display: none"])');
-          if (firstVisible) {
-            firstVisible.click();
-          }
+          document.querySelector('#start-search-results .search-result-row')?.click();
         }
+      });
+
+      document.getElementById('start-search-results')?.addEventListener('click', (e) => {
+        const row = e.target.closest('.search-result-row');
+        if (row) LauncherSearch.run(parseInt(row.getAttribute('data-i'), 10));
       });
     }
 
@@ -4001,7 +4248,8 @@
 
       // Saniyede bir aynı metni yazmak boşuna biçimlendirme çalıştırır.
       // Bu metinler ancak dakika ya da gün değişince değişir.
-      const clockStr = `${timeStr} | ${dayStr}, ${dateNum} ${monthStr} ${yearNum} |`;
+      // Çubukta yalnız saat durur; tam tarih takvim popover'unda yazılı.
+      const clockStr = timeStr;
       if (trayClock.textContent !== clockStr) trayClock.textContent = clockStr;
 
       const bigTime = document.getElementById('cal-time-big');
@@ -5195,17 +5443,6 @@
     else if (e.ctrlKey && e.altKey && (e.key === 'r' || e.key === 'R' || e.key === 'm' || e.key === 'M')) {
       e.preventDefault();
       MemoryManager.optimizeRam();
-    }
-    // Ctrl + Boşluk -> Başlat Menüsü
-    else if (e.ctrlKey && e.code === 'Space') {
-      e.preventDefault();
-      const flyout = document.getElementById('start-flyout');
-      const startBtn = document.getElementById('start-btn');
-      if (flyout) {
-        const isOpen = flyout.classList.contains('open');
-        flyout.classList.toggle('open', !isOpen);
-        if (startBtn) startBtn.classList.toggle('active', !isOpen);
-      }
     }
     // Escape -> Başlat veya Menüyü Gizle
     else if (e.key === 'Escape') {

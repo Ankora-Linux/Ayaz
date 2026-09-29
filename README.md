@@ -8,7 +8,7 @@
     <img src="https://img.shields.io/badge/S%C3%9CR%C3%9CM-2.0.0-ffffff?style=for-the-badge&labelColor=111111" alt="Sürüm">
     <img src="https://img.shields.io/badge/%C3%87EK%C4%B0RDEK-TAURI_%2B_RUST-059669?style=for-the-badge&labelColor=111111" alt="Çekirdek">
     <img src="https://img.shields.io/badge/HEDEF-ANKORA_LINUX-2563eb?style=for-the-badge&labelColor=111111" alt="Dağıtım">
-    <img src="https://img.shields.io/badge/L%C3%B0SANS-MIT-41a013?style=for-the-badge&labelColor=111111" alt="Lisans">
+    <img src="https://img.shields.io/badge/L%C3%B0SANS-GPL--3.0-41a013?style=for-the-badge&labelColor=111111" alt="Lisans">
   </p>
 </div>
 
@@ -102,4 +102,4 @@ GitHub Actions iş akışı (`release-de.yml`) otomatik olarak Ubuntu üzerinde 
 
 ## 📄 Lisans
 
-Bu proje **MIT** lisansı ile lisanslanmıştır. Ankora Linux projesinin bir parçasıdır.
+Bu proje **GNU General Public License v3.0** ile lisanslanmıştır; tam metin depodaki `LICENSE` dosyasındadır. Ankora Linux projesinin bir parçasıdır.

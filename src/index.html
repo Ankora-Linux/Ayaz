@@ -1941,6 +1941,9 @@
       </div>
     </div>
 
+    <!-- Arama yazıldığında menünün kendi bölümlerinin yerine geçen tek sonuç listesi -->
+    <div class="start-search-results" id="start-search-results" role="listbox" aria-label="Arama Sonuçları" hidden></div>
+
     <!-- 2. SABİTLENENLER (PINNED APPS GRID - 6 SÜTUN) -->
     <div class="start-section-heading">
       <span class="heading-title">Sabitlenenler</span>
@@ -2228,8 +2231,11 @@
 
   <!-- GÖREV ÇUBUĞU (TASKBAR - DESKTOP PREVIEW PARİTESİ) -->
   <footer class="taskbar" id="taskbar">
-    <!-- Sol Bölüm: Ankora Başlat Butonu ve Hızlı Başlatıcılar -->
-    <div class="taskbar-left-group">
+    <!-- Sol: yer tutucu. Başlat ve hızlı başlatıcılar ortada toplanır. -->
+    <div class="taskbar-left-group"></div>
+
+    <!-- Orta: Başlat Düğmesi, Hızlı Başlatıcılar, Açık Pencereler -->
+    <div class="taskbar-center-cluster">
       <!-- Ankora Başlat Düğmesi (Ayaz DE Zirve Logosu) -->
       <button class="start-btn" id="start-btn" title="Başlat Menüsü (Ctrl + Boşluk)">
         <img src="logo.svg" alt="Ankora" class="start-glyph-logo">
@@ -2264,10 +2270,10 @@
       <div class="taskbar-running-tabs" id="running-tabs"></div>
     </div>
 
-    <!-- Sağ Sistem Tepsisi (Desktop Preview: Saat | Wi-Fi, Ses, Pil | Ankora Zirve) -->
+    <!-- Sağ Sistem Tepsisi (Tek Tek İkonlar | Saat) -->
     <div class="taskbar-tray">
-      <!-- Saat ve Tarih (Format: 16:48 | Sal, 24 Eki 2023 |) -->
-      <div class="tray-cell tray-clock" id="tray-clock" title="Saat ve Takvim">16:48 | Sal, 24 Eki 2023 |</div>
+      <!-- Çalışma Alanı Göstergesi (aktif alan nokta ile işaretli) -->
+      <div class="taskbar-ws-dots" id="taskbar-ws-dots" role="group" aria-label="Çalışma Alanları"></div>
 
       <!-- Sistem Durum Kapsülü (Wi-Fi + Ses + Pil - Tıklandığında Hızlı Ayarlar açılır) -->
       <div class="tray-status-island" id="tray-status-island" title="Hızlı Sistem Ayarları">
@@ -2283,12 +2289,22 @@
         </div>
       </div>
 
-      <!-- Sağ Köşe Ankora Butonu (Desktop Preview ile birebir) -->
+      <!-- Masaüstüne Dön (bildirim alanı çizgisi gibi, saatin hemen solunda) -->
       <button class="tray-icon-btn tray-anchor-btn" id="tray-anchor-btn" title="Ankora Karşılayıcı &amp; Masaüstü">
         <img src="logo.svg" alt="Ankora" class="tray-anchor-logo">
       </button>
+
+      <!-- Saat: çubukta yalnız saat; tam tarih takvim popover'unda -->
+      <div class="tray-cell tray-clock" id="tray-clock" title="Saat ve Takvim">19:53</div>
     </div>
   </footer>
+
+  <!-- Genel Görünüm: Super + Ctrl + Tab / Ctrl + Alt + Tab veya Ctrl + Alt + G
+       (WebKitGTK bazı ortamlarda Tab olayını sayfaya ulaştırmaz, G ikizi var) -->
+  <div class="workspace-overview" id="workspace-overview" role="dialog" aria-label="Genel Görünüm" hidden>
+    <div class="overview-grid" id="overview-grid"></div>
+    <p class="overview-hint">Bir pencereye dön için tıkla, kapatmak için Esc</p>
+  </div>
 
   <!-- Ayaz DE Hızlı Ayarlar & Eylem Merkezi Popover (Action Center) -->
   <div class="tray-popover ayaz-quick-settings-flyout" id="quick-settings-popover">
