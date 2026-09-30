@@ -165,6 +165,13 @@ cat << 'CONFOPT' > /etc/apt/apt.conf.d/01-build-confold
 Dpkg::Options { "--force-confdef"; "--force-confold"; };
 CONFOPT
 
+# Bazı ağlarda IPv6 erişilemezken DNS IPv6 adresi döndürdüğünde apt
+# indirmeleri zaman aşımına düşüp kurulumu yarıda kesiyor. Build sırasında
+# IPv4 zorlanır; squashfs öncesi bu dosya kaldırılır, ISO'ya sızmaz.
+cat << 'FORCEIPV4' > /etc/apt/apt.conf.d/02-build-forceipv4
+Acquire::ForceIPv4 "true";
+FORCEIPV4
+
 # Depo kaynakları
 cat << 'SOURCES' > /etc/apt/sources.list
 deb http://deb.devuan.org/merged daedalus main contrib non-free non-free-firmware
@@ -2132,6 +2139,9 @@ for f in \
         sed -i 's/\r$//' "$f"
     fi
 done
+
+# Build'a özel IPv4 zorlaması artık gerekli; dağıtılan sistemde kalmamalı
+rm -f "$CHROOT_DIR/etc/apt/apt.conf.d/02-build-forceipv4"
 
 # 8. SquashFS Sıkıştırılmış Kök Dosya Sisteminin Üretilmesi
 echo "[5/8] SquashFS kök dosya sistemi sıkıştırılıyor (filesystem.squashfs)..."
