@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tauri::Manager;
 use url::Url;
 
 // ============================================================================
@@ -660,7 +659,7 @@ fn set_lock_credentials(current_pin: Option<String>, new_pin: String) -> Result<
 
 #[tauri::command]
 fn verify_lock_credentials(pin: String) -> Result<bool, String> {
-    if let Ok(mut lock) = LOCK_ATTEMPTS.lock() {
+    if let Ok(lock) = LOCK_ATTEMPTS.lock() {
         if let Some(cooldown) = lock.1 {
             let elapsed = cooldown.elapsed();
             // Üstel bekleme: 2^(deneme-2) saniye, en fazla 300 saniye
@@ -812,6 +811,14 @@ fn parse_desktop_entry(path: &Path) -> Option<XdgApplication> {
 
 #[tauri::command]
 async fn scan_xdg_applications() -> Result<Vec<XdgApplication>, String> {
+    // .desktop dizinleri diske yayılmış bir tarama; ana olay döngüsünü
+    // bloklamasın diye çalışma havuzuna devredilir.
+    tauri::async_runtime::spawn_blocking(scan_xdg_applications_blocking)
+        .await
+        .map_err(|e| format!("XDG taraması yürütülemedi: {}", e))?
+}
+
+fn scan_xdg_applications_blocking() -> Result<Vec<XdgApplication>, String> {
     #[cfg(target_os = "linux")]
     {
         let mut apps = Vec::new();
@@ -853,6 +860,14 @@ async fn scan_xdg_applications() -> Result<Vec<XdgApplication>, String> {
 // ============================================================================
 #[tauri::command]
 async fn install_deb_package(package_name: String) -> Result<XdgApplication, String> {
+    // apt/dpkg sürer; Command::output() senkron çağrısı spawn_blocking
+    // içinde çalıştırılır ki pencere donmasın.
+    tauri::async_runtime::spawn_blocking(move || install_deb_package_blocking(package_name))
+        .await
+        .map_err(|e| format!("Paket kurulumu yürütülemedi: {}", e))?
+}
+
+fn install_deb_package_blocking(package_name: String) -> Result<XdgApplication, String> {
     let clean_pkg = package_name.trim();
     if clean_pkg.is_empty() {
         return Err("Geçersiz paket adı.".to_string());
@@ -869,9 +884,9 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
             }
             let helper = Path::new("/usr/local/bin/ayaz-pkg-helper");
             if helper.exists() {
-                Command::new("sudo").args(["/usr/local/bin/ayaz-pkg-helper", "install", clean_pkg]).output()
+                root_command("/usr/local/bin/ayaz-pkg-helper", &["install", clean_pkg])
             } else {
-                Command::new("sudo").args(["apt-get", "install", "-y", "--no-install-recommends", "--", clean_pkg]).output()
+                root_command("apt-get", &["install", "-y", "--no-install-recommends", "--", clean_pkg])
             }
         };
 
@@ -886,7 +901,7 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
         }
 
         // Kurulum sonrası XDG dizinini tara ve masaüstü/uygulamalar dizinine yerleştir
-        let apps = scan_xdg_applications().await?;
+        let apps = scan_xdg_applications_blocking()?;
         let final_app = if let Some(mut app) = apps.into_iter().find(|a| a.id.contains(clean_pkg) || clean_pkg.contains(&a.id)) {
             app.is_installed_by_user = true;
             app
@@ -959,6 +974,12 @@ async fn install_deb_package(package_name: String) -> Result<XdgApplication, Str
 
 #[tauri::command]
 async fn remove_deb_package(package_name: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || remove_deb_package_blocking(package_name))
+        .await
+        .map_err(|e| format!("Paket kaldırma yürütülemedi: {}", e))?
+}
+
+fn remove_deb_package_blocking(package_name: String) -> Result<String, String> {
     let clean_pkg = package_name.trim();
     if clean_pkg.is_empty() || !is_valid_deb_package_name(clean_pkg) {
         return Err("Geçersiz Debian paket adı.".to_string());
@@ -975,9 +996,9 @@ async fn remove_deb_package(package_name: String) -> Result<String, String> {
 
         let helper = Path::new("/usr/local/bin/ayaz-pkg-helper");
         let res = if helper.exists() {
-            Command::new("sudo").args(["/usr/local/bin/ayaz-pkg-helper", "remove", clean_pkg]).output()
+            root_command("/usr/local/bin/ayaz-pkg-helper", &["remove", clean_pkg])
         } else {
-            Command::new("sudo").args(["apt-get", "remove", "-y", "--", clean_pkg]).output()
+            root_command("apt-get", &["remove", "-y", "--", clean_pkg])
         };
 
         match res {
@@ -999,11 +1020,64 @@ async fn remove_deb_package(package_name: String) -> Result<String, String> {
     }
 }
 
+// sudo tek seferlik denetlenir: sudo kurulu değilse ya da parolasız erişim
+// kapalıysa her komutta ikinci (boş) denemeye düşülmez.
+fn sudo_available() -> bool {
+    static SUDO_OK: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *SUDO_OK.get_or_init(|| {
+        Command::new("sudo")
+            .args(["-n", "true"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+}
+
+// Root gereken yollar: sudo kullanılabilirse sudo -n, değilse doğrudan
+// çalıştır. Tek deneme, ayrı bir yedek çağrı yok.
+fn root_command(prog: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
+    if sudo_available() {
+        Command::new("sudo").arg("-n").arg(prog).args(args).output()
+    } else {
+        Command::new(prog).args(args).output()
+    }
+}
+
+// Root sahibi /target dosyalarına yazım: sudo yokken doğrudan fs::write,
+// varken sudo tee (stdin üzerinden).
+fn root_write(path: &str, data: &str) -> Result<(), String> {
+    if sudo_available() {
+        let mut child = Command::new("sudo")
+            .args(["-n", "tee", path])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("sudo tee başlatılamadı: {}", e))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(data.as_bytes()).map_err(|e| e.to_string())?;
+        }
+        let out = child.wait_with_output().map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        Ok(())
+    } else {
+        fs::write(path, data).map_err(|e| e.to_string())
+    }
+}
+
 // ============================================================================
 // 4. GÜVENLİ TERMİNAL MOTORU (WHITELIST & SANDBOX) - GÜVENLİK BULGUSU #1
 // ============================================================================
 #[tauri::command]
 async fn run_terminal_command(command: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || run_terminal_command_blocking(command))
+        .await
+        .map_err(|e| format!("Komut yürütülemedi: {}", e))?
+}
+
+fn run_terminal_command_blocking(command: String) -> Result<String, String> {
     let cmd_trimmed = command.trim();
     if cmd_trimmed.is_empty() {
         return Ok(String::new());
@@ -1026,14 +1100,13 @@ async fn run_terminal_command(command: String) -> Result<String, String> {
         {
             // Kompozit bakım komutlarının güvenli ve sıralı yürütülmesi
             if cmd_trimmed == "apt-get clean && rm -rf /tmp/*" {
-                let _ = Command::new("sudo").args(["apt-get", "clean"]).output()
-                    .or_else(|_| Command::new("apt-get").args(["clean"]).output());
-                let _ = Command::new("sudo").args(["rm", "-rf", "/tmp/*"]).output()
-                    .or_else(|_| Command::new("sh").args(["-c", "rm -rf /tmp/*"]).output());
+                let _ = root_command("apt-get", &["clean"]);
+                // Glob genişletmesi sh üzerinden: sudo rm literal '/tmp/*'
+                // dosyasını silemezdi.
+                let _ = root_command("sh", &["-c", "rm -rf /tmp/*"]);
                 return Ok("[TEMİZLİK] APT paket önbelleği ve /tmp dizini başarıyla temizlendi.".to_string());
             } else if cmd_trimmed == "apt-get update" {
-                let res = Command::new("sudo").args(["apt-get", "update"]).output()
-                    .or_else(|_| Command::new("apt-get").args(["update"]).output());
+                let res = root_command("apt-get", &["update"]);
                 return match res {
                     Ok(out) => {
                         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -1047,10 +1120,8 @@ async fn run_terminal_command(command: String) -> Result<String, String> {
                     Err(e) => Err(format!("apt-get update çalıştırılamadı: {}", e)),
                 };
             } else if cmd_trimmed == "apt-get upgrade -y" || cmd_trimmed == "apt-get update && apt-get upgrade -y" {
-                let _ = Command::new("sudo").args(["apt-get", "update"]).output()
-                    .or_else(|_| Command::new("apt-get").args(["update"]).output());
-                let res = Command::new("sudo").args(["apt-get", "upgrade", "-y"]).output()
-                    .or_else(|_| Command::new("apt-get").args(["upgrade", "-y"]).output());
+                let _ = root_command("apt-get", &["update"]);
+                let res = root_command("apt-get", &["upgrade", "-y"]);
                 return match res {
                     Ok(out) => {
                         let stdout = String::from_utf8_lossy(&out.stdout).to_string();
@@ -1709,6 +1780,13 @@ async fn execute_agent_confirmed_action(command: String, token: String) -> Resul
 // ============================================================================
 #[tauri::command]
 async fn get_storage_devices() -> Result<Vec<StorageDisk>, String> {
+    // lsblk cihaz ağacını diske sorar; bloklayıcı çağrı havuza alınır.
+    tauri::async_runtime::spawn_blocking(get_storage_devices_blocking)
+        .await
+        .map_err(|e| format!("Depolama listesi alınamadı: {}", e))?
+}
+
+fn get_storage_devices_blocking() -> Result<Vec<StorageDisk>, String> {
     #[cfg(target_os = "linux")]
     {
         // JSON formatında parse ederek boşluklu MODEL adlarını doğru yakalıyoruz
@@ -1775,6 +1853,13 @@ async fn get_storage_devices() -> Result<Vec<StorageDisk>, String> {
 
 #[tauri::command]
 async fn execute_system_installation(payload: InstallPayload) -> Result<String, String> {
+    // Bölümleme/kurulum dakikalarca sürer; tamamı bloklayıcı iş parçacığında.
+    tauri::async_runtime::spawn_blocking(move || execute_system_installation_blocking(payload))
+        .await
+        .map_err(|e| format!("Kurulum görevi yürütülemedi: {}", e))?
+}
+
+fn execute_system_installation_blocking(payload: InstallPayload) -> Result<String, String> {
     let target = payload.target_disk.trim();
     if !is_valid_disk_target(target) {
         return Err("Geçersiz hedef disk seçimi (Örn: /dev/sda veya /dev/nvme0n1, bölümler seçilemez).".to_string());
@@ -1798,11 +1883,13 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
     #[cfg(target_os = "linux")]
     {
         let run_step = |prog: &str, args: &[&str]| -> Result<(), String> {
-            let res = Command::new(prog).args(args).output()
+            // Canlı oturumda kullanıcı yetkisizdir: root gereken adımlar
+            // sudo -n ile yürütülür (sudo yoksa doğrudan denenir).
+            let res = root_command(prog, args)
                 .map_err(|e| format!("'{}' süreci başlatılamadı: {}", prog, e))?;
             if !res.status.success() {
                 let err = String::from_utf8_lossy(&res.stderr);
-                let _ = Command::new("umount").args(["-R", "/target"]).output();
+                let _ = root_command("umount", &["-R", "/target"]);
                 return Err(format!("'{}' işlemi başarısız oldu (Çıkış Kodu {}): {}", prog, res.status.code().unwrap_or(-1), err.trim()));
             }
             Ok(())
@@ -1824,10 +1911,10 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         run_step("mkfs.vfat", &["-F32", &efi_part])?;
         run_step("mkfs.ext4", &["-F", &root_part])?;
 
-        // 3. Bağlama Noktaları (Mounts)
-        let _ = fs::create_dir_all("/target");
+        // 3. Bağlama Noktaları (Mounts) — dizinler de root gerektirir
+        let _ = run_step("mkdir", &["-p", "/target"]);
         run_step("mount", &[&root_part, "/target"])?;
-        let _ = fs::create_dir_all("/target/boot/efi");
+        let _ = run_step("mkdir", &["-p", "/target/boot/efi"]);
         run_step("mount", &[&efi_part, "/target/boot/efi"])?;
 
         // 4. Kök Dosya Sistemini Rsync ile Kopyalama
@@ -1839,8 +1926,8 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         ])?;
 
         // 5. Hostname: Kabuk yönlendirmesi olmaksızın doğrudan dosya yazma
-        if let Err(e) = fs::write("/target/etc/hostname", format!("{}\n", hostname)) {
-            let _ = Command::new("umount").args(["-R", "/target"]).output();
+        if let Err(e) = root_write("/target/etc/hostname", &format!("{}\n", hostname)) {
+            let _ = root_command("umount", &["-R", "/target"]);
             return Err(format!("Hostname dosyası yazılamadı: {}", e));
         }
 
@@ -1848,7 +1935,14 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         run_step("chroot", &["/target", "useradd", "-m", "-s", "/bin/bash", "-G", "sudo,audio,video,plugdev", username])?;
 
         // 7. Parola Belirleme: Parola doğrudan STDIN borusundan beslenir
-        let mut chpasswd_child = Command::new("chroot")
+        let mut chpasswd_cmd = if sudo_available() {
+            let mut c = Command::new("sudo");
+            c.args(["-n", "chroot"]);
+            c
+        } else {
+            Command::new("chroot")
+        };
+        let mut chpasswd_child = chpasswd_cmd
             .args(["/target", "chpasswd"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1863,7 +1957,7 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         }
         let chpasswd_res = chpasswd_child.wait_with_output().map_err(|e| e.to_string())?;
         if !chpasswd_res.status.success() {
-            let _ = Command::new("umount").args(["-R", "/target"]).output();
+            let _ = root_command("umount", &["-R", "/target"]);
             return Err("Kullanıcı parolası güncellenemedi.".to_string());
         }
 
@@ -1891,28 +1985,22 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
                 yeni.push('\n');
             }
             if inittab_yazildi {
-                let _ = fs::write(inittab_path, yeni);
+                let _ = root_write(inittab_path, &yeni);
             }
         }
 
         if username == "ankora" {
             // Kurulan kullanıcı canlı hesabın kendisi: parolası 7. adımda
             // zaten güncellendi, şifresiz yetki parolayla eşdeğer kılınır.
-            let _ = fs::write("/target/etc/sudoers.d/ankora", "ankora ALL=(ALL:ALL) ALL\n");
+            let _ = root_write("/target/etc/sudoers.d/ankora", "ankora ALL=(ALL:ALL) ALL\n");
         } else {
-            let _ = fs::remove_file("/target/etc/sudoers.d/ankora");
-            let _ = Command::new("chroot")
-                .args(["/target", "gpasswd", "-d", "ankora", "sudo"])
-                .output();
-            let _ = Command::new("chroot")
-                .args(["/target", "sed", "-i", "/^ankora /d", "/etc/sudoers.d/ankora-updater"])
-                .output();
+            let _ = root_command("rm", &["-f", "/target/etc/sudoers.d/ankora"]);
+            let _ = root_command("chroot", &["/target", "gpasswd", "-d", "ankora", "sudo"]);
+            let _ = root_command("chroot", &["/target", "sed", "-i", "/^ankora /d", "/etc/sudoers.d/ankora-updater"]);
             if inittab_yazildi {
                 // Otomatik giriş artık canlı hesaba bağlı değil: bilinen parola
                 // geçersiz kılınır, hesap silinmez ki başka referanslar kırılmasın.
-                let _ = Command::new("chroot")
-                    .args(["/target", "usermod", "-L", "ankora"])
-                    .output();
+                let _ = root_command("chroot", &["/target", "usermod", "-L", "ankora"]);
             }
         }
 
@@ -1921,10 +2009,10 @@ async fn execute_system_installation(payload: InstallPayload) -> Result<String, 
         run_step("chroot", &["/target", "update-grub"])?;
 
         // 9. Sistem Temizliği: machine-id sıfırlama ve eski SSH anahtarlarının temizlenmesi
-        let _ = fs::write("/target/etc/machine-id", "");
-        let _ = Command::new("sh").args(["-c", "rm -f /target/etc/ssh/ssh_host_*"]).output();
+        let _ = root_write("/target/etc/machine-id", "");
+        let _ = root_command("sh", &["-c", "rm -f /target/etc/ssh/ssh_host_*"]);
 
-        let _ = Command::new("umount").args(["-R", "/target"]).output();
+        let _ = root_command("umount", &["-R", "/target"]);
 
         Ok("Ankora Linux başarıyla kuruldu.".to_string())
     }
@@ -2093,7 +2181,14 @@ fn read_disk_usage() -> Option<(f64, f64, u8)> {
 }
 
 #[tauri::command]
-fn get_system_telemetry() -> Result<SystemTelemetry, String> {
+async fn get_system_telemetry() -> Result<SystemTelemetry, String> {
+    // /proc ve /sys okumaları senkron; telemetri arka plan havuzuna alınır.
+    tauri::async_runtime::spawn_blocking(collect_system_telemetry)
+        .await
+        .map_err(|e| format!("Telemetri okunamadı: {}", e))?
+}
+
+fn collect_system_telemetry() -> Result<SystemTelemetry, String> {
     #[cfg(target_os = "linux")]
     {
         // 1. Gerçek Bellek Tespiti (/proc/meminfo)
@@ -2179,7 +2274,7 @@ fn get_system_telemetry() -> Result<SystemTelemetry, String> {
             kernel,
             init_system,
             memory_used_mb,
-            memory_total_mb,
+            memory_total_mb: mem_total_mb,
             cpu_cores: std::thread::available_parallelism().map(|p| p.get()).unwrap_or(4),
             uptime_seconds,
             battery_percent,
@@ -2239,7 +2334,7 @@ async fn set_brightness(level: u32) -> Result<String, String> {
 fn optimize_system_memory() -> Result<MemoryTrimResult, String> {
     #[cfg(target_os = "linux")]
     {
-        let before_used = if let Ok(tele) = get_system_telemetry() {
+        let before_used = if let Ok(tele) = collect_system_telemetry() {
             tele.memory_used_mb
         } else {
             0
@@ -2260,7 +2355,7 @@ fn optimize_system_memory() -> Result<MemoryTrimResult, String> {
         }
 
         if !drop_caches_ok {
-            let current = get_system_telemetry().ok();
+            let current = collect_system_telemetry().ok();
             return Ok(MemoryTrimResult {
                 success: false,
                 freed_mb: 0,
@@ -2270,7 +2365,7 @@ fn optimize_system_memory() -> Result<MemoryTrimResult, String> {
             });
         }
 
-        let after = get_system_telemetry().ok();
+        let after = collect_system_telemetry().ok();
         let after_used = after.as_ref().map(|t| t.memory_used_mb).unwrap_or(before_used);
         let after_total = after.as_ref().map(|t| t.memory_total_mb).unwrap_or(8192);
         let freed = before_used.saturating_sub(after_used);
@@ -2446,7 +2541,7 @@ fn protocol_4_endpoint(target_repo: &str) -> String {
     if let Ok(val) = fs::read_to_string(&path) {
         let val = val.trim();
         // Yalnızca https uç noktaları kabul edilir; boşluk taşıyamaz.
-        if val.starts_with("https://") && !val.contains(char::whitespace) {
+        if val.starts_with("https://") && !val.chars().any(char::is_whitespace) {
             return val.to_string();
         }
     }
@@ -2903,8 +2998,11 @@ async fn delete_file(path: String) -> Result<String, String> {
 fn system_poweroff() -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("sudo").args(["/sbin/poweroff", "-f"]).spawn()
-            .or_else(|_| Command::new("/sbin/poweroff").arg("-f").spawn());
+        let _ = if sudo_available() {
+            Command::new("sudo").args(["-n", "/sbin/poweroff", "-f"]).spawn()
+        } else {
+            Command::new("/sbin/poweroff").arg("-f").spawn()
+        };
     }
     Ok("Sistem kapatılıyor.".to_string())
 }
@@ -2913,8 +3011,11 @@ fn system_poweroff() -> Result<String, String> {
 fn system_reboot() -> Result<String, String> {
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("sudo").args(["/sbin/reboot", "-f"]).spawn()
-            .or_else(|_| Command::new("/sbin/reboot").arg("-f").spawn());
+        let _ = if sudo_available() {
+            Command::new("sudo").args(["-n", "/sbin/reboot", "-f"]).spawn()
+        } else {
+            Command::new("/sbin/reboot").arg("-f").spawn()
+        };
     }
     Ok("Sistem yeniden başlatılıyor.".to_string())
 }
@@ -3051,7 +3152,13 @@ fn wifi_connect(ssid: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn get_processes() -> Result<Vec<ProcessInfo>, String> {
+async fn get_processes() -> Result<Vec<ProcessInfo>, String> {
+    tauri::async_runtime::spawn_blocking(read_processes)
+        .await
+        .map_err(|e| format!("Süreç listesi okunamadı: {}", e))?
+}
+
+fn read_processes() -> Result<Vec<ProcessInfo>, String> {
     let out = run_capture("ps", &["-eo", "pid=,user=,pcpu=,rss=,stat=,comm="])
         .ok_or_else(|| "Süreç listesi okunamadı (ps bulunamadı).".to_string())?;
     let mut list: Vec<ProcessInfo> = out
@@ -3170,6 +3277,15 @@ fn get_network_info() -> NetworkInfo {
 }
 
 fn main() {
+    // Alt süreçler (parted, mkfs, ps...) ebeveynin PATH'ini miras alır; canlı
+    // oturumda kullanıcı PATH'i /sbin ve /usr/sbin dizinlerini dışarıda
+    // bırakabiliyor. Bilinen sistem dizinleri garanti altına alınır.
+    let sys_path = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+    match std::env::var("PATH") {
+        Ok(cur) if cur.contains("/usr/sbin") => {}
+        Ok(cur) => std::env::set_var("PATH", format!("{}:{}", sys_path, cur)),
+        Err(_) => std::env::set_var("PATH", sys_path),
+    }
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             drag_window,

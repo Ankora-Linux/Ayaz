@@ -345,8 +345,13 @@ xset -dpms 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 
-# Sanal makinede ekran çözünürlüğünü dinamik ayarla
-xrandr -s 1280x800 2>/dev/null || xrandr -s 1024x768 2>/dev/null || true
+# Yalnızca çözünürlük çok düşükse (ör. sanal makinenin varsayılanı) düzelt;
+# fiziksel ekranda orijinal çözünürlüğü düşürme, taskbar dahil her şey
+# kendi çözünürlüğünde kalsın.
+CURW=$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}' | cut -dx -f1)
+case "$CURW" in
+    ''|640*|720*|800*|854*|960*) xrandr -s 1280x800 2>/dev/null || xrandr -s 1024x768 2>/dev/null || true ;;
+esac
 
 # Pencere yöneticisini arka planda başlat
 if command -v openbox >/dev/null 2>&1; then
@@ -417,6 +422,55 @@ chmod +x "$CHROOT_DIR/chroot-setup.sh"
 chroot "$CHROOT_DIR" /chroot-setup.sh
 rm -f "$CHROOT_DIR/chroot-setup.sh"
 
+# 6.b Örnek belgeler: canlı oturum ankora ile çalışır, /root/Belgeler'e
+# erişemez. Ofis ve Dosyalar GERÇEK açılan dosyalar göstermeli; PDF
+# içeriğinin tek doğruluk kaynağı src/app.js'teki yerleşik base64 gömülüdür.
+BDIR="$CHROOT_DIR/home/ankora/Belgeler"
+mkdir -p "$BDIR"
+_src_app_js="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/src/app.js"
+if [ -f "$_src_app_js" ]; then
+    sed -n "s/.*base64,\([A-Za-z0-9+/=]\{50,\}\).*/\1/p" "$_src_app_js" \
+        | head -n 1 | base64 -d > "$BDIR/ankora-sistem-rehberi.pdf" 2>/dev/null || true
+fi
+if grep -q '%PDF' "$BDIR/ankora-sistem-rehberi.pdf" 2>/dev/null; then
+    echo "[BELGE] ankora-sistem-rehberi.pdf yazildi ($(stat -c%s "$BDIR/ankora-sistem-rehberi.pdf") bayt)"
+else
+    echo "[BELGE] UYARI: PDF olusturulamadi — $_src_app_js kontrol edin"
+fi
+cat << 'KIOSKTXT' > "$BDIR/kiosk-ayarlari.txt"
+Ankora Linux 2.0 — Kiosk Yapılandırma Raporu
+=============================================
+
+Taban            : Devuan GNU/Linux 5 (daedalus)
+Init sistemi     : SysVinit (systemd yok)
+Çekirdek         : Linux 6.1 LTS
+Masaüstü         : Ayaz DE (Ayaz — Ankora Linux)
+Pencere motoru   : Tauri 1.5 + WebKitGTK
+Otomatik giriş   : tty1 getty --autologin ankora → startx
+Ekran düzeltmesi : Yalnızca çözünürlük çok düşükse xrandr -s 1280x800
+Paket yöneticisi : Yazılım Mağazası (apt tabanlı)
+
+Bu dosya Ayaz Dosyalar ve Ofis uygulamalarından açılabilir.
+Kiosk kilit ekranı ve widget ayarları Ayarlar penceresinden yönetilir.
+KIOSKTXT
+cat << 'KIOSKMD' > "$BDIR/kiosk-ayarlari.md"
+# Ankora Linux 2.0 — Kiosk Yapılandırma Raporu
+
+- Taban: Devuan Daedalus (SysVinit, systemd-free)
+- Çekirdek: Linux 6.1 LTS
+- Pencere motoru: Tauri + WebKitGTK
+- Otomatik giriş: tty1 getty --autologin ankora → startx
+- Ekran: xrandr donanım kontrolü, yalnız düşük çözünürlükte düzeltme
+- Bellek: ZRAM + disk swap hiyerarşisi
+
+Bu belge Ayaz Ofis yerel belge işleyicisi tarafından render edilir.
+KIOSKMD
+# Sayısal chown: betik host'ta koşuyor, host'ta "ankora" kullanıcı adı
+# yok (set -euo pipefail ad-üstü chown'u öldürürdü). Canlı sistemde
+# ankora = uid/gid 1000 (e2e --userspec=1000:1000 ile doğrulandı).
+chown -R 1000:1000 "$BDIR"
+echo "[BELGE] Belgeler/ icerigi: $(ls "$BDIR" | tr '\n' ' ')"
+
 # 7. Ayaz DE Paketinin Sisteme Enjekte Edilmesi
 echo "[4/8] Ayaz DE ikili dosyası ve sistem bileşenleri sisteme kopyalanıyor..."
 # Eğer dist altında deb yoksa ve host ortamında cargo/npm mevcutsa otomatik derle
@@ -443,11 +497,17 @@ else
     cat << 'AYAZ_PY' > "$CHROOT_DIR/usr/bin/ayaz"
 #!/usr/bin/env python3
 import sys, os, subprocess, json, threading, shutil, re, shlex, hmac, gzip, time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse, urllib.request
 
 # GPU Donanım Hızlandırma ve WebKit Ortam Değişkenleri
 os.environ["GDK_BACKEND"] = "x11"
+
+# Canlı oturumda kullanıcı PATH'i /sbin ve /usr/sbin içermez; sistem ve
+# kurulum araçları (parted, mkfs.vfat, blkid, chroot...) bu dizinlerdedir.
+# Bilinen sistem dizinleri başa eklenir ki alt süreçlerin hepsi aynı yolu görsün.
+_SBIN_PATH = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+os.environ['PATH'] = _SBIN_PATH + os.pathsep + os.environ.get('PATH', '')
 
 import gi
 gi.require_version('Gtk', '3.0')
@@ -465,6 +525,9 @@ import secrets
 IPC_TOKEN = secrets.token_hex(32)
 # Ardışık başarısız token denemelerini sayar; aşımında kapı tamamen kapanır
 IPC_STATE = {'bad': 0}
+
+# XDG tarama önbelleği: dizin özetleri (mtime) değişmediyse yeniden taranmaz
+_XDG_CACHE = None
 
 # Radyo (Wi-Fi/Bluetooth) ve ağ durumu: nmcli varsa o, yoksa rfkill.
 def _run_capture(cmd_args):
@@ -986,44 +1049,76 @@ def execute_ayaz_command(cmd, args):
         if not password or '\0' in password or '\n' in password:
             raise Exception('Geçersiz parola')
 
-        subprocess.run("umount -q -R /target 2>/dev/null || true", shell=True)
-        subprocess.run(f"umount -q {target}* 2>/dev/null || true", shell=True)
-        subprocess.run("swapoff -a 2>/dev/null || true", shell=True)
+        # Canlı oturumda `ankora` yetkisiz bir kullanıcıdır; kurulumun tamamı
+        # root gerektirir. Parolasız sudo yükselmesi baştan doğrulanır; araç
+        # yolu bulunamadığı için yarıda kalan (127) hataları yerine net mesaj
+        # döner.
+        if os.geteuid() != 0:
+            if not shutil.which('sudo'):
+                raise Exception('Kurulum için yönetici (root) yetkisi gerekiyor: sudo kurulu değil.')
+            try:
+                subprocess.run('sudo -n true', shell=True, check=True,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                raise Exception('Kurulum için yönetici (root) yetkisi gerekiyor: parolasız sudo erişimi (sudo -n) doğrulanamadı.')
+
+        def _root(cmd, check=True):
+            pre = '' if os.geteuid() == 0 else 'sudo -n '
+            return subprocess.run(pre + cmd, shell=True, check=check)
+
+        def _root_out(cmd):
+            pre = '' if os.geteuid() == 0 else 'sudo -n '
+            return subprocess.check_output(pre + cmd, shell=True, text=True)
+
+        def _root_write(path, data):
+            if os.geteuid() == 0:
+                with open(path, 'w') as f:
+                    f.write(data)
+                return
+            proc = subprocess.run(['sudo', '-n', 'tee', path], input=data.encode(),
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if proc.returncode != 0:
+                raise Exception(f'{path} yazılamadı: {proc.stderr.decode(errors="replace").strip()}')
+
+        def _root_makedirs(path):
+            _root(f"mkdir -p {shlex.quote(path)}", check=False)
+
+        _root("umount -q -R /target 2>/dev/null || true", check=False)
+        _root(f"umount -q {shlex.quote(target)}* 2>/dev/null || true", check=False)
+        _root("swapoff -a 2>/dev/null || true", check=False)
 
         cmds = [
-            f"parted -s {target} mklabel gpt",
-            f"parted -s {target} mkpart ESP fat32 1MiB 513MiB",
-            f"parted -s {target} set 1 esp on",
-            f"parted -s {target} mkpart primary ext4 513MiB 100%"
+            f"parted -s {shlex.quote(target)} mklabel gpt",
+            f"parted -s {shlex.quote(target)} mkpart ESP fat32 1MiB 513MiB",
+            f"parted -s {shlex.quote(target)} set 1 esp on",
+            f"parted -s {shlex.quote(target)} mkpart primary ext4 513MiB 100%"
         ]
         for c in cmds:
-            subprocess.run(c, shell=True, check=True)
+            _root(c)
 
         subprocess.run("udevadm settle || sleep 1", shell=True)
 
         p1 = f"{target}p1" if "nvme" in target else f"{target}1"
         p2 = f"{target}p2" if "nvme" in target else f"{target}2"
 
-        subprocess.run(f"mkfs.vfat -F32 {p1}", shell=True, check=True)
-        subprocess.run(f"mkfs.ext4 -F {p2}", shell=True, check=True)
+        _root(f"mkfs.vfat -F32 {shlex.quote(p1)}")
+        _root(f"mkfs.ext4 -F {shlex.quote(p2)}")
 
-        os.makedirs('/target', exist_ok=True)
-        subprocess.run(f"mount {p2} /target", shell=True, check=True)
-        os.makedirs('/target/boot/efi', exist_ok=True)
-        subprocess.run(f"mount {p1} /target/boot/efi", shell=True, check=True)
+        _root_makedirs('/target')
+        _root(f"mount {shlex.quote(p2)} /target")
+        _root_makedirs('/target/boot/efi')
+        _root(f"mount {shlex.quote(p1)} /target/boot/efi")
 
         rsync_cmd = "rsync -aAX / /target/ --exclude=/proc/* --exclude=/sys/* --exclude=/dev/* --exclude=/tmp/* --exclude=/run/* --exclude=/mnt/* --exclude=/media/* --exclude=/target/* --exclude=/home/*"
-        subprocess.run(rsync_cmd, shell=True, check=True)
+        _root(rsync_cmd)
 
-        with open('/target/etc/hostname', 'w') as f:
-            f.write(f"{hostname}\n")
+        _root_write('/target/etc/hostname', f"{hostname}\n")
 
-        with open('/target/etc/hosts', 'w') as f:
-            f.write(f"127.0.0.1\tlocalhost\n127.0.1.1\t{hostname}\n\n# The following lines are desirable for IPv6 capable hosts\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n")
+        _root_write('/target/etc/hosts', f"127.0.0.1\tlocalhost\n127.0.1.1\t{hostname}\n\n# The following lines are desirable for IPv6 capable hosts\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n")
 
         try:
-            root_uuid = subprocess.check_output(f"blkid -s UUID -o value {p2}", shell=True, text=True).strip()
-            efi_uuid = subprocess.check_output(f"blkid -s UUID -o value {p1}", shell=True, text=True).strip()
+            root_uuid = _root_out(f"blkid -s UUID -o value {shlex.quote(p2)}").strip()
+            efi_uuid = _root_out(f"blkid -s UUID -o value {shlex.quote(p1)}").strip()
         except Exception:
             root_uuid = p2
             efi_uuid = p1
@@ -1033,23 +1128,23 @@ UUID={root_uuid} / ext4 errors=remount-ro 0 1
 UUID={efi_uuid} /boot/efi vfat umask=0077 0 1
 tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
 """
-        with open('/target/etc/fstab', 'w') as f:
-            f.write(fstab_content)
+        _root_write('/target/etc/fstab', fstab_content)
 
         bind_mounts = ['/dev', '/dev/pts', '/proc', '/sys', '/run']
         for bm in bind_mounts:
-            os.makedirs(f"/target{bm}", exist_ok=True)
-            subprocess.run(f"mount --bind {bm} /target{bm}", shell=True, check=True)
+            _root_makedirs(f"/target{bm}")
+            _root(f"mount --bind {bm} /target{bm}")
 
         chroot_setup_cmds = [
             ['chroot', '/target', 'useradd', '-m', '-s', '/bin/bash', '-G', 'sudo,audio,video,plugdev,netdev', username],
         ]
+        _root_pre = [] if os.geteuid() == 0 else ['sudo', '-n']
         for cmd_args in chroot_setup_cmds:
-            subprocess.run(cmd_args, check=False)
+            subprocess.run(_root_pre + cmd_args, check=False)
 
         # GÜVENLİK: Parola stdin pipe ile güvenli geçiş (shell interpolation yok)
         chpasswd_proc = subprocess.Popen(
-            ['chroot', '/target', 'chpasswd'],
+            _root_pre + ['chroot', '/target', 'chpasswd'],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -1057,37 +1152,33 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         chpasswd_proc.communicate(input=f"{username}:{password}\n".encode())
 
         # Sudoers dosyası
-        with open(f'/target/etc/sudoers.d/{username}', 'w') as f:
-            f.write(f"{username} ALL=(ALL:ALL) ALL\n")
-        os.chmod(f'/target/etc/sudoers.d/{username}', 0o440)
+        _root_write(f'/target/etc/sudoers.d/{username}', f"{username} ALL=(ALL:ALL) ALL\n")
+        _root(f"chmod 0440 /target/etc/sudoers.d/{shlex.quote(username)}")
 
         # GÜVENLİK: rsync /etc'i de kopyaladığı için canlı oturumun izleri
         # kurulu sisteme geçerdi: `ankora` hesabının herkese açık bilinen
         # parolası + şifresiz sudo yetkisi = parolasız root. Canlı hesap
         # kurulu sistemde yetkisiz ve parolası bilinmeyen bir hesap olur.
         if username != 'ankora':
-            try:
-                os.remove('/target/etc/sudoers.d/ankora')
-            except OSError:
-                pass
-            subprocess.run(['chroot', '/target', 'gpasswd', '-d', 'ankora', 'sudo'], check=False)
+            _root("rm -f /target/etc/sudoers.d/ankora", check=False)
+            subprocess.run(_root_pre + ['chroot', '/target', 'gpasswd', '-d', 'ankora', 'sudo'], check=False)
             try:
                 live_pw = secrets.token_urlsafe(24)
-                subprocess.run(['chroot', '/target', 'chpasswd'],
+                subprocess.run(_root_pre + ['chroot', '/target', 'chpasswd'],
                                input=f"ankora:{live_pw}\n".encode(), check=False)
             except Exception:
                 pass
             try:
-                with open('/target/etc/sudoers.d/ankora-updater', 'w') as f:
-                    f.write(f"{username} ALL=(root) NOPASSWD: "
+                _root_write('/target/etc/sudoers.d/ankora-updater',
+                            f"{username} ALL=(root) NOPASSWD: "
                             "/usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper\n")
-                os.chmod('/target/etc/sudoers.d/ankora-updater', 0o440)
-            except OSError:
+                _root("chmod 0440 /target/etc/sudoers.d/ankora-updater")
+            except Exception:
                 pass
 
         # GRUB
-        subprocess.run(['chroot', '/target', 'grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=ankora', '--recheck'], check=False)
-        subprocess.run(['chroot', '/target', 'update-grub'], check=False)
+        subprocess.run(_root_pre + ['chroot', '/target', 'grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=ankora', '--recheck'], check=False)
+        subprocess.run(_root_pre + ['chroot', '/target', 'update-grub'], check=False)
 
         if autologin:
             inittab_path = '/target/etc/inittab'
@@ -1100,8 +1191,7 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                     content,
                     flags=re.MULTILINE
                 )
-                with open(inittab_path, 'w') as f:
-                    f.write(content)
+                _root_write(inittab_path, content)
         else:
             # Canlı ISO'nun `--autologin ankora` satırı kurulu sistemde
             # kalmamalı: hem kullanıcı otomatik girişi kapatmış oluyor hem de
@@ -1116,16 +1206,15 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                     content,
                     flags=re.MULTILINE
                 )
-                with open(inittab_path, 'w') as f:
-                    f.write(content)
+                _root_write(inittab_path, content)
 
         try:
             pass  # chroot komutları yukarıda zaten çalıştırıldı
         finally:
             for bm in reversed(bind_mounts):
-                subprocess.run(f"umount -l /target{bm} 2>/dev/null || true", shell=True)
-            subprocess.run("umount -l /target/boot/efi 2>/dev/null || true", shell=True)
-            subprocess.run("umount -l /target 2>/dev/null || true", shell=True)
+                _root(f"umount -l /target{bm} 2>/dev/null || true", check=False)
+            _root("umount -l /target/boot/efi 2>/dev/null || true", check=False)
+            _root("umount -l /target 2>/dev/null || true", check=False)
 
         return "Ankora Linux 2.0 başarıyla kuruldu! Sistemi yeniden başlatabilirsiniz."
 
@@ -1316,9 +1405,21 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         return f"Silindi: {target_path}"
 
     elif cmd == 'scan_xdg_applications':
-        apps = []
+        global _XDG_CACHE
         app_dirs = ['/usr/share/applications', os.path.expanduser('~/.local/share/applications')]
         user_app_dir = app_dirs[1]
+        # Dizin özetleri değişmediyse (içine dosya eklenip çıkarılmadıysa)
+        # tarama ve dosya okuma tekrarlanmaz.
+        sig = []
+        for ad in app_dirs:
+            try:
+                st = os.stat(ad)
+                sig.append((ad, st.st_mtime_ns))
+            except OSError:
+                sig.append((ad, 0))
+        if _XDG_CACHE is not None and _XDG_CACHE[0] == sig:
+            return _XDG_CACHE[1]
+        apps = []
         for ad in app_dirs:
             if os.path.exists(ad):
                 for fname in os.listdir(ad):
@@ -1361,6 +1462,7 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                             })
                         except Exception:
                             continue
+        _XDG_CACHE = (sig, apps)
         return apps
 
     elif cmd == 'read_document_file':
@@ -1374,7 +1476,14 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         if f_ext not in ('pdf', 'md', 'txt', 'conf', 'log', 'json', 'yaml', 'yml', 'ini'):
             raise Exception(f"Güvenlik Hatası: '.{f_ext}' uzantılı dosyalar güvenlik nedeniyle okunamaz")
         if not os.path.exists(f_path):
-            raise Exception('Belge bulunamadı: ' + str(f_path))
+            # Canlı oturum ankora ile çalışır; /root/Belgeler'e kök erişimi
+            # yoktur. Örnek belgeler kullanıcı dizinindedir — aynı ad
+            # (dizin geçişi olmadan) Belgeler altında aranır.
+            _alt = os.path.join(home_dir, 'Belgeler', os.path.basename(f_path))
+            if _alt != f_path and os.path.exists(_alt):
+                f_path = _alt
+            else:
+                raise Exception('Belge bulunamadı: ' + str(f_path))
         real_path = os.path.realpath(f_path)
         real_lower = real_path.lower()
         sensitive = (
@@ -1918,7 +2027,7 @@ class AyazIpcHandler(BaseHTTPRequestHandler):
             self.wfile.write(resp)
 
 def start_ipc_server():
-    server = HTTPServer(('127.0.0.1', PORT), AyazIpcHandler)
+    server = ThreadingHTTPServer(('127.0.0.1', PORT), AyazIpcHandler)
     server.serve_forever()
 
 class AyazDesktop(Gtk.Window):

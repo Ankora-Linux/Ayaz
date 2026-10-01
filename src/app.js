@@ -647,7 +647,8 @@
       win.classList.add('open');
       this.bringToFront(win);
 
-      const tbHeight = 48;
+      const tbVar = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--taskbar-height'), 10);
+      const tbHeight = Number.isFinite(tbVar) ? tbVar : 44;
       const sw = window.innerWidth;
       const sh = window.innerHeight - tbHeight;
 
@@ -726,7 +727,8 @@
       const openWins = this.windows.filter(w => w.classList.contains('open') && !w.classList.contains('minimized'));
       if (openWins.length === 0) return;
       const count = openWins.length;
-      const tbHeight = 48;
+      const tbVar = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--taskbar-height'), 10);
+      const tbHeight = Number.isFinite(tbVar) ? tbVar : 44;
       const sw = window.innerWidth;
       const sh = window.innerHeight - tbHeight;
 
@@ -755,6 +757,20 @@
 
     syncTabs() {
       if (!this.tabsContainer) return;
+      // Getir/odak gibi olaylar her seferinde syncTabs çağırıyor; küme
+      // değişmediyse tüm çubuğu tahrip etme yerine aynı çizimde kal.
+      const sig = this.windows.map(w => {
+        const meta = w.querySelector('.window-meta span');
+        return [
+          w.id,
+          w.classList.contains('open') && !w.classList.contains('ws-hide') ? 1 : 0,
+          w.classList.contains('active') ? 1 : 0,
+          w.classList.contains('minimized') ? 1 : 0,
+          meta ? meta.textContent : ''
+        ].join('|');
+      }).join('\n');
+      if (sig === this._tabsSig) return;
+      this._tabsSig = sig;
       this.tabsContainer.innerHTML = '';
 
       this.windows.forEach(win => {
@@ -1495,7 +1511,14 @@
       });
 
       if (searchInput) {
-        searchInput.addEventListener('input', (e) => this.render(e.target.value));
+        // Her tuş vuruşunda tüm mağaza tablosunu yeniden kurmak yerine
+        // kısa bir bekletme: yazarken DOM yalnızca yazmayı bitirince çizilir.
+        let storeSearchTimer = 0;
+        searchInput.addEventListener('input', (e) => {
+          const value = e.target.value;
+          clearTimeout(storeSearchTimer);
+          storeSearchTimer = setTimeout(() => this.render(value), 120);
+        });
       }
 
       this.render();
@@ -1509,6 +1532,10 @@
     render(query = '') {
       if (!this.tableBody) return;
       this.tableBody.innerHTML = '';
+
+      // Satırlar önce fragment'a doldurulur, tek eklemede girer: satır
+      // başına ayrı appendChild her seferinde ayrı reflow tetikliyordu.
+      const frag = document.createDocumentFragment();
 
       const q = query.toLowerCase();
       const seen = new Set();
@@ -1558,8 +1585,9 @@
           });
         }
 
-        this.tableBody.appendChild(tr);
+        frag.appendChild(tr);
       });
+      this.tableBody.appendChild(frag);
     },
 
     async launchPackage(pkg) {
@@ -3719,6 +3747,15 @@
       return items;
     },
 
+    // Toplama taraması (querySelectorAll sürüleri) her tuş vuruşunda
+    // tekrarlanmasın; bir saniyelik taze sonuç arama için yeterli.
+    collectCached() {
+      if (this._collected && Date.now() - this._collectedAt < 1000) return this._collected;
+      this._collected = this.collect();
+      this._collectedAt = Date.now();
+      return this._collected;
+    },
+
     render(value) {
       const box = document.getElementById('start-search-results');
       const flyout = document.getElementById('start-flyout');
@@ -3739,7 +3776,7 @@
       box.hidden = false;
 
       const nq = launcherNorm(query);
-      this.hits = this.collect().filter(it =>
+      this.hits = this.collectCached().filter(it =>
         launcherNorm(it.title).includes(nq) || launcherNorm(it.desc).includes(nq)
       ).slice(0, 8);
 
@@ -3937,12 +3974,18 @@
 
     // 4. Evrensel Arama (LauncherSearch)
     if (startSearch) {
+      let launcherSearchTimer = 0;
       startSearch.addEventListener('input', (e) => {
-        LauncherSearch.render(e.target.value);
+        const value = e.target.value;
+        clearTimeout(launcherSearchTimer);
+        launcherSearchTimer = setTimeout(() => LauncherSearch.render(value), 120);
       });
 
       startSearch.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
+          // Bekleyen gecikmeli çizim varsa Enter öncesi sonuçlar tazelensin.
+          clearTimeout(launcherSearchTimer);
+          LauncherSearch.render(startSearch.value);
           document.querySelector('#start-search-results .search-result-row')?.click();
         }
       });
@@ -4681,7 +4724,12 @@
 
       const searchInput = document.getElementById('taskmgr-search');
       if (searchInput) {
-        searchInput.addEventListener('input', () => this.render(searchInput.value));
+        let taskSearchTimer = 0;
+        searchInput.addEventListener('input', () => {
+          const value = searchInput.value;
+          clearTimeout(taskSearchTimer);
+          taskSearchTimer = setTimeout(() => this.render(value), 120);
+        });
       }
 
       const btnRefresh = document.getElementById('taskmgr-btn-refresh');
@@ -4741,6 +4789,8 @@
     },
 
     async tick() {
+      // Arka planda (sekme gizliyken) IPC ve tablo çizimi beklemesin.
+      if (document.hidden) return;
       try {
         const [tele, procs] = await Promise.all([
           TauriBridge.invoke('get_system_telemetry'),
@@ -4789,6 +4839,9 @@
       if (!this.tableBody) return;
       this.tableBody.innerHTML = '';
 
+      // 2,5 sn'lik otomatik yenilemede satırlar fragment ile tek seferde girer.
+      const frag = document.createDocumentFragment();
+
       if (this.loadError) {
         const errRow = document.createElement('tr');
         errRow.innerHTML = `<td colspan="6" style="padding:14px; color:#f59e0b;">Süreç listesi okunamadı: ${escapeHtml(this.loadError)}</td>`;
@@ -4833,8 +4886,9 @@
           this.render(query);
         });
 
-        this.tableBody.appendChild(tr);
+        frag.appendChild(tr);
       });
+      this.tableBody.appendChild(frag);
     }
   };
 
@@ -5567,9 +5621,12 @@
         this.setupAutoLock();
       }
 
-      // Kilit Saati ve Tarihi Güncelleme
+      // Kilit Saati ve Tarihi Güncelleme. Kilit ekranı kapalıyken saniyelik
+      // DOM yazımı gereksiz iş üretir; saat yalnız ekrandayken tazelenir.
       this.updateClock();
-      setInterval(() => this.updateClock(), 1000);
+      setInterval(() => {
+        if (this.overlay && this.overlay.classList.contains('show')) this.updateClock();
+      }, 1000);
 
       // Form Gönderimi (Kilidi Aç)
       const form = document.getElementById('lock-auth-form');
@@ -5672,6 +5729,7 @@
       } catch (e) {}
 
       this.isLocked = true;
+      this.updateClock();
       this.overlay.classList.add('show');
       if (this.errorMsg) {
         this.errorMsg.textContent = '';
