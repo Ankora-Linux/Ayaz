@@ -2108,8 +2108,15 @@ fn execute_system_installation_blocking(payload: InstallPayload) -> Result<Strin
         run_step("chroot", &["/target", "update-grub"])?;
 
         // 9. Sistem Temizliği: machine-id sıfırlama ve eski SSH anahtarlarının temizlenmesi
-        let _ = root_write("/target/etc/machine-id", "");
-        let _ = root_command("sh", &["-c", "rm -f /target/etc/ssh/ssh_host_*"]);
+        // AYAZ_PY kurulumcusundaki parite: canlı imaj her kurulumda aynı
+        // kimlikle başlar ve rsync /var altını da kopyalar; machine-id her
+        // kurulumda benzersiz üretilir, loglar/DHCP kiralama kayıtları ve
+        // kabuk geçmişi kurulu sisteme taşınmaz.
+        let _ = root_command("rm", &["-f", "/target/etc/machine-id", "/target/var/lib/dbus/machine-id"]);
+        let _ = root_command("chroot", &["/target", "dbus-uuidgen", "--ensure=/var/lib/dbus/machine-id"]);
+        let _ = root_command("cp", &["/target/var/lib/dbus/machine-id", "/target/etc/machine-id"]);
+        let _ = root_command("sh", &["-c", "rm -f /target/etc/ssh/ssh_host_* /target/var/lib/dhcp/* /target/root/.bash_history"]);
+        let _ = root_command("sh", &["-c", "find /target/var/log -type f -delete 2>/dev/null; rm -rf /target/var/tmp/* 2>/dev/null; true"]);
 
         let _ = root_command("umount", &["-R", "/target"]);
 

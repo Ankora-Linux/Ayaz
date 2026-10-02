@@ -270,6 +270,18 @@ apt-get install -y --no-install-recommends \
     scrot \
     xterm
 
+# -----------------------------------------------------------------------
+# GÜVENLİK: DSA sınıfı çekirdek/paket yamaları — debootstrap tabanı
+# daedalus-security'deki son sürümlere çekilir; ISO bayat çekirdekle
+# çıkmaz (ör. DSA-6528-1 sonrası 6.1.187-1).
+# -----------------------------------------------------------------------
+echo "[GÜVENLİK] Güvenlik güncellemeleri uygulanıyor (daedalus-security)..."
+apt-get update -qq
+apt-get -y dist-upgrade
+echo "[GÜVENLİK] linux-image-amd64 = $(dpkg-query -W -f='${Version}' linux-image-amd64 2>/dev/null || echo ?)"
+UPG=$(apt-get -s dist-upgrade 2>/dev/null | awk '/^Inst/{c++} END{print c+0}')
+echo "[GÜVENLİK] Bekleyen paket güncellemesi: $UPG (beklenen 0)"
+
 # Son temizlik
 apt-get clean
 rm -rf /var/lib/apt/lists/*
@@ -1460,6 +1472,19 @@ def execute_ayaz_command(cmd, args):
 
         rsync_cmd = "rsync -aAX / /target/ --exclude=/proc/* --exclude=/sys/* --exclude=/dev/* --exclude=/tmp/* --exclude=/run/* --exclude=/mnt/* --exclude=/media/* --exclude=/target/* --exclude=/home/*"
         _root(rsync_cmd)
+
+        # GİZLİLİK: canlı imaj her kurulumda aynı kimlikle başlar ve rsync
+        # /var altını da kopyalar: derleme-time machine-id, loglar, DHCP
+        # kiralama kayıtları, kabuk geçmişi kurulu sisteme taşınırdı.
+        # machine-id: her kurulumda benzersiz üretilir (dbus bu dosyayı
+        # okur; boş/eksik kalırsa tüm kurulumlar aynı kimliği paylaşır).
+        mid = secrets.token_hex(16)
+        _root_write('/target/etc/machine-id', mid + '\n')
+        _root_write('/target/var/lib/dbus/machine-id', mid + '\n')
+        _root("rm -f /target/var/lib/dhcp/* /target/etc/ssh/ssh_host_* "
+              "/target/root/.bash_history 2>/dev/null", check=False)
+        _root("sh -c 'find /target/var/log -type f -delete 2>/dev/null; "
+              "rm -rf /target/var/tmp/* 2>/dev/null; true'", check=False)
 
         _root_write('/target/etc/hostname', f"{hostname}\n")
 
