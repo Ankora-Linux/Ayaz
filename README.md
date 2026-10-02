@@ -2,7 +2,7 @@
   <img src="assets/logo.png" alt="Ayaz DE Logo" width="200" style="border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.8);">
   <br><br>
   <h1>Ayaz Desktop Environment (Ayaz DE)</h1>
-  <p><b>Ankora Linux İçin Minimalist, Ultra Hafif ve Kiosk Uyumlu Masaüstü Ortamı</b></p>
+  <p><b>Ankora Linux için hafif, kiosk odaklı masaüstü ortamı</b></p>
 
   <p>
     <img src="https://img.shields.io/badge/S%C3%9CR%C3%9CM-2.0.0-ffffff?style=for-the-badge&labelColor=111111" alt="Sürüm">
@@ -12,94 +12,91 @@
   </p>
 </div>
 
----
+## Ayaz DE nedir?
 
-## ❄️ Ayaz Masaüstü Ortamı Nedir?
+Ayaz DE, **Ankora Linux** için geliştirilmiş, SysVinit tabanlı masaüstü ortamıdır. GNOME ve KDE'nin aksine arayüzü Rust ve WebKitGTK (Tauri 1.5) ile çalışır; boşta ~80-120 MB RAM harcar. Kiosk kullanımı için monokrom cam görünüm ve ortalanmış görev çubuğu kullanır.
 
-**Ayaz DE**, **Ankora Linux** işletim sistemi için özel olarak tasarlanmış, systemd kirliliğinden arındırılmış (Devuan SysVinit uyumlu), ultra hafif ve yüksek tepkiselliğe sahip bağımsız bir masaüstü ortamıdır.
+## Özellikler
 
-Geleneksel ağır masaüstü ortamlarının (GNOME/KDE) aksine, **Rust** ve **WebKitGTK (Tauri 1.5)** mimarisi üzerinde çalışır. Kiosk modunda sıfır çökme, minimal bellek ayak izi (~80-120 MB RAM) ve endüstriyel monokrom cam tasarımı sunar.
+* Gereksiz arka plan servisleri olmadan çalışır; boşta ~80-120 MB RAM harcar.
+* Ayaz Güncelleyici, `.deb` güncellemelerini terminale girmeden masaüstünden denetler, indirir ve kurar.
+* Yapay zeka ajanı Ollama (localhost), Google Gemini ve Groq ile çalışır; `apt-get clean`, `df -h` gibi komutları onayınızla çalıştırır.
+* Üç tema (Nordik Açık, Modern Grafit, Derin Gece) ve 8 vektörel monokrom duvar kağıdı gelir.
+* Görev çubuğu ve başlat menüsü ortalanır; düzen Windows 11 ve Chrome OS Flex'ten esinlenir.
+* İkili kara liste, `sudo`, `su`, `pkexec`, `dd` gibi araçların yetkisiz çalıştırılmasını engeller.
+* Belge görüntüleyici hardlink ve path traversal'a karşı korumalıdır; PDF, Markdown ve metin dosyalarını açar.
+* Devuan SysVinit ve X11 `nodm` oto-oturumuyla uyumludur.
 
----
-
-## ✨ Öne Çıkan Özellikler
-
-* **🚀 Ultra Düşük Bellek ve CPU Tüketimi:** Gereksiz arka plan servisleri olmadan doğrudan donanım verimliliğine odaklanır.
-* **🔄 Ayaz Güncelleyici (GUI Update Manager):** Kullanıcıların terminale girmeden doğrudan masaüstü arayüzünden tek tıkla en son `.deb` güncellemelerini denetlemesini, indirmesini ve kurmasını sağlar.
-* **🧠 Yerel Yapay Zeka Teftiş Ajanı:** Ollama (localhost), Google Gemini ve Groq modellerini destekleyen, onaylı sistem komutları (`apt-get clean`, `df -h`) üretebilen akıllı asistan.
-* **🎨 Modern Cam (Glassmorphism) Tasarım:**
-  * 3 farklı tema (Nordik Açık, Modern Grafit, Derin Gece).
-  * 8 adet yüksek çözünürlüklü vektörel (SVG) monokrom duvar kağıdı.
-  * Windows 11 ve Chrome OS Flex'ten ilham alan ortalanmış Görev Çubuğu ve Başlat Menüsü.
-* **🔒 Kiosk ve Donanım Güvenliği:**
-  * Binary blacklist kalkanı (`sudo`, `su`, `pkexec`, `dd` vb. yetkisiz doğrudan çalıştırma engeli).
-  * Hardlink ve Path Traversal korumalı belge görüntüleyici (PDF/Markdown/Metin).
-  * Devuan SysVinit ve X11 `nodm` oto-oturum açma uyumluluğu.
-
----
-
-## 📁 Proje Dizin Yapısı
+## Dizin yapısı
 
 ```
 Ayaz/
 ├── .github/workflows/
-│   └── release-de.yml          # GitHub Actions otomatik .deb derleme iş akışı
-├── assets/                     # Logo ve masaüstü önizleme görselleri
+│   ├── build-iso.yml            # Ankora Linux canlı ISO derleme iş akışı (manuel tetiklemeli)
+│   └── release-de.yml           # Etiket push'ında otomatik .deb derleme
+├── assets/                      # Logo ve masaüstü önizleme görselleri
 ├── scripts/
-│   ├── ayaz-update-helper.sh   # Şifresiz güvenli root paket kurucu
-│   └── ankora-updater-sudoers  # Helper için tek satırlık sudoers izni
-├── src/                        # Ayaz DE Web Kullanıcı Arayüzü
-│   ├── app.js                  # Pencere yöneticisi, güncelleyici ve masaüstü mantığı
-│   ├── index.html              # Masaüstü çalışma alanı, pencereler ve başlat menüsü
-│   ├── style.css               # Monokrom cam tasarım sistemi ve tema stilleri
-│   └── *.svg                   # Vektörel arka planlar ve sistem ikonları
-├── src-tauri/                  # Ayaz DE Rust Arka Planı
-│   ├── Cargo.toml              # Rust bağımlılıkları ve ayaz-de paketi
-│   ├── tauri.conf.json         # Kiosk pencere kuralları, CSP güvenlik politikası
-│   └── src/main.rs             # Sistem telemetrisi, IPC köprüsü, güncelleme motoru
+│   ├── ankora-updater-sudoers   # Helper'lar için sudoers izni
+│   ├── ayaz-pkg-helper.sh       # Root yetkisiyle paket kurma yardımcısı
+│   ├── ayaz-update-helper.sh    # Şifresiz güvenli .deb kurulum yardımcısı
+│   ├── ayaz-session.desktop     # X11 oturum kaydı
+│   ├── ayaz.desktop             # Uygulama kısayolu
+│   ├── build-iso.sh             # Hibrit canlı ISO derleme betiği
+│   ├── build-on-windows.ps1     # Windows'tan ISO derleme yardımcısı
+│   ├── package-deb.sh           # Yerel .deb paketleme betiği
+│   └── xinitrc                  # X oturum başlangıç betiği
+├── src/                         # Arayüz
+│   ├── app.js                   # Pencere yöneticisi, güncelleyici, yapay zeka ajanı
+│   ├── index.html               # Masaüstü, pencereler ve başlat menüsü
+│   ├── style.css                # Monokrom cam tasarımı ve temalar
+│   └── wallpaper-*.svg          # Monokrom duvar kağıtları
+├── src-tauri/                   # Rust arka ucu
+│   ├── Cargo.toml
+│   ├── tauri.conf.json          # Kiosk pencere kuralları ve CSP
+│   └── src/main.rs              # Sistem telemetrisi, IPC, güncelleme motoru
+├── my-linux-orchestrator/       # Yapılandırma orkestratörü ve beceri tanımları
+├── AGENTS.md
+├── LICENSE                      # GPL-3.0
 └── package.json
 ```
 
----
-
-## 🛠️ Yerel Geliştirme ve Derleme
+## Geliştirme ve derleme
 
 ### Gereksinimler
 
-* **Rust:** `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-* **Node.js:** v18 veya v20
-* **Linux Kütüphaneleri (Debian/Devuan):**
+* Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+* Node.js v18 veya v20
+* Debian/Devuan kütüphaneleri:
   ```bash
   sudo apt-get install -y libwebkit2gtk-4.0-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
   ```
 
-### Geliştirme Modunda Çalıştırma
+### Geliştirme modunda çalıştırma
 
 ```bash
 cargo install tauri-cli --version "^1.5"
 cargo tauri dev
 ```
 
-### Üretim `.deb` Paketini Derleme
+### Üretim `.deb` paketini derleme
 
 ```bash
 cargo tauri build --bundles deb
 ```
-Derlenen paket `src-tauri/target/release/bundle/deb/ayaz-de_2.0.0_amd64.deb` dizininde üretilir.
 
----
+Paket `src-tauri/target/release/bundle/deb/ayaz-de_2.0.0_amd64.deb` dizininde oluşur.
 
-## 🚀 Sürüm Dağıtımı (Release)
+## Sürüm dağıtımı
 
-Bu depoda yeni bir etiket (tag) push edildiğinde:
+Depoda yeni bir etiket push edildiğinde:
+
 ```bash
 git tag v2.0.1
 git push origin v2.0.1
 ```
-GitHub Actions iş akışı (`release-de.yml`) otomatik olarak Ubuntu üzerinde derlemeyi tamamlar ve `.deb` paketini GitHub Releases sayfasına yükler. Ankora Linux kullanıcıları masaüstündeki **Ayaz Güncelleyici** ile yeni sürüme anında geçer.
 
----
+`release-de.yml` iş akışı derlemeyi Ubuntu üzerinde tamamlar ve `.deb` paketini GitHub Releases sayfasına yükler. Güncellemeler masaüstündeki **Ayaz Güncelleyici** ile kurulur.
 
-## 📄 Lisans
+## Lisans
 
-Bu proje **GNU General Public License v3.0** ile lisanslanmıştır; tam metin depodaki `LICENSE` dosyasındadır. Ankora Linux projesinin bir parçasıdır.
+Bu proje **GNU General Public License v3.0** ile lisanslıdır; tam metin `LICENSE` dosyasındadır. Ankora Linux projesinin parçasıdır.
