@@ -25,7 +25,7 @@ Ayaz DE, **Ankora Linux** için geliştirilmiş, SysVinit tabanlı masaüstü or
 * Görev çubuğu ve başlat menüsü ortalanır; düzen Windows 11 ve Chrome OS Flex'ten esinlenir.
 * İkili kara liste, `sudo`, `su`, `pkexec`, `dd` gibi araçların yetkisiz çalıştırılmasını engeller.
 * Belge görüntüleyici hardlink ve path traversal'a karşı korumalıdır; PDF, Markdown ve metin dosyalarını açar.
-* Devuan SysVinit ve X11 `nodm` oto-oturumuyla uyumludur.
+* Devuan SysVinit ve X11 `nodm` oto-oturumuyla uyumludur
 
 ## Dizin yapısı
 
