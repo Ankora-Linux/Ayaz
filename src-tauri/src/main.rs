@@ -85,6 +85,8 @@ const ALLOWED_AGENT_ACTIONS: &[&str] = &[
 /// Ankora Office tarafından okunabilecek güvenli belge uzantıları (.docx ikili dosya olduğundan metin/pdf listesinde yer almaz)
 const ALLOWED_DOC_EXTENSIONS: &[&str] = &[
     "pdf", "md", "txt", "conf", "log", "json", "yaml", "yml", "ini",
+    "js", "py", "sh", "css", "html", "xml",
+    "png", "jpg", "jpeg", "webp", "gif",
 ];
 
 /// Kesinlikle doğrudan veya dolaylı çalıştırılması yasaklanan tehlikeli sistem araçları (Kara Liste)
@@ -738,6 +740,26 @@ fn lock_x11_session() -> Result<String, String> {
     }
 }
 
+/// Kilit açıldığında xtrlock sonlandırılır: süreç canlı kalırsa imleç kilit
+/// simgesinde kalır ve masaüstünde hiçbir yere tıklanamaz.
+#[tauri::command]
+fn unlock_x11_session() -> Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let status = Command::new("pkill").args(["-x", "xtrlock"]).status();
+        match status {
+            Ok(s) if s.success() => Ok("X11 kilidi açıldı (xtrlock sonlandırıldı).".to_string()),
+            Ok(_) => Ok("Çalışan xtrlock süreci yoktu; X11 kilidi zaten açıktı.".to_string()),
+            Err(e) => Err(format!("X11 kilidi açılamadı: {}", e)),
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Ok("Geliştirme ortamında kilit ekranı arayüz modu aktif.".to_string())
+    }
+}
+
 // ============================================================================
 // 1. GERÇEK TAURI NATIVE WINDOW DRAG
 // ============================================================================
@@ -829,13 +851,20 @@ fn scan_xdg_applications_blocking() -> Result<Vec<XdgApplication>, String> {
             dirs::data_dir().map(|d| d.join("applications")).unwrap_or_default(),
         ];
 
+        let user_apps_dir = dirs::data_dir().map(|d| d.join("applications")).unwrap_or_default();
         for dir in &search_dirs {
             if dir.exists() {
                 if let Ok(entries) = fs::read_dir(dir) {
                     for entry in entries.flatten() {
                         let path = entry.path();
                         if path.extension().and_then(|s| s.to_str()) == Some("desktop") {
-                            if let Some(app) = parse_desktop_entry(&path) {
+                            if let Some(mut app) = parse_desktop_entry(&path) {
+                                // Kullanıcının kendi dizinindeki kayıtlar (pip,
+                                // elle kurulan paketler) kullanıcı kurulumudur;
+                                // /usr/share kayıtları sistemle gelir.
+                                if dir == &user_apps_dir {
+                                    app.is_installed_by_user = true;
+                                }
                                 if !apps.iter().any(|a: &XdgApplication| a.id == app.id) {
                                     apps.push(app);
                                 }
@@ -1368,6 +1397,26 @@ async fn read_document_file(file_path: String) -> Result<DocumentResult, String>
                 file_type: "pdf".to_string(),
                 file_size,
                 content: data_uri,
+            })
+        }
+        "png" | "jpg" | "jpeg" | "webp" | "gif" => {
+            // Görsel, data URI olarak aynı Office çerçevesinde gösterilir.
+            let mut file = fs::File::open(&canonical).map_err(|e| e.to_string())?;
+            let mut bytes = Vec::new();
+            file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let mime = match extension.as_str() {
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "webp" => "image/webp",
+                _ => "image/gif",
+            };
+
+            Ok(DocumentResult {
+                file_name,
+                file_type: "image".to_string(),
+                file_size,
+                content: format!("data:{};base64,{}", mime, b64),
             })
         }
         _ => {
@@ -2917,7 +2966,15 @@ pub struct DirectoryListing {
 async fn list_directory(path: Option<String>) -> Result<DirectoryListing, String> {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/home/ankora"));
     let target_path = match path {
-        Some(p) if !p.trim().is_empty() && Path::new(&p).exists() => PathBuf::from(p),
+        // Boş yol ev dizinidir; dolu ama var olmayan yol sessizce ev dizinine
+        // düşürülmezdi — kullanıcı her klasörde aynı dosyaları görüyordu.
+        Some(p) if !p.trim().is_empty() => {
+            let target = PathBuf::from(p.trim());
+            if !target.exists() {
+                return Err(format!("Klasör bulunamadı: {}", p.trim()));
+            }
+            target
+        }
         _ => home.clone(),
     };
 
@@ -3390,6 +3447,7 @@ fn main() {
             set_lock_credentials,
             verify_lock_credentials,
             lock_x11_session,
+            unlock_x11_session,
             get_storage_devices,
             execute_system_installation,
             get_system_telemetry,

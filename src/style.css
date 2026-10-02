@@ -471,26 +471,37 @@ body.theme-light .btn-power-item.power-danger:hover {
 }
 
 /* Mağaza & Tablolar - Açık Tema */
-body.theme-light .store-toolbar,
-body.theme-light .store-table th {
+body.theme-light .store-toolbar {
   background: #f8fafc;
   color: #475569;
   border-color: rgba(0, 0, 0, 0.08);
 }
 
-body.theme-light .store-table td {
-  border-color: rgba(0, 0, 0, 0.06);
+body.theme-light .store-card {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.08);
 }
 
-body.theme-light .store-table tr:hover td {
+body.theme-light .store-card:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+body.theme-light .store-card-icon {
   background: #f1f5f9;
+  border-color: rgba(0, 0, 0, 0.08);
+  color: #475569;
 }
 
-body.theme-light .pkg-title {
+body.theme-light .store-card-name {
   color: #0f172a;
 }
 
-body.theme-light .pkg-desc {
+body.theme-light .store-card-pkg,
+body.theme-light .store-card-meta {
+  color: #64748b;
+}
+
+body.theme-light .store-card-desc {
   color: #475569;
 }
 
@@ -1203,54 +1214,116 @@ body.is-dragging button {
   color: var(--text-primary);
 }
 
-.store-table-wrap {
+.store-grid-wrap {
   flex: 1;
   overflow-y: auto;
+  padding-right: 4px;
 }
 
-.store-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
+.store-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(255px, 1fr));
+  gap: 14px;
+  padding-bottom: 14px;
 }
 
-.store-table th {
-  padding: 8px 14px;
+.store-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
   background: var(--bg-panel);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--border-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  transition: border-color 0.12s, transform 0.12s;
 }
 
-.store-table td {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  font-size: 12px;
-  vertical-align: middle;
+.store-card:hover {
+  border-color: var(--border-medium);
+  transform: translateY(-2px);
 }
 
-.store-table tr:hover td {
+.store-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.store-card-icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
   background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-ui, 6px);
+  color: var(--text-secondary);
 }
 
-.pkg-title {
+.store-card-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.store-card-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.store-card-name {
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pkg-name {
+.store-card-pkg {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.pkg-desc {
-  color: var(--text-secondary);
+.store-card-desc {
+  margin: 0;
+  min-height: 36px;
   font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.store-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.store-card-repo {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.store-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  min-height: 26px;
 }
 
 .btn-pkg {
@@ -2715,6 +2788,15 @@ body.theme-light .toggle-slider-knob {
 .tray-island-item:hover {
   background: rgba(255, 255, 255, 0.08);
   color: #ffffff;
+}
+
+/* Ağ durumu: bağlıyken ikon vurgulu, bağlantı yokken soluk */
+.tray-island-item.net-on .tray-status-glyph {
+  color: var(--accent-active);
+}
+
+.tray-island-item.net-off {
+  opacity: 0.45;
 }
 
 /* Çalışma alanı göstergesi: kaç alan varsa o kadar nokta, aktif olan vurgulu */

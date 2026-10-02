@@ -3,4 +3,3 @@
 # GÜVENLIK: Yalnızca belirli güncelleme yardımcılarına sınırlı NOPASSWD erişimi
 # /tmp yerine güvenli staging dizini kullanılır (/var/cache/ayaz-updates/)
 ankora ALL=(root) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper
-pars ALL=(root) NOPASSWD: /usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper

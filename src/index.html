@@ -447,18 +447,8 @@
               <button class="store-filter-btn" data-cat="util">Araçlar</button>
             </div>
           </div>
-          <div class="store-table-wrap">
-            <table class="store-table">
-              <thead>
-                <tr>
-                  <th style="width: 220px;">Uygulama</th>
-                  <th>Açıklama</th>
-                  <th style="width: 90px;">Boyut</th>
-                  <th style="width: 120px; text-align: right;">Durum</th>
-                </tr>
-              </thead>
-              <tbody id="store-table-body"></tbody>
-            </table>
+          <div class="store-grid-wrap">
+            <div class="store-grid" id="store-grid"></div>
           </div>
         </div>
       </div>
@@ -1146,46 +1136,20 @@
 
               <div class="setting-row-item">
                 <div class="row-desc">
-                  <strong>Ana Çıkış Aygıtı</strong>
-                  <span>Donanım ses kartı veya DAC portu</span>
-                </div>
-                <div class="row-control">
-                  <select id="ctrl-audio-device" class="select-mono">
-                    <option value="alsa-hda" selected>ALSA HDA Intel PCH (Dahili Hoparlör/Jak)</option>
-                    <option value="usb-dac">USB Audio DAC / Harici Kulaklık</option>
-                    <option value="hdmi">HDMI / DisplayPort Digital Audio</option>
-                  </select>
-                </div>
-              </div>
-
-              <div class="setting-row-item">
-                <div class="row-desc">
                   <strong>Ana Ses Düzeyi</strong>
-                  <span>Genel hoparlör ses şiddeti</span>
+                  <span>Genel hoparlör ses şiddeti (ALSA/PulseVolume)</span>
                 </div>
                 <div class="row-control">
                   <input type="range" id="ctrl-volume" min="0" max="100" value="80" class="slider-mono">
                   <span id="volume-val-label" class="val-label">%80</span>
-                </div>
-              </div>
-
-              <div class="setting-row-item">
-                <div class="row-desc">
-                  <strong>Sistem Uyarı Sesleri</strong>
-                  <span>Pencere, hata ve modal etkileşim tonları</span>
-                </div>
-                <div class="row-control">
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="ctrl-sound-effects" checked>
-                    <span class="toggle-slider"></span>
-                  </label>
+                  <span id="volume-hint" class="val-label" style="color: var(--text-muted);"></span>
                 </div>
               </div>
 
               <div class="setting-row-item">
                 <div class="row-desc">
                   <strong>Sessiz Mod (Rahatsız Etme)</strong>
-                  <span>Kiosk ekranında açılan tüm bildirimleri gizler</span>
+                  <span>Sıradan bildirimleri gizler; hatalar her zaman görünür kalır</span>
                 </div>
                 <div class="row-control">
                   <label class="toggle-switch">
@@ -1246,11 +1210,11 @@
                   <span>Hareketsizlik sonrası ekranın karartılma süresi</span>
                 </div>
                 <div class="row-control">
-                  <select class="select-mono">
-                    <option value="never" selected>Hiçbir Zaman (Kiosk Modu - Önerilen)</option>
-                    <option value="15">15 Dakika</option>
-                    <option value="30">30 Dakika</option>
-                    <option value="60">1 Saat</option>
+                  <select id="ctrl-screen-timeout" class="select-mono">
+                    <option value="0" selected>Hiçbir Zaman (Kiosk Modu - Önerilen)</option>
+                    <option value="900">15 Dakika</option>
+                    <option value="1800">30 Dakika</option>
+                    <option value="3600">1 Saat</option>
                   </select>
                 </div>
               </div>
@@ -1261,7 +1225,7 @@
                   <span>İşlemci frekans ölçekleme politikası (cpufreq)</span>
                 </div>
                 <div class="row-control">
-                  <select class="select-mono">
+                  <select id="ctrl-power-profile" class="select-mono">
                     <option value="performance">Yüksek Performans (performance)</option>
                     <option value="balanced" selected>Dengeli (schedutil / ondemand)</option>
                     <option value="powersave">Güç Tasarrufu (powersave)</option>
@@ -1277,19 +1241,6 @@
                 <div class="row-control">
                   <label class="toggle-switch">
                     <input type="checkbox" checked disabled>
-                    <span class="toggle-slider"></span>
-                  </label>
-                </div>
-              </div>
-
-              <div class="setting-row-item">
-                <div class="row-desc">
-                  <strong>Geçici Live Oturum Modu (OverlayFS)</strong>
-                  <span>Yeniden başlatıldığında tüm disk değişikliklerini sıfırla</span>
-                </div>
-                <div class="row-control">
-                  <label class="toggle-switch">
-                    <input type="checkbox" id="chk-overlay-mode">
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
@@ -1313,23 +1264,23 @@
                 </div>
               </div>
 
-              <div class="disk-usage-card">
+              <div class="disk-usage-card" id="card-disk-usage">
                 <div class="disk-usage-meta">
-                  <strong>/dev/sda2 (Kök Dosya Sistemi — ext4)</strong>
-                  <span>14.8 GB kullanılıyor / 64.0 GB Toplam (49.2 GB Boş)</span>
+                  <strong>Kök Dosya Sistemi (ext4)</strong>
+                  <span id="label-disk-usage">Okunuyor…</span>
                 </div>
                 <div class="disk-progress-bar">
-                  <div class="disk-progress-fill" style="width: 23%;"></div>
+                  <div class="disk-progress-fill" id="fill-disk-bar" style="width: 0%;"></div>
                 </div>
               </div>
 
-              <div class="disk-usage-card">
+              <div class="disk-usage-card" id="card-zram-usage">
                 <div class="disk-usage-meta">
                   <strong>ZRAM Sıkıştırılmış Takas Belleği (zram0)</strong>
-                  <span>420 MB / 4.0 GB (LZO-RLE Hızlı Sıkıştırma)</span>
+                  <span id="label-zram-usage">Okunuyor…</span>
                 </div>
                 <div class="disk-progress-bar">
-                  <div class="disk-progress-fill" style="width: 10%; background: #10b981;"></div>
+                  <div class="disk-progress-fill" id="fill-zram-bar" style="width: 0%; background: #10b981;"></div>
                 </div>
               </div>
 

@@ -332,6 +332,128 @@ allow-hotplug eth0
 iface eth0 inet dhcp
 NETIF
 
+# ----------------------------------------------------------------------
+# Ağ: Fiziksel arayüzler için DHCP istemcisi (SysVinit)
+# /etc/network/interfaces eth0 adını sabit yazar; gerçek arayüz adı
+# enp1s0 / ens33 gibi bir değerse ifupdown hiç devreye girmez ve canlı
+# sistemde bağlantı hiç kurulmaz. ayaz-net adı değil /sys/class/net/*
+# altındaki aygıt kökünü (device) esas alır, her fiziksel arayüz için
+# ayrı dhclient başlatır. Chroot-setup.sh içinde çalışıldığı için hem
+# betik yazımı hem de update-rc.d doğrudan chroot dosya sisteminde yapılır.
+# ----------------------------------------------------------------------
+mkdir -p /etc/init.d /run /var/lib/dhcp
+cat << 'AYAZNET' > /etc/init.d/ayaz-net
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          ayaz-net
+# Required-Start:    $network $remote_fs
+# Required-Stop:     $network $remote_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Fiziksel ethernet arayüzleri için DHCP
+# Description:       Fiziksel kablolu arayüzleri ayağa kaldırır ve her biri
+#                    için ayrı bir dhclient süreci başlatır.
+### END INIT INFO
+# chkconfig: 2345 90 10
+#
+# Canlı ISO'da arayüz adı eth0 olmak zorunda değildir (enp1s0, ens33...).
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+RUNDIR=/run
+LEASEDIR=/var/lib/dhcp
+
+# Kablosuz, konteyner ve türetilmiş arayüzler dışarıda bırakılır:
+# onların bağlantısını wpa_supplicant / docker / vpn kendi üstlenir.
+skip_iface() {
+    case "$1" in
+        lo|wlan*|wlx*|docker*|veth*|tun*|tap*|wg*|tailscale*) return 0 ;;
+    esac
+    return 1
+}
+
+start_iface() {
+    name="$1"
+    # Aynı arayüz için çalışan bir dhclient varsa ikincisi IP'yi paylaşamaz
+    if [ -f "$RUNDIR/dhclient.$name.pid" ] && \
+       kill -0 "$(cat "$RUNDIR/dhclient.$name.pid" 2>/dev/null)" 2>/dev/null; then
+        return 0
+    fi
+    ip link set "$name" up 2>/dev/null || ifconfig "$name" up 2>/dev/null || true
+    dhclient -nw -pf "$RUNDIR/dhclient.$name.pid" \
+             -lf "$LEASEDIR/dhclient.$name.lease" "$name" >/dev/null 2>&1 || true
+}
+
+do_start() {
+    mkdir -p "$RUNDIR" "$LEASEDIR"
+    for path in /sys/class/net/*; do
+        [ -e "$path" ] || continue
+        name="${path##*/}"
+        skip_iface "$name" && continue
+        # Yalnız fiziksel arayüzlerin altında device kökü vardır
+        [ -d "$path/device" ] || continue
+        start_iface "$name"
+    done
+    return 0
+}
+
+do_stop() {
+    for pf in "$RUNDIR"/dhclient.*.pid; do
+        [ -f "$pf" ] || continue
+        pid="$(cat "$pf" 2>/dev/null)"
+        [ -n "$pid" ] && kill "$pid" 2>/dev/null
+        rm -f "$pf"
+    done
+    return 0
+}
+
+case "$1" in
+    start)
+        do_start
+        ;;
+    stop)
+        do_stop
+        ;;
+    restart|force-reload)
+        do_stop
+        do_start
+        ;;
+    status)
+        # LSB: 0 çalışır, 3 çalışmıyor
+        alive=3
+        for pf in "$RUNDIR"/dhclient.*.pid; do
+            [ -f "$pf" ] || continue
+            if kill -0 "$(cat "$pf" 2>/dev/null)" 2>/dev/null; then
+                alive=0
+            fi
+        done
+        exit "$alive"
+        ;;
+    *)
+        echo "Kullanım: $0 {start|stop|restart|status}" >&2
+        exit 1
+        ;;
+esac
+exit 0
+AYAZNET
+chmod +x /etc/init.d/ayaz-net
+
+# LSB başlığındaki Default-Start: 2 3 4 5 dizilimi rc2..rc5'te başlatma
+# bağlantılarını kurar. insserv $network tesisatını bulamazsa betiği
+# reddedebiliyor; böyle durumda bağlantılar elle kurulur (DHCP'siz kalmak
+# canlı sistemde bağlantı yok demektir).
+if ! update-rc.d ayaz-net defaults; then
+    for rl in 2 3 4 5; do
+        ln -sf ../init.d/ayaz-net "/etc/rc$rl.d/S01ayaz-net"
+    done
+    for rl in 0 1 6; do
+        ln -sf ../init.d/ayaz-net "/etc/rc$rl.d/K01ayaz-net"
+    done
+fi
+# ifupdown kuruluysa kendi betiği de devreye girsin (varsa)
+if [ -f /etc/init.d/networking ]; then
+    update-rc.d networking defaults 2>/dev/null || true
+fi
+
 # -----------------------------------------------------------------------
 # X11 Otomatik Kiosk Başlatıcı
 # -----------------------------------------------------------------------
@@ -344,6 +466,8 @@ xsetroot -solid "#0b0c10" 2>/dev/null || true
 xset -dpms 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
+# Kullanıcının Ayarlar'dan verdiği DPMS zaman aşımı yeniden başlatmada korunur
+[ -f "$HOME/.config/ankora/dpms_secs" ] && xset +dpms dpms "$(cat "$HOME/.config/ankora/dpms_secs")" "$(cat "$HOME/.config/ankora/dpms_secs")" "$(cat "$HOME/.config/ankora/dpms_secs")" 2>/dev/null || true
 
 # 1) Ekranın önerilen (native) çözünürlüğüne geç: kurulu sistemde düşük
 #    modda kalan ekranın bulanık/sahte görünmesini böyle önlenir.
@@ -487,6 +611,34 @@ KIOSKMD
 chown -R 1000:1000 "$BDIR"
 echo "[BELGE] Belgeler/ icerigi: $(ls "$BDIR" | tr '\n' ' ')"
 
+# 6.c Türkçe XDG klasörleri: dosya yöneticisi, Başlat menüsü ve Ofis bu
+# adları bekler; oluşturulmazsa kullanıcı kendi evinde boş kalır. Aynı
+# içerik skel'e de konur ki kurulumdan sonraki kullanıcılar da alsın.
+# Sayısal chown: betik host'ta koşuyor, host'ta "ankora" kullanıcı adı yok
+# (set -euo pipefail ad-üstü chown'u öldürürdü); canlı sistemde uid/gid 1000.
+XDG_HOME="$CHROOT_DIR/home/ankora"
+for xdg_d in Masaüstü İndirilenler Belgeler Müzik Resimler Videolar; do
+    mkdir -p "$XDG_HOME/$xdg_d"
+done
+mkdir -p "$XDG_HOME/.config"
+cat << 'USERDIRS' > "$XDG_HOME/.config/user-dirs.dirs"
+XDG_DESKTOP_DIR="$HOME/Masaüstü"
+XDG_DOWNLOAD_DIR="$HOME/İndirilenler"
+XDG_DOCUMENTS_DIR="$HOME/Belgeler"
+XDG_MUSIC_DIR="$HOME/Müzik"
+XDG_PICTURES_DIR="$HOME/Resimler"
+XDG_VIDEOS_DIR="$HOME/Videolar"
+USERDIRS
+mkdir -p "$CHROOT_DIR/etc/skel/.config"
+for xdg_d in Masaüstü İndirilenler Belgeler Müzik Resimler Videolar; do
+    mkdir -p "$CHROOT_DIR/etc/skel/$xdg_d"
+done
+cp "$XDG_HOME/.config/user-dirs.dirs" "$CHROOT_DIR/etc/skel/.config/user-dirs.dirs"
+chown -R 1000:1000 "$XDG_HOME/.config" \
+    "$XDG_HOME/Masaüstü" "$XDG_HOME/İndirilenler" "$XDG_HOME/Belgeler" \
+    "$XDG_HOME/Müzik" "$XDG_HOME/Resimler" "$XDG_HOME/Videolar"
+echo "[XDG] Türkçe klasörler: $(ls "$XDG_HOME" | tr '\n' ' ')"
+
 # 7. Ayaz DE Paketinin Sisteme Enjekte Edilmesi
 echo "[4/8] Ayaz DE ikili dosyası ve sistem bileşenleri sisteme kopyalanıyor..."
 # Eğer dist altında deb yoksa ve host ortamında cargo/npm mevcutsa otomatik derle
@@ -558,6 +710,32 @@ def _run_capture(cmd_args):
     if proc.returncode != 0:
         return None
     return proc.stdout
+
+def _root_run(cmd_args, stdin_text=None, timeout=30):
+    """root gerektiren komutu ya doğrudan ya da `sudo -n` ile çalıştırır.
+
+    Canlı sistemde ankora için parolasız sudo tanımlıdır; sudo yoksa ya da
+    parola gerekiyorsa beklemeden net bir Türkçe hata döner."""
+    if os.geteuid() == 0:
+        run_args = list(cmd_args)
+    elif shutil.which('sudo'):
+        run_args = ['sudo', '-n'] + list(cmd_args)
+    else:
+        raise Exception('Bu ayar için yönetici (root) yetkisi gerekiyor: sudo kurulu değil.')
+    try:
+        proc = subprocess.run(
+            run_args, input=stdin_text, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        raise Exception(f'Komut zaman aşımına uğradı ({timeout} sn)')
+    except Exception as e:
+        raise Exception(f'Komut çalıştırılamadı: {e}')
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or '').strip()
+        if any(t in err for t in ('password is required', 'a terminal is required', 'no tty present')):
+            raise Exception('Bu ayar için yönetici (root) yetkisi gerekiyor: sudo parola soruyor.')
+    return proc
 
 def _rfkill_enabled(out):
     for line in out.splitlines():
@@ -857,15 +1035,24 @@ def execute_ayaz_command(cmd, args):
             raise Exception('Geçersiz paket adı biçimi')
         helper = '/usr/local/bin/ayaz-pkg-helper'
         cmd_args = ['sudo', helper, 'install', pkg] if os.path.exists(helper) else ['sudo', 'apt-get', 'install', '-y', '--no-install-recommends', '--', pkg]
-        proc = subprocess.run(
-            cmd_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=300
-        )
+        # stdin DEVNULL: sudo parola sorarsa veya dpkg conffile sorusu
+        # gelirse arayüz askıda kalmasın, hata anında frontend'e dönsün.
+        try:
+            proc = subprocess.run(
+                cmd_args,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=300
+            )
+        except subprocess.TimeoutExpired:
+            raise Exception(f'Kurulum zaman aşımına uğradı: {pkg} (300 sn)')
         if proc.returncode != 0:
-            raise Exception(f'Kurulum başarısız: {proc.stderr or proc.stdout}')
+            err = (proc.stderr or proc.stdout or '').strip()
+            if not err:
+                err = f'çıkış kodu {proc.returncode}'
+            raise Exception(f'Kurulum başarısız: {err}')
 
         # Kurulan paketin .desktop girdisi kullanıcı dizinine kopyalanır; Başlat
         # menüsü ve masaüstü ikonu yeniden başlatma sonrasında da korunur.
@@ -927,15 +1114,22 @@ def execute_ayaz_command(cmd, args):
         helper = '/usr/local/bin/ayaz-pkg-helper'
         if not os.path.exists(helper):
             raise Exception('Güvenlik: ayaz-pkg-helper bulunamadı; vendor kurulumu yapılamaz')
-        proc = subprocess.run(
-            ['sudo', helper, 'vendor', vendor],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=600
-        )
+        try:
+            proc = subprocess.run(
+                ['sudo', helper, 'vendor', vendor],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=600
+            )
+        except subprocess.TimeoutExpired:
+            raise Exception(f'Kurulum zaman aşımına uğradı: {vendor} (600 sn)')
         if proc.returncode != 0:
-            raise Exception(f'Kurulum başarısız: {proc.stderr or proc.stdout}')
+            err = (proc.stderr or proc.stdout or '').strip()
+            if not err:
+                err = f'çıkış kodu {proc.returncode}'
+            raise Exception(f'Kurulum başarısız: {err}')
         # Depo eklendikten sonraki paket kurulumu ve .desktop yerleşimi normal
         # kurulum akışının kendisiyle yapılır (apt ikinci çağrıda boştur).
         return execute_ayaz_command('install_deb_package',
@@ -947,14 +1141,33 @@ def execute_ayaz_command(cmd, args):
             raise Exception('Geçersiz paket adı biçimi')
         helper = '/usr/local/bin/ayaz-pkg-helper'
         cmd_args = ['sudo', helper, 'remove', pkg] if os.path.exists(helper) else ['sudo', 'apt-get', 'remove', '-y', '--', pkg]
-        proc = subprocess.run(
-            cmd_args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=120
-        )
+        try:
+            proc = subprocess.run(
+                cmd_args,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=120
+            )
+        except subprocess.TimeoutExpired:
+            raise Exception(f'Kaldırma zaman aşımına uğradı: {pkg} (120 sn)')
+        # Daha önce returncode'a bakılmadan "kaldırıldı" dönülüyordu; arayüz
+        # paket silinmemişken başarı görüyordu.
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or '').strip()
+            if not err:
+                err = f'çıkış kodu {proc.returncode}'
+            raise Exception(f'Kaldırma başarısız: {err}')
         return f'{pkg} kaldırıldı'
+
+    elif cmd == 'list_installed_deb_packages':
+        # Yazılım Mağazası'nın "kurulu" listesi dpkg üzerinden yürür;
+        # dpkg yoksa (veya sorgu düşerse) boş liste arayüzü bozmaz.
+        out = _run_capture(['dpkg-query', '-W', '-f=${Package}\n'])
+        if out is None:
+            return []
+        return [p.strip() for p in out.splitlines() if p.strip()]
 
     elif cmd == 'system_poweroff':
         subprocess.Popen(['/sbin/poweroff', '-f'])
@@ -1137,6 +1350,36 @@ def execute_ayaz_command(cmd, args):
         return [
             {'name': 'sda', 'path': '/dev/sda', 'size_gb': 64.0, 'model': 'Sistem Sabit Diski (/dev/sda)', 'is_removable': False}
         ]
+
+    elif cmd == 'get_storage_stats':
+        # Ayarlar'daki depolama göstergesi: kök bölünüm + ZRAM (varsa).
+        # Bayt cinsinden döner; arayüz ölçeği kendisi çevirir.
+        stats = {'disk_total': 0, 'disk_used': 0, 'zram_total': 0, 'zram_used': 0}
+        out = _run_capture(['df', '-B1', '/'])
+        if out:
+            for line in out.splitlines()[1:]:
+                parts = line.split()
+                if len(parts) >= 6 and parts[1].isdigit() and parts[2].isdigit():
+                    stats['disk_total'] = int(parts[1])
+                    stats['disk_used'] = int(parts[2])
+                    break
+                # Uzun aygıt adı satırı kırıldığında sayılar başa kayar
+                if len(parts) >= 5 and parts[0].isdigit() and parts[1].isdigit():
+                    stats['disk_total'] = int(parts[0])
+                    stats['disk_used'] = int(parts[1])
+                    break
+        try:
+            with open('/sys/block/zram0/disksize') as f:
+                stats['zram_total'] = int((f.read().strip() or '0'))
+        except Exception:
+            stats['zram_total'] = 0
+        try:
+            # mm_stat'ın ilk alanı sıkıştırılmamış (asıl) veri boyutudur
+            with open('/sys/block/zram0/mm_stat') as f:
+                stats['zram_used'] = int(f.read().split()[0])
+        except Exception:
+            stats['zram_used'] = 0
+        return stats
 
     elif cmd == 'execute_system_installation':
         payload = args.get('payload', {})
@@ -1386,9 +1629,17 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             return {'success': False, 'freed_mb': 0, 'message': str(e)}
 
     elif cmd == 'list_directory':
-        req_path = args.get('path', home_dir).strip()
-        if not req_path or '\0' in req_path or not os.path.exists(req_path):
+        req_path = args.get('path', home_dir)
+        if not isinstance(req_path, str):
             req_path = home_dir
+        req_path = req_path.strip()
+        if not req_path or '\0' in req_path:
+            # Boş yol bilerek ev dizinine düşer; arayüzün varsayılanıdır.
+            req_path = home_dir
+        elif not os.path.exists(req_path):
+            # Verilen yol yokken sessizce ev dizinine dönmek arayüze yanlış
+            # klasörü gösteriyordu; eksik yol açıkça hata olarak döner.
+            raise Exception('Klasör bulunamadı: ' + str(req_path))
         req_path = os.path.abspath(req_path)
         # GÜVENLİK: Kök gezilebilir, ancak başkalarının hesapları ve çekirdek /
         # aygıt arayüzleri listelenemez (dosya adı sızıntısı).
@@ -1579,8 +1830,14 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         if '..' in f_path:
             raise Exception("Güvenlik Hatası: Dizin geçişine ('..') izin verilmez")
         f_ext = os.path.splitext(f_path)[1].lower().replace('.', '')
-        if f_ext not in ('pdf', 'md', 'txt', 'conf', 'log', 'json', 'yaml', 'yml', 'ini'):
+        if f_ext not in ('pdf', 'md', 'txt', 'conf', 'log', 'json', 'yaml', 'yml', 'ini',
+                         'js', 'py', 'sh', 'css', 'html', 'xml',
+                         'png', 'jpg', 'jpeg', 'webp', 'gif'):
             raise Exception(f"Güvenlik Hatası: '.{f_ext}' uzantılı dosyalar güvenlik nedeniyle okunamaz")
+        # Görsel uzantılar metin değil, base64 data URI olarak döner
+        IMAGE_MIME = {'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+                      'webp': 'image/webp', 'gif': 'image/gif'}
+        is_image = f_ext in IMAGE_MIME
         if not os.path.exists(f_path):
             # Canlı oturum ankora ile çalışır; /root/Belgeler'e kök erişimi
             # yoktur. Örnek belgeler kullanıcı dizinindedir — aynı ad
@@ -1603,6 +1860,11 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         allowed_dirs = [
             os.path.join(home_dir, 'Belgeler'),
             os.path.join(home_dir, 'Downloads'),
+            os.path.join(home_dir, 'Resimler'),
+            os.path.join(home_dir, 'Masaüstü'),
+            os.path.join(home_dir, 'İndirilenler'),
+            os.path.join(home_dir, 'Müzik'),
+            os.path.join(home_dir, 'Videolar'),
             home_dir,
             '/root/Belgeler',
             '/usr/share/doc',
@@ -1613,8 +1875,27 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                 raise Exception('Güvenlik Hatası: Yalnızca kullanıcı belgeleri ve sistem '
                                 'dokümantasyonu dizinindeki dosyalar okunabilir')
         f_path = real_path
-        f_size = os.path.getsize(f_path)
+        # GÜVENLİK: Rust'taki hard-link ve boyut denetimlerinin karşılığı —
+        # çok bağlantılı dosyalar ve 50 MB üstü içerikler okunmaz.
+        st = os.stat(f_path)
+        if st.st_nlink > 1:
+            raise Exception('Güvenlik Hatası: Çoklu bağlantılı (hard link) dosyaların '
+                            'okunması güvenlik gerekçesiyle engellendi')
+        f_size = st.st_size
+        if f_size > 50 * 1024 * 1024:
+            raise Exception('Dosya boyutu çok büyük (50 MB üstü kabul edilmez)')
         f_name = os.path.basename(f_path)
+        if is_image:
+            # Tarayıcı <img> için doğrudan gömülebilen data URI üretilir
+            import base64
+            with open(f_path, 'rb') as f:
+                b64 = base64.b64encode(f.read()).decode('utf-8')
+            return {
+                'file_name': f_name,
+                'file_type': 'image',
+                'file_size': f_size,
+                'content': f"data:{IMAGE_MIME[f_ext]};base64,{b64}"
+            }
         if f_ext == 'pdf':
             import base64
             with open(f_path, 'rb') as f:
@@ -1658,14 +1939,23 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             raise Exception('Yeni PIN/Parola en az 4 karakter olmalıdır.')
         cfg_dir = os.path.expanduser('~/.config/ankora')
         os.makedirs(cfg_dir, exist_ok=True)
+        h_file = os.path.join(cfg_dir, 'lock.hash')
+        # Rust tarafındaki set_lock_credentials ile aynı denetim: kilit
+        # zaten kurulu ve istekte current_pin alanındaysa önce o doğrulanır.
+        # Alan boş/None gelirse boş PIN denenir; Rust da unwrap_or_default
+        # ile aynısını yapar — mevcut PIN'siz değişiklik böylece kapanır.
+        if os.path.exists(h_file) and ('current_pin' in args or 'currentPin' in args):
+            cur_pin = str(args.get('current_pin') or args.get('currentPin') or '')
+            if not execute_ayaz_command('verify_lock_credentials', {'pin': cur_pin}):
+                raise Exception('Mevcut PIN hatalı! PIN değiştirme reddedildi.')
         import hashlib
         salt = os.urandom(16)
         h = hashlib.sha256(salt + new_pin.encode()).digest()
         for i in range(50000):
             h = hashlib.sha256(h + salt + i.to_bytes(4, 'little')).digest()
-        with open(os.path.join(cfg_dir, 'lock.hash'), 'wb') as f:
+        with open(h_file, 'wb') as f:
             f.write(salt + h)
-        os.chmod(os.path.join(cfg_dir, 'lock.hash'), 0o600)
+        os.chmod(h_file, 0o600)
         return True
 
     elif cmd == 'verify_lock_credentials':
@@ -1692,6 +1982,16 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             return 'X11 oturumu kilitlendi'
         return 'Kiosk kilit ekranı devrede'
 
+    elif cmd == 'unlock_x11_session':
+        # xtrlock süreçte değilse kilit zaten açık demektir; pkill'in 1
+        # kodu da bu durumda başarı sayılır.
+        try:
+            subprocess.run(['pkill', '-x', 'xtrlock'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+        return 'Ekran kilidi kaldırıldı'
+
     elif cmd == 'set_brightness':
         lvl = int(args.get('level', 100))
         clamped = max(20, min(100, lvl))
@@ -1706,6 +2006,133 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         except Exception:
             pass
         return f"Parlaklık ayarlandı: %{clamped}"
+
+    elif cmd == 'get_volume':
+        # ALSA Master kanalının yüzde değeri. Araç yokluğu ile aygıt
+        # yokluğu ayrı hatalardır: biri "kurulu değil" derken diğeri
+        # donanım/sürücü sorununu gösterir.
+        if not shutil.which('amixer'):
+            raise Exception('Ses sistemi bulunamadı (amixer kurulu değil)')
+        try:
+            proc = subprocess.run(
+                ['amixer', 'get', 'Master'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=10)
+        except Exception as e:
+            raise Exception(f'Ses sistemi okunamadı: {e}')
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or '').strip()
+            raise Exception(f'Ses aygıtı okunamadı: {err or "amixer hata verdi"}')
+        m = re.search(r'\[(\d{1,3})%\]', proc.stdout)
+        if not m:
+            raise Exception('Ses düzeyi okunamadı (amixer yüzde vermedi)')
+        return max(0, min(100, int(m.group(1))))
+
+    elif cmd == 'set_volume':
+        try:
+            level = int(args.get('level', args.get('volume', 50)))
+        except (TypeError, ValueError):
+            raise Exception('Geçersiz ses seviyesi')
+        if not 0 <= level <= 100:
+            raise Exception('Ses seviyesi 0 ile 100 arasında olmalı')
+        if not shutil.which('amixer'):
+            raise Exception('Ses sistemi bulunamadı (amixer kurulu değil)')
+        # Karıştırıcıya yazmak çoğu sistemde grup yetkisiyle doğrudan olur;
+        # olmazsa parolasız sudo ile denenir.
+        try:
+            proc = subprocess.run(
+                ['amixer', 'set', 'Master', f'{level}%'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, timeout=10)
+        except Exception as e:
+            raise Exception(f'Ses ayarı çalıştırılamadı: {e}')
+        if proc.returncode != 0:
+            proc = _root_run(['amixer', 'set', 'Master', f'{level}%'])
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or '').strip()
+                raise Exception(err or 'Ses seviyesi ayarlanamadı')
+        return f'Ses seviyesi ayarlandı: %{level}'
+
+    elif cmd == 'get_cpu_governor':
+        try:
+            with open('/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor') as f:
+                return f.read().strip()
+        except Exception:
+            raise Exception('Bu donanım CPU frekans profilini desteklemiyor')
+
+    elif cmd == 'set_cpu_governor':
+        gov = str(args.get('governor', args.get('profile', ''))).strip().lower()
+        # Arayüzdeki "Dengeli" bir governor adı değil: çekirdek hangisini
+        # sunuyorsa (schedutil > ondemand > conservative) o seçilir.
+        if gov == 'balanced':
+            gov = ''
+            try:
+                with open('/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors') as f:
+                    avail = f.read().split()
+                for cand in ('schedutil', 'ondemand', 'conservative'):
+                    if cand in avail:
+                        gov = cand
+                        break
+            except Exception:
+                pass
+            if not gov:
+                raise Exception('Bu donanım dengeli güç profili desteklemiyor')
+        if gov not in ('performance', 'powersave', 'ondemand', 'conservative', 'schedutil'):
+            raise Exception('Geçersiz CPU frekans profili')
+        gov_file = '/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor'
+        if not os.path.exists(gov_file):
+            raise Exception('Bu donanım CPU frekans profilini desteklemiyor')
+        # Sysfs yazısı root gerektirir; canlı sistemde ankora parolasız sudo kullanır
+        proc = _root_run(['tee', gov_file], stdin_text=gov + '\n')
+        if proc.returncode != 0:
+            raise Exception('Bu donanım CPU frekans profilini desteklemiyor')
+        try:
+            with open(gov_file) as f:
+                applied = f.read().strip()
+        except Exception:
+            applied = ''
+        if applied != gov:
+            raise Exception('Bu donanım CPU frekans profilini desteklemiyor')
+        return f'CPU frekans profili ayarlandı: {gov}'
+
+    elif cmd == 'set_dpms_timeout':
+        # Süre saniyedir; 0 DPMS'i kapatır. Değer ~/.config/ankora/dpms_secs
+        # dosyasına yazılır ki .xinitrc yeniden başlatmada koruyabilsin.
+        raw = args.get('seconds', args.get('secs', args.get('timeout', args.get('value', 0))))
+        try:
+            secs = int(raw)
+        except (TypeError, ValueError):
+            raise Exception('Geçersiz bekleme süresi (saniye)')
+        if secs < 0:
+            raise Exception('Geçersiz bekleme süresi (saniye)')
+        if not shutil.which('xset'):
+            raise Exception('Ekran ayarları için xset kurulu değil (x11-xserver-utils)')
+        cfg_dir = os.path.expanduser('~/.config/ankora')
+        cfg_file = os.path.join(cfg_dir, 'dpms_secs')
+        try:
+            if secs > 0:
+                os.makedirs(cfg_dir, exist_ok=True)
+                with open(cfg_file, 'w') as f:
+                    f.write(str(secs))
+            elif os.path.exists(cfg_file):
+                os.remove(cfg_file)
+        except Exception:
+            pass  # kalıcılık hatası ayarın kendisini düşürmez
+        env = os.environ.copy()
+        if 'DISPLAY' not in env:
+            env['DISPLAY'] = ':0'
+        cmd_args = ['xset', '-dpms'] if secs == 0 else \
+                   ['xset', '+dpms', 'dpms', str(secs), str(secs), str(secs)]
+        try:
+            p = subprocess.run(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, env=env, timeout=10)
+        except Exception as e:
+            raise Exception(f'DPMS ayarı uygulanamadı: {e}')
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'DPMS ayarı uygulanamadı')
+        if secs == 0:
+            return 'Ekran uyku (DPMS) kapatıldı'
+        return f'Ekran uyku zaman aşımı ayarlandı: {secs} sn'
 
     elif cmd == 'get_display_modes':
         # Çıktı listelemeyen sunucularda (Xvfb vb.) boş döner; arayüz sabit
