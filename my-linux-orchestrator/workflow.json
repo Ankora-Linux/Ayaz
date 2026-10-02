@@ -1,0 +1,103 @@
+{
+  "name": "linux-orchestrator",
+  "version": "1.0",
+  "entry": "chef",
+  "description": "Şefin karar bağladığı iş akış şeması. Düğümler skill klasör adlarıdır (skills/<skill>).",
+  "notes": [
+    "when kosulu saglanmayan dugum atlanir; atlanan dugum bagimliliklar icin OK sayilir.",
+    "validate alanlari AGENTS.md zorunlulugu: eklenen her betik/komut bash -n veya node --check ile gecer.",
+    "on_fail degerleri: stop | retry_from:<dugum> | ask_user"
+  ],
+  "defaults": {
+    "on_fail": "stop",
+    "validate": ["bash -n", "node --check"]
+  },
+  "nodes": [
+    {
+      "id": "plan",
+      "skill": "chef",
+      "depends_on": [],
+      "purpose": "niyet siniflandirma + aktif dugum listesi"
+    },
+    {
+      "id": "deps",
+      "skill": "dependency_resolver",
+      "depends_on": ["plan"],
+      "when": "intent in [derleme, paketleme, kernel, test]",
+      "purpose": "eksik kutuphane/paket tespiti (glibc, openssl, dtc, ...)"
+    },
+    {
+      "id": "codegen",
+      "skill": "compiler_configurator",
+      "depends_on": ["deps"],
+      "when": "intent == derleme",
+      "purpose": "Makefile / CMakeLists / Yocto recipe uretimi ve derleme"
+    },
+    {
+      "id": "kernel_patch",
+      "skill": "kernel_patch_generator",
+      "depends_on": ["deps"],
+      "when": "intent == kernel && artifact == patch",
+      "purpose": "Kconfig + Makefile uyumlu C yamasi"
+    },
+    {
+      "id": "device_tree",
+      "skill": "device_tree_architect",
+      "depends_on": ["deps"],
+      "when": "intent == kernel && artifact == dts",
+      "purpose": ".dts/.dtsi uretimi ve dtc derlemesi"
+    },
+    {
+      "id": "static_analysis",
+      "skill": "code_hardener",
+      "depends_on": ["codegen", "kernel_patch", "device_tree"],
+      "when": "intent in [derleme, guvenlik, kernel]",
+      "purpose": "gcc -fanalyzer / cppcheck / ASan; bulgu = HATA",
+      "on_fail": "retry_from:codegen"
+    },
+    {
+      "id": "policy",
+      "skill": "policy_writer",
+      "depends_on": ["static_analysis"],
+      "when": "intent == guvenlik && artifact == policy",
+      "purpose": "AppArmor / SELinux erisim profili"
+    },
+    {
+      "id": "package",
+      "skill": "package_manifester",
+      "depends_on": ["static_analysis"],
+      "when": "intent in [paketleme, derleme]",
+      "purpose": "deb control/rules veya rpm spec uretimi"
+    },
+    {
+      "id": "service",
+      "skill": "init_script_designer",
+      "depends_on": ["package"],
+      "when": "artifact == service",
+      "purpose": "acilis servisi (Ankora: SysVinit oncelikli; systemd/OpenRC opsiyonel)"
+    },
+    {
+      "id": "boot_test",
+      "skill": "qemu_automator",
+      "depends_on": ["package", "service"],
+      "when": "artifact in [iso, deb, kernel]",
+      "purpose": "uretilen imaji QEMU/KVM ile baslat, seri port logu yakala",
+      "on_fail": "retry_from:log_triage"
+    },
+    {
+      "id": "log_triage",
+      "skill": "log_analyst",
+      "depends_on": ["boot_test"],
+      "when": "boot_test.result == fail",
+      "purpose": "dmesg/serial/kernel panic okuma, satir bazli kok neden raporu",
+      "on_fail": "retry_from:codegen"
+    },
+    {
+      "id": "accept",
+      "skill": "chef",
+      "depends_on": ["boot_test"],
+      "when": "boot_test.result == ok",
+      "purpose": "tum zorunlu dugumler OK ise teslim/imzalama onayi"
+    }
+  ]
+}
