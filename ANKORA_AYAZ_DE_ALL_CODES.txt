@@ -3,8 +3,8 @@
        DE: Ayaz masaüstü ortamı (Tauri + WebKitGTK + Vanilla CSS/JS)
        Dağıtım: Ankora Linux (Calamares kurulumcu, snapshot, araçlar)
        Taban: Devuan GNU/Linux 5 (Daedalus) SysVinit 3.06 Core (systemd-free)
-       Tarih: 2026-10-02 16:38:39
-       Git: DE=5fff0f3 (origin/main) | Dağıtım=ankora-org/main@f550382
+       Tarih: 2026-10-02 18:45:13
+       Git: DE=d6f19d0 (origin/main) | Dağıtım=ankora-org/main@f550382
        Bölümler: 1) DE + ISO derleme — bu depo, 47 dosya
                  2) Dağıtım — ankora-org deposu, 17 dosya
 ================================================================================
@@ -15,7 +15,7 @@
 
 ################################################################################
 # DOSYA: src\index.html
-# SATIR SAYISI: 2520 | BOYUT: 155377 bayt
+# SATIR SAYISI: 2569 | BOYUT: 158589 bayt
 ################################################################################
 <!DOCTYPE html>
 <html lang="tr">
@@ -680,12 +680,21 @@
             <!-- Köprü içeriği uygulama kökeninden izole edilir: allow-same-origin
                  olmadan çerçevedeki sayfa üst belgeye (ve yerel depoya) erişemez. -->
             <iframe id="browser-iframe" class="browser-iframe" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer"></iframe>
+            <!-- Köprü yanıt verene kadar boş beyaz alan yerine yükleniyor
+                 ekranı gösterilir; süre dolarsa hata kartına düşülür. -->
+            <div class="browser-load-mask" id="browser-load-mask" style="display: none;" aria-hidden="true">
+              <div class="load-mask-spinner"></div>
+              <p id="browser-load-mask-text">Sayfa yükleniyor…</p>
+            </div>
             <div id="browser-fallback-card" class="browser-fallback-card" style="display: none;">
               <div class="fallback-hero">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:36px;height:36px;"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
                 <h3 id="browser-fallback-title">Ankora Ağ Tarayıcısı</h3>
                 <p id="browser-fallback-desc">Hafif ve güvenli yerleşik WebKit görüntüleyicisi aktif.</p>
-                <button class="btn-pkg" id="btn-browser-refresh">Yeniden Yükle</button>
+                <div class="fallback-actions">
+                  <button class="btn-pkg" id="btn-browser-refresh">Yeniden Yükle</button>
+                  <button class="btn-pkg" id="btn-browser-fallback-external" style="background:#334155; color:#e2e8f0; border-color:#475569;">Dış Tarayıcıda Aç</button>
+                </div>
               </div>
             </div>
           </div>
@@ -951,6 +960,17 @@
                 </div>
               </div>
 
+              <!-- İkon Seti (Başlat Menüsü, Masaüstü ve Pencere simgeleri) -->
+              <div class="settings-card-group">
+                <span class="card-group-title">İkon Seti</span>
+                <div class="option-pill-group" id="group-iconset">
+                  <button class="option-pill-btn active" data-iconset="monokrom">Monokrom</button>
+                  <button class="option-pill-btn" data-iconset="faerie">Faerie Wren (Renkli)</button>
+                  <button class="option-pill-btn" data-iconset="outline">Çizgisel</button>
+                </div>
+                <p class="card-group-hint">Seçim Başlat menüsündeki ve masaüstündeki tüm uygulama simgelerine uygulanır.</p>
+              </div>
+
               <!-- Duvar Kağıdı Seçimi -->
               <div class="settings-card-group">
                 <span class="card-group-title">Duvar Kağıdı (8 Vektörel Arka Plan)</span>
@@ -1073,8 +1093,33 @@
                     <option value="1920x1080" selected>1920 x 1080 (16:9 Full HD - Önerilen)</option>
                     <option value="2560x1440">2560 x 1440 (16:9 2K QHD)</option>
                     <option value="3840x2160">3840 x 2160 (16:9 4K UHD)</option>
+                    <option value="1600x900">1600 x 900 (16:9 HD+)</option>
+                    <option value="1440x900">1440 x 900 (16:10 WXGA+)</option>
                     <option value="1366x768">1366 x 768 (16:9 WXGA)</option>
+                    <option value="1280x1024">1280 x 1024 (5:4 SXGA)</option>
+                    <option value="1280x800">1280 x 800 (16:10 WXGA)</option>
+                    <option value="1280x720">1280 x 720 (16:9 HD)</option>
+                    <option value="1024x768">1024 x 768 (4:3 XGA)</option>
+                    <option value="800x600">800 x 600 (4:3 SVGA)</option>
                   </select>
+                </div>
+              </div>
+
+              <div class="setting-row-item">
+                <div class="row-desc">
+                  <strong>Önerilen (Native) Çözünürlük</strong>
+                  <span>Panelin fabrika önerisi — kurulu sistemde bulanıklığı bu çözer</span>
+                </div>
+                <div class="row-control">
+                  <button type="button" class="btn-pill" id="btn-preferred-mode">Önerilene Dön</button>
+                </div>
+              </div>
+
+              <div class="display-revert-bar" id="display-revert-bar" style="display: none;" role="status">
+                <span id="display-revert-label">Ekran modu uygulandı.</span>
+                <div class="display-revert-actions">
+                  <button type="button" class="btn-pill" id="btn-display-keep">Bu Ayarı Koru</button>
+                  <button type="button" class="btn-pill btn-pill-ghost" id="btn-display-revert">Geri Al</button>
                 </div>
               </div>
 
@@ -1086,8 +1131,10 @@
                 <div class="row-control">
                   <select id="ctrl-refresh-rate" class="select-mono">
                     <option value="60">60 Hz (Standart)</option>
+                    <option value="75">75 Hz</option>
                     <option value="120">120 Hz (Akıcı)</option>
                     <option value="144">144 Hz (Yüksek Hız)</option>
+                    <option value="165">165 Hz (Oyuncu)</option>
                   </select>
                 </div>
               </div>
@@ -1102,6 +1149,8 @@
                     <option value="100" selected>%100 (Varsayılan)</option>
                     <option value="125">%125 (Büyütülmüş)</option>
                     <option value="150">%150 (Yüksek DPI)</option>
+                    <option value="175">%175 (Çok Yüksek DPI)</option>
+                    <option value="200">%200 (2x Büyük)</option>
                   </select>
                 </div>
               </div>
@@ -2540,7 +2589,7 @@
 
 ################################################################################
 # DOSYA: src\style.css
-# SATIR SAYISI: 7403 | BOYUT: 157961 bayt
+# SATIR SAYISI: 7555 | BOYUT: 163688 bayt
 ################################################################################
 /* ==============================================================================
    ANKORA LINUX - ULTRA-MINIMALIST MONOCHROME TAURI DESKTOP ENVIRONMENT
@@ -8662,6 +8711,41 @@ body.theme-light .snap-zone:hover {
   z-index: 5;
 }
 
+.browser-load-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg-deep, #181a24);
+  color: var(--text-secondary, #9aa3b2);
+  font-size: 13px;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.load-mask-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(120, 140, 170, 0.25);
+  border-top-color: #38bdf8;
+  animation: ayazLoadMaskSpin 0.9s linear infinite;
+}
+
+@keyframes ayazLoadMaskSpin {
+  to { transform: rotate(360deg); }
+}
+
+.fallback-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
 .fallback-hero {
   display: flex;
   flex-direction: column;
@@ -9946,9 +10030,126 @@ body .pinned-icon-box.installer-accent {
 
 
 
+/* ==========================================================================
+   İKON SETİ KATMANI (Ayarlar > Görünüm > İkon Seti)
+   html[data-iconset] seçilir; monokrom varsayılan olduğu için bu bloklar
+   yalnız faerie/outline iken devreye girer. Inline stil !important ile ezilir.
+   ========================================================================== */
+
+/* --- Faerie Wren: renkli, yumuşak gradyan ikon kareleri --- */
+html[data-iconset='faerie'] .pinned-icon-box {
+  background: linear-gradient(135deg, #60a5fa, #818cf8) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+}
+html[data-iconset='faerie'] .pinned-icon-box.store-accent { background: linear-gradient(135deg, #fbbf24, #f97316) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.terminal-accent { background: linear-gradient(135deg, #34d399, #059669) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.browser-accent { background: linear-gradient(135deg, #38bdf8, #0284c7) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.ai-accent { background: linear-gradient(135deg, #a78bfa, #7c3aed) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.settings-accent { background: linear-gradient(135deg, #94a3b8, #475569) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.office-accent { background: linear-gradient(135deg, #fb7185, #e11d48) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.welcome-accent { background: linear-gradient(135deg, #22d3ee, #0891b2) !important; }
+html[data-iconset='faerie'] .pinned-icon-box.installer-accent { background: linear-gradient(135deg, #818cf8, #4f46e5) !important; }
+html[data-iconset='faerie'] .pinned-icon-box svg { stroke: #ffffff !important; }
+
+html[data-iconset='faerie'] .desktop-item .item-icon,
+html[data-iconset='faerie'] .ayaz-desktop-shortcut .item-icon {
+  background: linear-gradient(135deg, #60a5fa, #818cf8) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.25) !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.35) !important;
+}
+html[data-iconset='faerie'] .item-icon svg { stroke: #ffffff !important; }
+
+/* Kategoriye göre gradyan (nokta paletiyle aynı aile) */
+html[data-iconset='faerie'] .cat-dev .item-icon { background: linear-gradient(135deg, #38bdf8, #0284c7) !important; }
+html[data-iconset='faerie'] .cat-media .item-icon { background: linear-gradient(135deg, #c084fc, #7c3aed) !important; }
+html[data-iconset='faerie'] .cat-net .item-icon { background: linear-gradient(135deg, #34d399, #059669) !important; }
+html[data-iconset='faerie'] .cat-office .item-icon { background: linear-gradient(135deg, #fbbf24, #d97706) !important; }
+html[data-iconset='faerie'] .cat-sys .item-icon { background: linear-gradient(135deg, #60a5fa, #2563eb) !important; }
+html[data-iconset='faerie'] .cat-util .item-icon { background: linear-gradient(135deg, #fb7185, #e11d48) !important; }
+
+/* --- Çizgisel (outline): şeffaf zemin, renkli ince çerçeve --- */
+html[data-iconset='outline'] .pinned-icon-box {
+  background: transparent !important;
+  border: 1.5px solid currentColor !important;
+}
+html[data-iconset='outline'] .pinned-app-card:hover .pinned-icon-box {
+  background: rgba(127, 127, 127, 0.12) !important;
+}
+html[data-iconset='outline'] .desktop-item .item-icon,
+html[data-iconset='outline'] .ayaz-desktop-shortcut .item-icon {
+  background: transparent !important;
+  border: 1.5px solid currentColor !important;
+  box-shadow: none !important;
+}
+html[data-iconset='outline'] .desktop-item:hover .item-icon,
+html[data-iconset='outline'] .ayaz-desktop-shortcut:hover .item-icon {
+  background: rgba(127, 127, 127, 0.12) !important;
+}
+
+/* ==========================================================================
+   AYARLAR: pill butonlar, ipucu metni, ekran onay çubuğu
+   ========================================================================== */
+
+.card-group-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.btn-pill {
+  padding: 7px 14px;
+  border: 1px solid var(--border-medium);
+  border-radius: 999px;
+  background: rgba(127, 127, 127, 0.14);
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-pill:hover {
+  border-color: var(--border-focus);
+  background: rgba(127, 127, 127, 0.22);
+}
+
+.btn-pill:active {
+  transform: translateY(1px);
+}
+
+.btn-pill-ghost {
+  background: transparent;
+}
+
+.btn-pill-ghost:hover {
+  background: rgba(127, 127, 127, 0.16);
+}
+
+.display-revert-bar {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--border-focus);
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.08);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.display-revert-actions {
+  display: flex;
+  gap: 8px;
+}
+
 ################################################################################
 # DOSYA: src\app.js
-# SATIR SAYISI: 6774 | BOYUT: 293266 bayt
+# SATIR SAYISI: 6982 | BOYUT: 303217 bayt
 ################################################################################
 (() => {
   'use strict';
@@ -11327,6 +11528,10 @@ body .pinned-icon-box.installer-accent {
       { id: 'git', name: 'Git Kaynak Kod Sürüm Kontrolü', deb: 'git', desc: 'Yazılım geliştiriciler için endüstri standardı kod versiyon kontrol sistemi', cat: 'dev', size: '36 MB', installed: false },
       { id: 'python3', name: 'Python 3 Programlama Dili', deb: 'python3', desc: 'Modern yapay zeka, veri analitiği ve otomasyon dili', cat: 'dev', size: '16 MB', installed: false },
       { id: 'p7zip-full', name: '7-Zip Yüksek Sıkıştırmalı Arşivleyici', deb: 'p7zip-full', desc: 'ZIP, 7z, TAR ve RAR arşivlerini açma ve sıkıştırma aracı', cat: 'util', size: '5 MB', installed: false },
+      { id: 'brave', name: 'Brave Hızlı & Gizli Tarayıcı', deb: 'brave-browser', vendor: 'brave', desc: 'Reklam ve izleyici engelleyicisi yerleşik; resmî deposundan kurulur', cat: 'net', size: '150 MB', installed: false },
+      { id: 'helium', name: 'Helium Hafif Web Tarayıcı', deb: 'helium-bin', vendor: 'helium', desc: 'ungoogle-chromium temelli, gizlilik odaklı hafif masaüstü tarayıcısı', cat: 'net', size: '130 MB', installed: false },
+      { id: 'antigravity', name: 'Antigravity Yapay Zekâ IDE', deb: 'antigravity', vendor: 'antigravity', desc: 'Google’ın ajan öncesi dönem için tasarladığı ajan destekli kod editörü', cat: 'dev', size: '420 MB', installed: false },
+      { id: 'opencode-desktop', name: 'OpenCode Masaüstü (AI Kod Ajanı)', deb: '', extUrl: 'https://opencode.ai', desc: 'Terminal, masaüstü ve IDE eklentisi olarak çalışan açık kaynak yapay zekâ kod ajanı', cat: 'dev', size: 'Site', installed: false },
 
 
       // 2. ORTAM & MEDYA (MEDIA)
@@ -11411,6 +11616,8 @@ body .pinned-icon-box.installer-accent {
       { id: 'memtest86+', name: 'Memtest86+ RAM Test Aracı', deb: 'memtest86+', desc: 'Bellek donanımında kararsızlık ve hücre bozulmalarını tarama', cat: 'sys', size: '2 MB', installed: false },
       { id: 'sysstat', name: 'Sysstat Sistem İstatistikleri (sar/iostat)', deb: 'sysstat', desc: 'İşletim sistemi performans sayaçları ve geçmiş kullanım loglayıcı', cat: 'sys', size: '5 MB', installed: false },
       { id: 'glances', name: 'Glances Kapsamlı Sistem Gözlemcisi', deb: 'glances', desc: 'Web tabanlı veya konsolda çalışan istemci-sunucu sistem monitörü', cat: 'sys', size: '14 MB', installed: false },
+      { id: 'flatpak', name: 'Flatpak Uygulama Mağazası', deb: 'flatpak', desc: 'Sandbox içinde çalışan evrensel Linux uygulama mağazası altyapısı', cat: 'sys', size: '26 MB', installed: false },
+      { id: 'synaptic', name: 'Synaptic Grafik Paket Yöneticisi', deb: 'synaptic', desc: 'Depo paketlerini gruplar hâlinde arayıp kurup kaldırabileceğiniz klasik arayüz', cat: 'sys', size: '12 MB', installed: false },
 
       // 7. ARAÇLAR & YARDIMCILAR (UTIL)
       { id: 'tmux', name: 'Tmux Terminal Çoklayıcı', deb: 'tmux', desc: 'Tek terminal penceresinde bölünmüş paneller ve kalıcı arka plan oturumları', cat: 'util', size: '4 MB', installed: false },
@@ -11513,7 +11720,9 @@ body .pinned-icon-box.installer-accent {
           <td><span class="pkg-desc">${escapeHtml(pkg.desc)}</span></td>
           <td><span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11px;">${escapeHtml(pkg.size)}</span></td>
           <td style="text-align: right;">
-            ${pkg.installed ? `
+            ${pkg.extUrl ? `
+              <button class="btn-pkg btn-pkg-site" id="btn-site-${pkg.id}" style="background: #334155; color: #e2e8f0; border-color: #475569;">Resmî Site</button>
+            ` : pkg.installed ? `
               <div style="display: inline-flex; gap: 6px; justify-content: flex-end;">
                 <button class="btn-pkg btn-pkg-open" id="btn-open-${pkg.id}" style="background: #2563eb; color: #fff; border-color: #3b82f6;">Aç</button>
                 <button class="btn-pkg installed" id="btn-pkg-${pkg.id}">Kaldır</button>
@@ -11524,9 +11733,22 @@ body .pinned-icon-box.installer-accent {
           </td>
         `;
 
-        const btn = tr.querySelector('.btn-pkg:not(.btn-pkg-open)');
+        const btn = tr.querySelector('.btn-pkg:not(.btn-pkg-open):not(.btn-pkg-site)');
         if (btn) {
           btn.addEventListener('click', () => this.togglePackage(pkg, tr));
+        }
+
+        const btnSite = tr.querySelector('.btn-pkg-site');
+        if (btnSite) {
+          btnSite.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              await TauriBridge.invoke('open_url', { url: pkg.extUrl });
+              Terminal.log(`[AĞ] ${pkg.name} resmî sitesi açılıyor: ${pkg.extUrl}`, 'cmd');
+            } catch (err) {
+              Terminal.log(`[ERR] Resmî site açılamadı: ${err}`, 'error');
+            }
+          });
         }
 
         const btnOpen = tr.querySelector('.btn-pkg-open');
@@ -11599,7 +11821,9 @@ body .pinned-icon-box.installer-accent {
         btn.disabled = true;
         btn.textContent = 'İndiriliyor...';
       }
-      Terminal.log(`[APT] sudo apt-get install -y -- ${pkg.deb} yürütülüyor...`, 'cmd');
+      Terminal.log(pkg.vendor
+        ? `[DEPO] ${pkg.vendor} resmî deposu hazırlanıp '${pkg.deb}' kuruluyor...`
+        : `[APT] sudo apt-get install -y -- ${pkg.deb} yürütülüyor...`, 'cmd');
 
       let val = 0;
       const interval = setInterval(() => {
@@ -11609,7 +11833,11 @@ body .pinned-icon-box.installer-accent {
       }, 100);
 
       try {
-        const xdgApp = await TauriBridge.invoke('install_deb_package', { packageName: pkg.deb });
+        // vendor girdileri (Brave/Helium/Antigravity) root-owned
+        // ayaz-pkg-helper'ın vendor eylemiyle; diğerleri normal apt akışıyla kurulur.
+        const xdgApp = pkg.vendor
+          ? await TauriBridge.invoke('install_vendor_package', { vendor: pkg.vendor })
+          : await TauriBridge.invoke('install_deb_package', { packageName: pkg.deb });
         this.syncInstalledState(pkg.id, true);
         if (prog) prog.style.width = '0%';
 
@@ -13118,6 +13346,7 @@ body .pinned-icon-box.installer-accent {
       const savedAlign = SafeStorage.getItem('ankora_taskbar_align') || 'center';
       const savedHeight = SafeStorage.getItem('ankora_taskbar_height') || '44px';
       const savedAnim = SafeStorage.getItem('ankora_anim_speed') || 'smooth';
+      const savedIconSet = SafeStorage.getItem('ankora_icon_set') || 'monokrom';
 
       this.setTheme(savedTheme, false);
       this.setAccent(savedAccent, false);
@@ -13127,6 +13356,7 @@ body .pinned-icon-box.installer-accent {
       this.setTaskbarAlign(savedAlign, false);
       this.setTaskbarHeight(savedHeight, false);
       this.setAnimSpeed(savedAnim, false);
+      this.setIconSet(savedIconSet, false);
 
       // Tema Kartı, Vurgu Butonu ve Kişiselleştirme Seçimleri
       document.addEventListener('click', (e) => {
@@ -13182,6 +13412,13 @@ body .pinned-icon-box.installer-accent {
         if (animBtn) {
           const s = animBtn.getAttribute('data-anim');
           if (s) this.setAnimSpeed(s);
+        }
+
+        // İkon Seti (Başlat menüsü / masaüstü / görev çubuğu simgeleri)
+        const iconsetBtn = e.target.closest('#group-iconset .option-pill-btn');
+        if (iconsetBtn) {
+          const s = iconsetBtn.getAttribute('data-iconset');
+          if (s) this.setIconSet(s);
         }
       });
     },
@@ -13315,6 +13552,20 @@ body .pinned-icon-box.installer-accent {
         SafeStorage.setItem('ankora_anim_speed', animMode);
         Terminal.log(`[KİŞİSELLEŞTİRME] Arayüz animasyon hızı: ${animMode}`, 'cmd');
       }
+    },
+
+    setIconSet(setName, persist = true) {
+      this.currentIconSet = setName;
+      document.documentElement.setAttribute('data-iconset', setName);
+
+      document.querySelectorAll('#group-iconset .option-pill-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-iconset') === setName);
+      });
+
+      if (persist) {
+        SafeStorage.setItem('ankora_icon_set', setName);
+        Terminal.log(`[İKON SETİ] Uygulama simgeleri setine geçildi: ${setName}`, 'cmd');
+      }
     }
   };
 
@@ -13333,8 +13584,30 @@ body .pinned-icon-box.installer-accent {
       try {
         info = await TauriBridge.invoke('get_display_modes');
       } catch (e) {
-        return;
+        info = null;
       }
+
+      // Önerilen (native) çözünürlüğe dönüş — kurulu sistemde bulanık görünen
+      // ekranı bu düğme kurtarır. Dinamik mod listesi yoksa da bağlanır.
+      const btnPreferred = document.getElementById('btn-preferred-mode');
+      if (btnPreferred) {
+        btnPreferred.onclick = async () => {
+          if (!info || !info.preferred_mode) {
+            ReportManager.showToast('Ekranın önerilen çözünürlüğü bulunamadı.');
+            return;
+          }
+          try {
+            const res = await TauriBridge.invoke('set_display_mode', {
+              mode: 'preferred', rate: '', output: info.output
+            });
+            const after = (res && typeof res === 'object') ? Number(res.revert_after) || 0 : 0;
+            this.startRevertCountdown(after);
+          } catch (e) {
+            ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
+          }
+        };
+      }
+
       if (!info || !Array.isArray(info.modes) || info.modes.length === 0) return;
 
       const fillRates = (modeObj) => {
@@ -13354,7 +13627,10 @@ body .pinned-icon-box.installer-accent {
       info.modes.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.mode;
-        opt.textContent = `${m.mode.replace('x', ' x ')}${m.current ? ' (aktif)' : ''}`;
+        const tags = [];
+        if (m.current) tags.push('aktif');
+        if (m.preferred || m.mode === info.preferred_mode) tags.push('önerilen');
+        opt.textContent = `${m.mode.replace('x', ' x ')}${tags.length ? ` (${tags.join(', ')})` : ''}`;
         if (m.mode === info.current_mode) opt.selected = true;
         selMode.appendChild(opt);
         if (m.current) fillRates(m);
@@ -13362,9 +13638,13 @@ body .pinned-icon-box.installer-accent {
 
       const apply = async (rate) => {
         try {
-          await TauriBridge.invoke('set_display_mode', {
+          const res = await TauriBridge.invoke('set_display_mode', {
             mode: selMode.value, rate, output: info.output
           });
+          // Sunucu onay süresi döndürürse geri alma çubuğu açılır; süre
+          // dolarsa sistem eski moda kendisi döner.
+          const after = (res && typeof res === 'object') ? Number(res.revert_after) || 0 : 0;
+          this.startRevertCountdown(after);
         } catch (e) {
           ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
         }
@@ -13390,7 +13670,81 @@ body .pinned-icon-box.installer-accent {
       }
     },
 
+    // --- Çözünürlük onay / geri alma akışı (ekran boş kalmasın diye) ---
+    revertTimer: null,
+
+    startRevertCountdown(sec) {
+      const bar = document.getElementById('display-revert-bar');
+      const label = document.getElementById('display-revert-label');
+      if (!bar) return;
+      if (this.revertTimer) {
+        clearInterval(this.revertTimer);
+        this.revertTimer = null;
+      }
+      if (!sec) {
+        bar.style.display = 'none';
+        return;
+      }
+      let left = sec;
+      const tick = () => {
+        if (label) {
+          label.textContent = `Ekran modu uygulandı — ${left} saniye içinde onaylanmazsa eski haline dönecek.`;
+        }
+      };
+      tick();
+      bar.style.display = 'flex';
+      this.revertTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(this.revertTimer);
+          this.revertTimer = null;
+          bar.style.display = 'none';
+          ReportManager.showToast('Ekran modu onaylanmadı; önceki çözünürlüğe geri dönüldü.');
+          this.loadDisplayModes();
+          return;
+        }
+        tick();
+      }, 1000);
+    },
+
+    async confirmDisplayMode() {
+      if (this.revertTimer) {
+        clearInterval(this.revertTimer);
+        this.revertTimer = null;
+      }
+      const bar = document.getElementById('display-revert-bar');
+      if (bar) bar.style.display = 'none';
+      try {
+        await TauriBridge.invoke('confirm_display_mode');
+        ReportManager.showToast('Ekran ayarı kalıcı olarak kaydedildi.');
+      } catch (e) {
+        ReportManager.showToast(`Onay gönderilemedi: ${e.message || e}`);
+      }
+    },
+
+    async revertDisplayModeNow() {
+      if (this.revertTimer) {
+        clearInterval(this.revertTimer);
+        this.revertTimer = null;
+      }
+      try {
+        await TauriBridge.invoke('revert_display_mode');
+        const bar = document.getElementById('display-revert-bar');
+        if (bar) bar.style.display = 'none';
+        ReportManager.showToast('Önceki ekran çözünürlüğüne dönüldü.');
+        this.loadDisplayModes();
+      } catch (e) {
+        ReportManager.showToast(`Geri alınamadı: ${e.message || e}`);
+      }
+    },
+
     async init() {
+      // Çözünürlük onay çubuğu düğmeleri (kepçe: tek bağlama, tekrarsız)
+      const btnKeep = document.getElementById('btn-display-keep');
+      if (btnKeep) btnKeep.addEventListener('click', () => this.confirmDisplayMode());
+      const btnRevert = document.getElementById('btn-display-revert');
+      if (btnRevert) btnRevert.addEventListener('click', () => this.revertDisplayModeNow());
+
       // 1. Sol Navigasyon Sekme Değişimi
       const navItems = document.querySelectorAll('.settings-nav-item');
       const panes = document.querySelectorAll('.settings-pane');
@@ -15142,18 +15496,25 @@ body .pinned-icon-box.installer-accent {
     historyIndex: 0,
     loadingBar: null,
     fallbackCard: null,
+    loadMask: null,
+    watchdog: null,
+    timedOut: false,
 
     init() {
       this.iframe = document.getElementById('browser-iframe');
       this.urlInput = document.getElementById('browser-url-input');
       this.loadingBar = document.getElementById('browser-loading-bar');
       this.fallbackCard = document.getElementById('browser-fallback-card');
+      this.loadMask = document.getElementById('browser-load-mask');
       // Sayfa doğrudan siteye açılsaydı X-Frame-Options çerçeveyi kapatır;
       // ilk yükleme de köprü üzerinden yapılır.
       // Host, köprü dışına çıkan geçişleri iptal edip hedefi buraya bildirir;
       // böylece bağlantı, form ve JavaScript geçişleri tek yoldan ilerler.
       window.__ayazProxyNav = (uri) => { if (uri) this.navigate(uri); };
-      if (this.iframe) this.iframe.src = this.toProxy(this.history[this.historyIndex]);
+      if (this.iframe) {
+        this.startLoading();
+        this.iframe.src = this.toProxy(this.history[this.historyIndex]);
+      }
 
       const btnGo = document.getElementById('btn-browser-go');
       const btnBack = document.getElementById('btn-browser-back');
@@ -15221,6 +15582,11 @@ body .pinned-icon-box.installer-accent {
           .catch(() => {});
       }
 
+      const btnFallbackExternal = document.getElementById('btn-browser-fallback-external');
+      if (btnFallbackExternal) {
+        btnFallbackExternal.addEventListener('click', () => this.openExternal());
+      }
+
       // Bookmark Chips
       const chips = document.querySelectorAll('.bookmark-chip[data-url]');
       chips.forEach(chip => {
@@ -15235,6 +15601,12 @@ body .pinned-icon-box.installer-accent {
       // Iframe Load Event
       if (this.iframe) {
         this.iframe.addEventListener('load', () => {
+          // Sayaç dolmuş ama sayfa sonunda yine gelmişse: hata kartı
+          // içeriğin üstünde kalmasın.
+          if (this.timedOut && this.fallbackCard) {
+            this.timedOut = false;
+            this.fallbackCard.style.display = 'none';
+          }
           this.finishLoading();
         });
       }
@@ -15320,10 +15692,12 @@ body .pinned-icon-box.installer-accent {
 
     reload() {
       if (this.iframe) {
-        this.startLoading();
         const cur = this.iframe.src;
         this.iframe.src = '';
+        // about:blank yüklemesi load olayını erken tetikler; sayaç ve maske
+        // gerçek hedef yazılırken başlatılır.
         setTimeout(() => {
+          this.startLoading();
           this.iframe.src = cur;
         }, 50);
       }
@@ -15339,9 +15713,44 @@ body .pinned-icon-box.installer-accent {
           }
         }, 300);
       }
+      // Yükleniyor maske: köprü yanıt verene kadar kullanıcı boş beyaz
+      // alan görmez.
+      if (this.loadMask) {
+        const txt = document.getElementById('browser-load-mask-text');
+        if (txt) txt.textContent = 'Sayfa yükleniyor…';
+        this.loadMask.style.display = 'flex';
+      }
+      // Bekleme sayacı: köprü/sunucu yanıt vermezse süre sonunda hata
+      // kartına düşülür, ekran boş beyaz kalmaz.
+      if (this.watchdog) clearTimeout(this.watchdog);
+      this.watchdog = setTimeout(() => this.onLoadTimeout(), 25000);
+    },
+
+    onLoadTimeout() {
+      if (this.watchdog) {
+        clearTimeout(this.watchdog);
+        this.watchdog = null;
+      }
+      if (this.loadMask) this.loadMask.style.display = 'none';
+      this.finishLoading();
+      if (this.fallbackCard) {
+        const title = document.getElementById('browser-fallback-title');
+        const desc = document.getElementById('browser-fallback-desc');
+        if (title) title.textContent = 'Sayfa yüklenemedi';
+        if (desc) {
+          desc.textContent = 'Köprü yanıt vermedi; ağ bağlantısı yavaş veya kopuk olabilir. Yeniden deneyebilir ya da sayfayı sistem tarayıcısında açabilirsiniz.';
+        }
+        this.timedOut = true;
+        this.fallbackCard.style.display = 'flex';
+      }
     },
 
     finishLoading() {
+      if (this.watchdog) {
+        clearTimeout(this.watchdog);
+        this.watchdog = null;
+      }
+      if (this.loadMask) this.loadMask.style.display = 'none';
       if (this.loadingBar) {
         this.loadingBar.style.width = '100%';
         setTimeout(() => {
@@ -17073,7 +17482,7 @@ body .pinned-icon-box.installer-accent {
 </svg>
 ################################################################################
 # DOSYA: src-tauri\src\main.rs
-# SATIR SAYISI: 3464 | BOYUT: 135548 bayt
+# SATIR SAYISI: 3550 | BOYUT: 139507 bayt
 ################################################################################
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -18046,6 +18455,56 @@ fn install_deb_package_blocking(package_name: String) -> Result<XdgApplication, 
             desktop_file: format!("/usr/share/applications/{}.desktop", clean_pkg),
             is_installed_by_user: true,
         })
+    }
+}
+
+// ============================================================================
+// 3b. VENDOR KURULUMU (üçüncü parti resmi depolar: Brave / Helium / Antigravity)
+// Ad eşlemesi KODDA sabittir; arayüz yalnızca bu adları gönderebilir.
+// Adres, anahtar ve komut bilgisi root-owned ayaz-pkg-helper betiğinin
+// içindedir — arayüzden URL veya komut kabul edilmez.
+// ============================================================================
+#[tauri::command]
+async fn install_vendor_package(vendor: String) -> Result<XdgApplication, String> {
+    tauri::async_runtime::spawn_blocking(move || install_vendor_package_blocking(vendor))
+        .await
+        .map_err(|e| format!("Vendor kurulumu yürütülemedi: {}", e))?
+}
+
+fn install_vendor_package_blocking(vendor: String) -> Result<XdgApplication, String> {
+    let (v, pkg) = match vendor.trim() {
+        "brave" => ("brave", "brave-browser"),
+        "helium" => ("helium", "helium-bin"),
+        "antigravity" => ("antigravity", "antigravity"),
+        _ => return Err("Bilinmeyen uygulama kaynağı.".to_string()),
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        let helper = Path::new("/usr/local/bin/ayaz-pkg-helper");
+        if !helper.exists() {
+            return Err(
+                "Güvenlik İlkesi: vendor kurulumu yalnızca ayaz-pkg-helper üzerinden yapılabilir."
+                    .to_string(),
+            );
+        }
+        let res = match root_command("/usr/local/bin/ayaz-pkg-helper", &["vendor", v]) {
+            Ok(o) => o,
+            Err(e) => return Err(format!("Paket yardımcısı çalıştırılamadı: {}", e)),
+        };
+        if !res.status.success() {
+            let err = String::from_utf8_lossy(&res.stderr);
+            return Err(format!("Vendor kurulumu başarısız: {}", err));
+        }
+        // Depo eklendikten ve paket kurulduktan sonra XDG taraması ile
+        // .desktop yerleşimi normal paket akışının kendisi tarafından yapılır.
+        install_deb_package_blocking(pkg.to_string())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (v, pkg);
+        Err("Bu platformda vendor kurulumu desteklenmez.".to_string())
     }
 }
 
@@ -19793,27 +20252,62 @@ async fn download_and_apply_de_update(
     }
 
     #[cfg(target_os = "linux")]
-    let deb_path = {
-        let staging_dir = PathBuf::from("/var/cache/ayaz-updates");
-        let _ = fs::create_dir_all(&staging_dir);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&staging_dir, fs::Permissions::from_mode(0o700));
-        }
-        staging_dir.join("ayaz-update.deb")
-    };
+    let deb_path = PathBuf::from("/var/cache/ayaz-updates/ayaz-update.deb");
 
     #[cfg(not(target_os = "linux"))]
     let deb_path = std::env::temp_dir().join("ayaz-update.deb");
 
-    fs::write(&deb_path, &bytes)
+    // Paket önce kullanıcının kendi özel geçici dizinine yazılır: normal bir
+    // süreç /var/cache dizinine yazamaz. Root staging devri, helper'ın
+    // --stage moduyla yapılır; paketin KOPYASI root tarafından alınıp özeti
+    // yeniden doğrulanır, sahiplik doğrulaması bu kopya üzerinde geçerlidir.
+    let tmp_dir = std::env::temp_dir().join(format!("ayaz-upd-{}", std::process::id()));
+    fs::create_dir_all(&tmp_dir)
+        .map_err(|e| format!("Geçici güncelleme dizini oluşturulamadı: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp_dir, fs::Permissions::from_mode(0o700));
+    }
+    let tmp_deb = tmp_dir.join("ayaz-update.deb");
+    fs::write(&tmp_deb, &bytes)
         .map_err(|e| format!("Geçici güncelleme dosyası diske kaydedilemedi: {}", e))?;
 
-    // Dosya sahipliğini root:root olarak ayarla (helper güvenlik kontrolü için)
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("chown").args(["root:root", &deb_path.to_string_lossy()]).output();
+        let helper_path = Path::new("/usr/local/bin/ayaz-update-helper");
+        if !helper_path.exists() {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            return Err(
+                "Güvenlik İlkesi İhlali: /usr/local/bin/ayaz-update-helper bulunamadı. \
+                 Paket staging dizinine yalnızca bu yardımcı üzerinden alınabilir."
+                    .to_string(),
+            );
+        }
+        let helper_str = helper_path.to_string_lossy().to_string();
+        let stage_src = tmp_deb.to_string_lossy().to_string();
+        let stage_sha = computed_sha256.to_lowercase();
+        let stage_status = Command::new("sudo")
+            .args([helper_str.as_str(), "--stage", stage_src.as_str(), stage_sha.as_str()])
+            .status();
+        let _ = fs::remove_dir_all(&tmp_dir);
+        match stage_status {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                return Err(format!(
+                    "Güncelleme paketi güvenli staging dizinine alınamadı (Çıkış Kodu: {}).",
+                    status.code().unwrap_or(-1)
+                ));
+            }
+            Err(e) => {
+                return Err(format!("Güvenlik yardımcısı çalıştırılamadı: {}", e));
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = fs::rename(&tmp_deb, &deb_path);
     }
 
     let _ = window.emit("update-progress", UpdateProgressPayload {
@@ -20368,6 +20862,7 @@ fn main() {
             drag_window,
             scan_xdg_applications,
             install_deb_package,
+            install_vendor_package,
             remove_deb_package,
             run_terminal_command,
             read_document_file,
@@ -20725,7 +21220,7 @@ Thumbs.db
 
 ################################################################################
 # DOSYA: scripts\build-iso.sh
-# SATIR SAYISI: 2527 | BOYUT: 107939 bayt
+# SATIR SAYISI: 2675 | BOYUT: 114240 bayt
 ################################################################################
 #!/bin/bash
 # ==============================================================================
@@ -21074,9 +21569,25 @@ xset -dpms 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 
-# Yalnızca çözünürlük çok düşükse (ör. sanal makinenin varsayılanı) düzelt;
-# fiziksel ekranda orijinal çözünürlüğü düşürme, taskbar dahil her şey
-# kendi çözünürlüğünde kalsın.
+# 1) Ekranın önerilen (native) çözünürlüğüne geç: kurulu sistemde düşük
+#    modda kalan ekranın bulanık/sahte görünmesini böyle önlenir.
+# 2) Önerilen okunamazsa ve çözünürlük hâlâ çok düşükse (ör. sanal
+#    makinenin varsayılanı) eski düzeltme uygulanır; fiziksel ekranda
+#    orijinal çözünürlük asla düşürülmez.
+PREF=$(xrandr 2>/dev/null | awk '{
+    for (i = 2; i <= NF; i++) {
+        if (index($i, "+") && $(i - 1) ~ /^[0-9]+x[0-9]+$/) { print $(i - 1); exit }
+    }
+}')
+CURM=$(xrandr 2>/dev/null | awk '{
+    for (i = 2; i <= NF; i++) {
+        if (index($i, "*") && $(i - 1) ~ /^[0-9]+x[0-9]+$/) { print $(i - 1); exit }
+    }
+}')
+if [ -n "$PREF" ] && [ "$PREF" != "$CURM" ]; then
+    xrandr -s "$PREF" 2>/dev/null || true
+fi
+
 CURW=$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}' | cut -dx -f1)
 case "$CURW" in
     ''|640*|720*|800*|854*|960*) xrandr -s 1280x800 2>/dev/null || xrandr -s 1024x768 2>/dev/null || true ;;
@@ -21370,6 +21881,69 @@ def _disk_usage():
     except Exception:
         return None
 
+# --- Ekran modu güvenli değiştirme yardımcıları ---------------------------
+# Çözünürlük değişikliği 15 saniye içinde onaylanmazsa eski moda geri
+# dönülür: kullanıcı yanlış mod seçerse ekran kararmaz/kurulmaz, sistem
+# kendini kurtarır. Onay arayüzden confirm_display_mode ile gelir.
+DISPLAY_REVERT_DELAY = 15
+_display_revert = {'pid': None, 'mode': None, 'rate': None, 'output': None}
+
+
+def _display_current_state():
+    """xrandr --query okuyup {'output','mode','rate'} döndürür; bulunamazsa None."""
+    try:
+        p = subprocess.run(['xrandr', '--query'], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, timeout=10)
+    except Exception:
+        return None
+    out = mode = rate = None
+    for line in p.stdout.splitlines():
+        if out is None:
+            m = re.match(r'^(\S+)\s+connected\b', line)
+            if m:
+                out = m.group(1)
+                sm = re.search(r'(\d+x\d+)\+\d+\+\d+', line)
+                if sm:
+                    mode = sm.group(1)
+        mm = re.match(r'^\s+(\d+x\d+)\s+(.+)$', line)
+        if mm:
+            for tok in mm.group(2).split():
+                if '*' in tok:
+                    rate = tok.replace('*', '').replace('+', '')
+    if out is None or mode is None:
+        return None
+    return {'output': out, 'mode': mode, 'rate': rate}
+
+
+def _display_cancel_revert():
+    pid = _display_revert.get('pid')
+    if pid:
+        try:
+            os.kill(pid, 15)  # SIGTERM
+        except Exception:
+            pass
+    _display_revert.update({'pid': None, 'mode': None, 'rate': None, 'output': None})
+
+
+def _display_schedule_revert(prev):
+    """prev hedefine DISPLAY_REVERT_DELAY saniye sonra geri dönen süreci
+    başlatır; confirm_display_mode çağrısı süreci öldürerek iptal eder."""
+    _display_cancel_revert()
+    if not prev:
+        return None
+    cmd = 'sleep %d; xrandr --output %s --mode %s' % (
+        DISPLAY_REVERT_DELAY, prev['output'], prev['mode'])
+    if prev.get('rate'):
+        cmd += ' --rate %s' % prev['rate']
+    cmd += ' >/dev/null 2>&1'
+    try:
+        proc = subprocess.Popen(['sh', '-c', cmd])
+    except Exception:
+        return None
+    _display_revert.update({'pid': proc.pid, 'mode': prev['mode'],
+                            'rate': prev.get('rate'), 'output': prev['output']})
+    return proc.pid
+
 def execute_ayaz_command(cmd, args):
     global TERM_CWD
     home_dir = os.path.expanduser('~')
@@ -21563,6 +22137,33 @@ def execute_ayaz_command(cmd, args):
 
         return {'id': app_id, 'name': app_name, 'exec': app_exec,
                 'cat': 'util', 'is_installed_by_user': True}
+
+    elif cmd == 'install_vendor_package':
+        # Üçüncü parti resmi depo kurulumları (Brave/Helium/Antigravity).
+        # Ad eşlemesi sabittir; URL/komut arayüzden ALINMAZ — hepsi
+        # root-owned ayaz-pkg-helper betiğinin içindedir.
+        vendor = str(args.get('vendor', '')).strip()
+        vendor_pkgs = {'brave': 'brave-browser',
+                       'helium': 'helium-bin',
+                       'antigravity': 'antigravity'}
+        if vendor not in vendor_pkgs:
+            raise Exception('Bilinmeyen uygulama kaynağı')
+        helper = '/usr/local/bin/ayaz-pkg-helper'
+        if not os.path.exists(helper):
+            raise Exception('Güvenlik: ayaz-pkg-helper bulunamadı; vendor kurulumu yapılamaz')
+        proc = subprocess.run(
+            ['sudo', helper, 'vendor', vendor],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600
+        )
+        if proc.returncode != 0:
+            raise Exception(f'Kurulum başarısız: {proc.stderr or proc.stdout}')
+        # Depo eklendikten sonraki paket kurulumu ve .desktop yerleşimi normal
+        # kurulum akışının kendisiyle yapılır (apt ikinci çağrıda boştur).
+        return execute_ayaz_command('install_deb_package',
+                                    {'packageName': vendor_pkgs[vendor]})
 
     elif cmd == 'remove_deb_package':
         pkg = args.get('packageName', '').strip()
@@ -22333,7 +22934,8 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
     elif cmd == 'get_display_modes':
         # Çıktı listelemeyen sunucularda (Xvfb vb.) boş döner; arayüz sabit
         # listeye düşerek çalışmayı sürdürür.
-        info = {'output': None, 'current_mode': None, 'current_rate': None, 'modes': []}
+        info = {'output': None, 'current_mode': None, 'current_rate': None,
+                'preferred_mode': None, 'modes': []}
         try:
             p = subprocess.run(['xrandr', '--query'], stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, text=True, timeout=10)
@@ -22355,8 +22957,11 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             mm = re.match(r'^\s+(\d+x\d+)\s+(.+)$', line)
             if mm:
                 rates = []
+                preferred = False
                 for tok in mm.group(2).split():
                     marked = '*' in tok
+                    if '+' in tok:
+                        preferred = True
                     r = tok.replace('*', '').replace('+', '')
                     if re.match(r'^\d+(\.\d+)?$', r):
                         rates.append(r)
@@ -22365,8 +22970,11 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                 info['modes'].append({
                     'mode': mm.group(1),
                     'rates': rates,
-                    'current': mm.group(1) == info['current_mode']
+                    'current': mm.group(1) == info['current_mode'],
+                    'preferred': preferred
                 })
+                if preferred and not info['preferred_mode']:
+                    info['preferred_mode'] = mm.group(1)
             elif line and not line[0].isspace():
                 break
         return info
@@ -22375,17 +22983,29 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         mode = str(args.get('mode', '')).strip()
         rate = str(args.get('rate', '')).strip()
         output = str(args.get('output', '')).strip()
-        if not re.match(r'^\d+x\d+$', mode):
+        # 'preferred': ekranın önerilen (native) çözünürlüğü — kurulum sonrası
+        # bulanıklığı çözen seçenek.
+        if mode != 'preferred' and not re.match(r'^\d+x\d+$', mode):
             raise Exception('Geçersiz çözünürlük biçimi')
         if output and not re.match(r'^[A-Za-z0-9_-]+$', output):
             raise Exception('Geçersiz ekran çıkışı')
-        cmd_args = ['xrandr']
-        if output:
-            cmd_args += ['--output', output, '--mode', mode]
+        if mode == 'preferred':
+            if not output:
+                cur = _display_current_state()
+                output = (cur or {}).get('output') or ''
+            if not output:
+                raise Exception('Bağlı ekran bulunamadı')
+            cmd_args = ['xrandr', '--output', output, '--preferred']
         else:
-            cmd_args += ['--size', mode]
+            cmd_args = ['xrandr']
+            if output:
+                cmd_args += ['--output', output, '--mode', mode]
+            else:
+                cmd_args += ['--size', mode]
         if rate and re.match(r'^\d+(\.\d+)?$', rate):
             cmd_args += ['--rate', rate]
+
+        prev = _display_current_state()
         try:
             p = subprocess.run(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, timeout=15)
@@ -22393,6 +23013,29 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             raise Exception(f'Ekran modu ayarlanamadı: {e}')
         if p.returncode != 0:
             raise Exception(p.stderr.strip() or 'Ekran modu uygulanamadı')
+        # Güvenlik ağı: değişiklik onaylanmazsa eski moda otomatik geri dönüş.
+        revert_pid = _display_schedule_revert(prev)
+        return {'applied': True,
+                'revert_after': DISPLAY_REVERT_DELAY if revert_pid else 0}
+
+    elif cmd == 'confirm_display_mode':
+        # Arayüz onayı: geri dönüş sayacını iptal eder.
+        _display_cancel_revert()
+        return True
+
+    elif cmd == 'revert_display_mode':
+        # Kullanıcının "geri al" düğmesi: sayaç beklemeden eski moda dönülür.
+        prev = dict(_display_revert)
+        _display_cancel_revert()
+        if not prev.get('mode'):
+            raise Exception('Geri alınacak önceki ekran modu yok')
+        cmd_args = ['xrandr', '--output', prev['output'], '--mode', prev['mode']]
+        if prev.get('rate'):
+            cmd_args += ['--rate', prev['rate']]
+        p = subprocess.run(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, timeout=15)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Önceki ekran moduna dönülemedi')
         return True
 
     elif cmd == 'set_display_scale':
@@ -23319,7 +23962,7 @@ fi
 
 ################################################################################
 # DOSYA: scripts\ayaz-pkg-helper.sh
-# SATIR SAYISI: 46 | BOYUT: 1643 bayt
+# SATIR SAYISI: 110 | BOYUT: 4657 bayt
 ################################################################################
 #!/bin/bash
 # ==============================================================================
@@ -23332,7 +23975,7 @@ ACTION="${1:-}"
 PKG="${2:-}"
 
 if [[ -z "$ACTION" || -z "$PKG" ]]; then
-    echo "[HATA] Kullanım: ayaz-pkg-helper <install|remove> <paket_adi>" >&2
+    echo "[HATA] Kullanım: ayaz-pkg-helper <install|remove|vendor> <paket_adi>" >&2
     exit 1
 fi
 
@@ -23354,23 +23997,87 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+# ---------------------------------------------------------------------
+# VENDOR (üçüncü parti resmi depo) kurulumları
+# Ad eşlemesi root-owned bu betiğin İÇİNDE sabittir: arayüz yalnızca bu
+# isimleri gönderebilir, URL/komut/argüman gönderilemez. Tüm adresler
+# satıcıların resmi HTTPS depolarıdır ve betik dışından değiştirilemez.
+# ---------------------------------------------------------------------
+need_net_tools() {
+    if ! command -v curl >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
+        /usr/bin/apt-get update -qq || true
+        /usr/bin/apt-get install -y --no-install-recommends curl gnupg >/dev/null 2>&1 || true
+    fi
+    if ! command -v curl >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
+        echo "[HATA] curl/gpg bulunamadı; resmi depo kurulumu yapılamıyor." >&2
+        exit 6
+    fi
+}
+
+vendor_brave() {
+    need_net_tools
+    curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+        https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+    curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources \
+        https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+    /usr/bin/apt-get update -qq
+    exec /usr/bin/apt-get install -y --no-install-recommends -- brave-browser
+}
+
+vendor_helium() {
+    need_net_tools
+    curl -fsSL https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc \
+        | gpg --dearmor --yes -o /usr/share/keyrings/helium.gpg
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/helium.gpg] https://pkg.helium.computer/deb stable main" \
+        > /etc/apt/sources.list.d/helium.list
+    /usr/bin/apt-get update -qq
+    exec /usr/bin/apt-get install -y --no-install-recommends -- helium-bin
+}
+
+vendor_antigravity() {
+    need_net_tools
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://us-central1-apt.pkg.dev/doc/repo-signing-key.gpg \
+        | gpg --dearmor --yes -o /etc/apt/keyrings/antigravity-repo-key.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/antigravity-repo-key.gpg] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main" \
+        > /etc/apt/sources.list.d/antigravity.list
+    /usr/bin/apt-get update -qq
+    exec /usr/bin/apt-get install -y --no-install-recommends -- antigravity
+}
+
 case "$ACTION" in
     install)
-        # Sadece resmi depolardan güvenli kurulum (asla --allow-unauthenticated kabul edilmez)
+        # Sadece resmi depolardan güvenli kurulum (asla --allow-unauthenticated kabul edilmez).
+        # Canlı ISO'da imaj küçültme için paket listeleri silinir; paket görünmüyorsa
+        # bir kez "apt-get update" ile tazelenip kurulum yeniden denenir.
+        if ! /usr/bin/apt-cache show "$PKG" >/dev/null 2>&1; then
+            /usr/bin/apt-get update -qq || true
+        fi
         exec /usr/bin/apt-get install -y --no-install-recommends -- "$PKG"
         ;;
     remove)
         exec /usr/bin/apt-get remove -y -- "$PKG"
         ;;
+    vendor)
+        case "$PKG" in
+            brave)      vendor_brave ;;
+            helium)     vendor_helium ;;
+            antigravity) vendor_antigravity ;;
+            *)
+                echo "[HATA] Bilinmeyen vendor adı: '$PKG'. İzin verilenler: brave, helium, antigravity" >&2
+                exit 5
+                ;;
+        esac
+        ;;
     *)
-        echo "[HATA] Bilinmeyen işlem: '$ACTION'. Yalnızca 'install' veya 'remove' kabul edilir." >&2
+        echo "[HATA] Bilinmeyen işlem: '$ACTION'. Yalnızca 'install', 'remove' veya 'vendor' kabul edilir." >&2
         exit 4
         ;;
 esac
 
 ################################################################################
 # DOSYA: scripts\ayaz-update-helper.sh
-# SATIR SAYISI: 189 | BOYUT: 7666 bayt
+# SATIR SAYISI: 223 | BOYUT: 9202 bayt
 ################################################################################
 #!/bin/bash
 # ==============================================================================
@@ -23383,6 +24090,8 @@ esac
 #   - Symlink takibi engelleme (readlink -f + O_NOFOLLOW semantiği)
 #   - Paket adı doğrulaması (yalnızca ayaz-de veya ankora-de paketleri)
 #   - Dosya sahipliği doğrulaması (root:root olmalı)
+#   - --stage modu: kullanıcı sürecinin indirdiği paketi sha256
+#     doğrulamasıyla root staging'ine alma (TOCTOU'ya kapalı kopya)
 # ==============================================================================
 
 set -euo pipefail
@@ -23402,6 +24111,38 @@ STAGING_OWNER=$(stat -c '%u:%g' "$STAGING_DIR" 2>/dev/null || echo "unknown")
 if [[ "$STAGING_OWNER" != "0:0" ]]; then
     echo "[HATA] Staging dizini root sahipliğinde değil: $STAGING_DIR ($STAGING_OWNER)" >&2
     exit 10
+fi
+
+# --- STAGE modu: kullanıcının indirdiği paketi root ile staging'e alır ---
+# Kullanım: ayaz-update-helper --stage <kullanici_dosyasi> <sha256>
+# İndirme kullanıcı sürecinde olur (/var/cache'a yazma yetkisi yoktur); paket
+# burada root olarak kopyalanır ve KOPYANIN sha256'sı doğrulanır. Kaynak dosya
+# kopya sırasında değiştirilse bile kopyanın özeti uyuşmadığı için reddedilir.
+if [[ "${1:-}" == "--stage" ]]; then
+    SRC="${2:-}"
+    EXPECTED_SHA="${3:-}"
+    if [[ -z "$SRC" || -z "$EXPECTED_SHA" || ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        echo "[HATA] Kullanım: ayaz-update-helper --stage <dosya> <sha256>" >&2
+        exit 9
+    fi
+    if [[ ! -f "$SRC" || -L "$SRC" ]]; then
+        echo "[HATA] Aşama alınacak dosya yok veya sembolik bağlantı: $SRC" >&2
+        exit 9
+    fi
+    INCOMING="$STAGING_DIR/.incoming.deb"
+    rm -f "$INCOMING"
+    cat "$SRC" > "$INCOMING"
+    chown root:root "$INCOMING"
+    chmod 0600 "$INCOMING"
+    ACTUAL_SHA=$(sha256sum "$INCOMING" | awk '{print $1}')
+    if [[ "${ACTUAL_SHA,,}" != "${EXPECTED_SHA,,}" ]]; then
+        rm -f "$INCOMING"
+        echo "[HATA] sha256 doğrulaması başarısız; paket staging'e alınmadı." >&2
+        exit 9
+    fi
+    mv -f "$INCOMING" "$STAGING_DIR/ayaz-update.deb"
+    echo "[AYAZ GÜNCELLEYİCİ] Paket staging dizinine alındı ve özeti doğrulandı."
+    exit 0
 fi
 
 # 2. Dosya yolu güvenlik kontrolü — yalnızca staging dizini kabul edilir
@@ -24946,7 +25687,7 @@ jobs:
 
 ################################################################################
 # DOSYA: my-linux-orchestrator\workflow.json
-# SATIR SAYISI: 103 | BOYUT: 3342 bayt
+# SATIR SAYISI: 104 | BOYUT: 3558 bayt
 ################################################################################
 {
   "name": "linux-orchestrator",
@@ -24956,7 +25697,8 @@ jobs:
   "notes": [
     "when kosulu saglanmayan dugum atlanir; atlanan dugum bagimliliklar icin OK sayilir.",
     "validate alanlari AGENTS.md zorunlulugu: eklenen her betik/komut bash -n veya node --check ile gecer.",
-    "on_fail degerleri: stop | retry_from:<dugum> | ask_user"
+    "on_fail degerleri: stop | retry_from:<dugum> | ask_user",
+    "komut disiplini: sistem degistiren islem yalniz kullanici onayindan sonra; skill'ler gercek sistemde komutu kendisi calistirmez, onayli allowlist disina cikan arac once kullaniciya sorulur (chef SKILL.md 4a)."
   ],
   "defaults": {
     "on_fail": "stop",
@@ -25054,7 +25796,7 @@ jobs:
 
 ################################################################################
 # DOSYA: my-linux-orchestrator\chef\SKILL.md
-# SATIR SAYISI: 53 | BOYUT: 3047 bayt
+# SATIR SAYISI: 67 | BOYUT: 3870 bayt
 ################################################################################
 ---
 name: chef
@@ -25105,6 +25847,20 @@ DOGRULAMA: <komut + sonuc, tek satir>
 - Kimlik bilgisi, token, özel anahtar log çıktısına yazılmaz.
 - Sürüm metni `2.0`; arayüz/kopya metinleri Türkçe.
 - Kod incelemesi yapılacaksa antislop akışı çalışma sırasında uygulanır (Mode 1).
+
+## 4a. Komut çalıştırma disiplini (guardrail)
+
+- Skill'ler **gerçek sistemde komut çalıştırmaz**; yalnız plan, dosya üretimi
+  ve gözetimli doğrulama (`bash -n`, `node --check`, `py_compile`, chroot
+  içi deneme) yapar.
+- Sistem değiştiren işlemler (paket kurulumu, `apt`, `dd`, `mkfs`, servis
+  durdurma, `/etc`-`/boot` yazma, disk bölütleme) **kullanıcı onayından sonra**
+  ve komut satırı raporlanarak teslim edilir; ajan komutu kendisi çalıştırmez.
+- Onaylı kısa bir **allowlist** (doğrulama/okuma komutları) dışına çıkan her
+  araç önce kullanıcıya sorulur; "hızlıca dene" bahanesiyle sessizce
+  çalıştırılmaz.
+- Doğrulamalar ana makineye değil, kopya (chroot/konteyner/geçici dizin)
+  içindedir; gerçek sistemin bölümleme ve önyükleme alanlarına dokunulmaz.
 
 ## 5. Çıktı
 

@@ -6,7 +6,8 @@
   "notes": [
     "when kosulu saglanmayan dugum atlanir; atlanan dugum bagimliliklar icin OK sayilir.",
     "validate alanlari AGENTS.md zorunlulugu: eklenen her betik/komut bash -n veya node --check ile gecer.",
-    "on_fail degerleri: stop | retry_from:<dugum> | ask_user"
+    "on_fail degerleri: stop | retry_from:<dugum> | ask_user",
+    "komut disiplini: sistem degistiren islem yalniz kullanici onayindan sonra; skill'ler gercek sistemde komutu kendisi calistirmez, onayli allowlist disina cikan arac once kullaniciya sorulur (chef SKILL.md 4a)."
   ],
   "defaults": {
     "on_fail": "stop",

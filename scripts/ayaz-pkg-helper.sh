@@ -9,7 +9,7 @@ ACTION="${1:-}"
 PKG="${2:-}"
 
 if [[ -z "$ACTION" || -z "$PKG" ]]; then
-    echo "[HATA] Kullanım: ayaz-pkg-helper <install|remove> <paket_adi>" >&2
+    echo "[HATA] Kullanım: ayaz-pkg-helper <install|remove|vendor> <paket_adi>" >&2
     exit 1
 fi
 
@@ -31,16 +31,80 @@ fi
 
 export DEBIAN_FRONTEND=noninteractive
 
+# ---------------------------------------------------------------------
+# VENDOR (üçüncü parti resmi depo) kurulumları
+# Ad eşlemesi root-owned bu betiğin İÇİNDE sabittir: arayüz yalnızca bu
+# isimleri gönderebilir, URL/komut/argüman gönderilemez. Tüm adresler
+# satıcıların resmi HTTPS depolarıdır ve betik dışından değiştirilemez.
+# ---------------------------------------------------------------------
+need_net_tools() {
+    if ! command -v curl >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
+        /usr/bin/apt-get update -qq || true
+        /usr/bin/apt-get install -y --no-install-recommends curl gnupg >/dev/null 2>&1 || true
+    fi
+    if ! command -v curl >/dev/null 2>&1 || ! command -v gpg >/dev/null 2>&1; then
+        echo "[HATA] curl/gpg bulunamadı; resmi depo kurulumu yapılamıyor." >&2
+        exit 6
+    fi
+}
+
+vendor_brave() {
+    need_net_tools
+    curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
+        https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
+    curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources \
+        https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+    /usr/bin/apt-get update -qq
+    exec /usr/bin/apt-get install -y --no-install-recommends -- brave-browser
+}
+
+vendor_helium() {
+    need_net_tools
+    curl -fsSL https://raw.githubusercontent.com/imputnet/helium-linux/main/pubkey.asc \
+        | gpg --dearmor --yes -o /usr/share/keyrings/helium.gpg
+    echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/helium.gpg] https://pkg.helium.computer/deb stable main" \
+        > /etc/apt/sources.list.d/helium.list
+    /usr/bin/apt-get update -qq
+    exec /usr/bin/apt-get install -y --no-install-recommends -- helium-bin
+}
+
+vendor_antigravity() {
+    need_net_tools
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://us-central1-apt.pkg.dev/doc/repo-signing-key.gpg \
+        | gpg --dearmor --yes -o /etc/apt/keyrings/antigravity-repo-key.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/antigravity-repo-key.gpg] https://us-central1-apt.pkg.dev/projects/antigravity-auto-updater-dev/ antigravity-debian main" \
+        > /etc/apt/sources.list.d/antigravity.list
+    /usr/bin/apt-get update -qq
+    exec /usr/bin/apt-get install -y --no-install-recommends -- antigravity
+}
+
 case "$ACTION" in
     install)
-        # Sadece resmi depolardan güvenli kurulum (asla --allow-unauthenticated kabul edilmez)
+        # Sadece resmi depolardan güvenli kurulum (asla --allow-unauthenticated kabul edilmez).
+        # Canlı ISO'da imaj küçültme için paket listeleri silinir; paket görünmüyorsa
+        # bir kez "apt-get update" ile tazelenip kurulum yeniden denenir.
+        if ! /usr/bin/apt-cache show "$PKG" >/dev/null 2>&1; then
+            /usr/bin/apt-get update -qq || true
+        fi
         exec /usr/bin/apt-get install -y --no-install-recommends -- "$PKG"
         ;;
     remove)
         exec /usr/bin/apt-get remove -y -- "$PKG"
         ;;
+    vendor)
+        case "$PKG" in
+            brave)      vendor_brave ;;
+            helium)     vendor_helium ;;
+            antigravity) vendor_antigravity ;;
+            *)
+                echo "[HATA] Bilinmeyen vendor adı: '$PKG'. İzin verilenler: brave, helium, antigravity" >&2
+                exit 5
+                ;;
+        esac
+        ;;
     *)
-        echo "[HATA] Bilinmeyen işlem: '$ACTION'. Yalnızca 'install' veya 'remove' kabul edilir." >&2
+        echo "[HATA] Bilinmeyen işlem: '$ACTION'. Yalnızca 'install', 'remove' veya 'vendor' kabul edilir." >&2
         exit 4
         ;;
 esac

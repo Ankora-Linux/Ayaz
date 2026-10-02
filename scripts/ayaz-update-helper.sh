@@ -9,6 +9,8 @@
 #   - Symlink takibi engelleme (readlink -f + O_NOFOLLOW semantiği)
 #   - Paket adı doğrulaması (yalnızca ayaz-de veya ankora-de paketleri)
 #   - Dosya sahipliği doğrulaması (root:root olmalı)
+#   - --stage modu: kullanıcı sürecinin indirdiği paketi sha256
+#     doğrulamasıyla root staging'ine alma (TOCTOU'ya kapalı kopya)
 # ==============================================================================
 
 set -euo pipefail
@@ -28,6 +30,38 @@ STAGING_OWNER=$(stat -c '%u:%g' "$STAGING_DIR" 2>/dev/null || echo "unknown")
 if [[ "$STAGING_OWNER" != "0:0" ]]; then
     echo "[HATA] Staging dizini root sahipliğinde değil: $STAGING_DIR ($STAGING_OWNER)" >&2
     exit 10
+fi
+
+# --- STAGE modu: kullanıcının indirdiği paketi root ile staging'e alır ---
+# Kullanım: ayaz-update-helper --stage <kullanici_dosyasi> <sha256>
+# İndirme kullanıcı sürecinde olur (/var/cache'a yazma yetkisi yoktur); paket
+# burada root olarak kopyalanır ve KOPYANIN sha256'sı doğrulanır. Kaynak dosya
+# kopya sırasında değiştirilse bile kopyanın özeti uyuşmadığı için reddedilir.
+if [[ "${1:-}" == "--stage" ]]; then
+    SRC="${2:-}"
+    EXPECTED_SHA="${3:-}"
+    if [[ -z "$SRC" || -z "$EXPECTED_SHA" || ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{64}$ ]]; then
+        echo "[HATA] Kullanım: ayaz-update-helper --stage <dosya> <sha256>" >&2
+        exit 9
+    fi
+    if [[ ! -f "$SRC" || -L "$SRC" ]]; then
+        echo "[HATA] Aşama alınacak dosya yok veya sembolik bağlantı: $SRC" >&2
+        exit 9
+    fi
+    INCOMING="$STAGING_DIR/.incoming.deb"
+    rm -f "$INCOMING"
+    cat "$SRC" > "$INCOMING"
+    chown root:root "$INCOMING"
+    chmod 0600 "$INCOMING"
+    ACTUAL_SHA=$(sha256sum "$INCOMING" | awk '{print $1}')
+    if [[ "${ACTUAL_SHA,,}" != "${EXPECTED_SHA,,}" ]]; then
+        rm -f "$INCOMING"
+        echo "[HATA] sha256 doğrulaması başarısız; paket staging'e alınmadı." >&2
+        exit 9
+    fi
+    mv -f "$INCOMING" "$STAGING_DIR/ayaz-update.deb"
+    echo "[AYAZ GÜNCELLEYİCİ] Paket staging dizinine alındı ve özeti doğrulandı."
+    exit 0
 fi
 
 # 2. Dosya yolu güvenlik kontrolü — yalnızca staging dizini kabul edilir

@@ -972,6 +972,56 @@ fn install_deb_package_blocking(package_name: String) -> Result<XdgApplication, 
     }
 }
 
+// ============================================================================
+// 3b. VENDOR KURULUMU (üçüncü parti resmi depolar: Brave / Helium / Antigravity)
+// Ad eşlemesi KODDA sabittir; arayüz yalnızca bu adları gönderebilir.
+// Adres, anahtar ve komut bilgisi root-owned ayaz-pkg-helper betiğinin
+// içindedir — arayüzden URL veya komut kabul edilmez.
+// ============================================================================
+#[tauri::command]
+async fn install_vendor_package(vendor: String) -> Result<XdgApplication, String> {
+    tauri::async_runtime::spawn_blocking(move || install_vendor_package_blocking(vendor))
+        .await
+        .map_err(|e| format!("Vendor kurulumu yürütülemedi: {}", e))?
+}
+
+fn install_vendor_package_blocking(vendor: String) -> Result<XdgApplication, String> {
+    let (v, pkg) = match vendor.trim() {
+        "brave" => ("brave", "brave-browser"),
+        "helium" => ("helium", "helium-bin"),
+        "antigravity" => ("antigravity", "antigravity"),
+        _ => return Err("Bilinmeyen uygulama kaynağı.".to_string()),
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        let helper = Path::new("/usr/local/bin/ayaz-pkg-helper");
+        if !helper.exists() {
+            return Err(
+                "Güvenlik İlkesi: vendor kurulumu yalnızca ayaz-pkg-helper üzerinden yapılabilir."
+                    .to_string(),
+            );
+        }
+        let res = match root_command("/usr/local/bin/ayaz-pkg-helper", &["vendor", v]) {
+            Ok(o) => o,
+            Err(e) => return Err(format!("Paket yardımcısı çalıştırılamadı: {}", e)),
+        };
+        if !res.status.success() {
+            let err = String::from_utf8_lossy(&res.stderr);
+            return Err(format!("Vendor kurulumu başarısız: {}", err));
+        }
+        // Depo eklendikten ve paket kurulduktan sonra XDG taraması ile
+        // .desktop yerleşimi normal paket akışının kendisi tarafından yapılır.
+        install_deb_package_blocking(pkg.to_string())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (v, pkg);
+        Err("Bu platformda vendor kurulumu desteklenmez.".to_string())
+    }
+}
+
 #[tauri::command]
 async fn remove_deb_package(package_name: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || remove_deb_package_blocking(package_name))
@@ -2716,27 +2766,62 @@ async fn download_and_apply_de_update(
     }
 
     #[cfg(target_os = "linux")]
-    let deb_path = {
-        let staging_dir = PathBuf::from("/var/cache/ayaz-updates");
-        let _ = fs::create_dir_all(&staging_dir);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&staging_dir, fs::Permissions::from_mode(0o700));
-        }
-        staging_dir.join("ayaz-update.deb")
-    };
+    let deb_path = PathBuf::from("/var/cache/ayaz-updates/ayaz-update.deb");
 
     #[cfg(not(target_os = "linux"))]
     let deb_path = std::env::temp_dir().join("ayaz-update.deb");
 
-    fs::write(&deb_path, &bytes)
+    // Paket önce kullanıcının kendi özel geçici dizinine yazılır: normal bir
+    // süreç /var/cache dizinine yazamaz. Root staging devri, helper'ın
+    // --stage moduyla yapılır; paketin KOPYASI root tarafından alınıp özeti
+    // yeniden doğrulanır, sahiplik doğrulaması bu kopya üzerinde geçerlidir.
+    let tmp_dir = std::env::temp_dir().join(format!("ayaz-upd-{}", std::process::id()));
+    fs::create_dir_all(&tmp_dir)
+        .map_err(|e| format!("Geçici güncelleme dizini oluşturulamadı: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&tmp_dir, fs::Permissions::from_mode(0o700));
+    }
+    let tmp_deb = tmp_dir.join("ayaz-update.deb");
+    fs::write(&tmp_deb, &bytes)
         .map_err(|e| format!("Geçici güncelleme dosyası diske kaydedilemedi: {}", e))?;
 
-    // Dosya sahipliğini root:root olarak ayarla (helper güvenlik kontrolü için)
     #[cfg(target_os = "linux")]
     {
-        let _ = Command::new("chown").args(["root:root", &deb_path.to_string_lossy()]).output();
+        let helper_path = Path::new("/usr/local/bin/ayaz-update-helper");
+        if !helper_path.exists() {
+            let _ = fs::remove_dir_all(&tmp_dir);
+            return Err(
+                "Güvenlik İlkesi İhlali: /usr/local/bin/ayaz-update-helper bulunamadı. \
+                 Paket staging dizinine yalnızca bu yardımcı üzerinden alınabilir."
+                    .to_string(),
+            );
+        }
+        let helper_str = helper_path.to_string_lossy().to_string();
+        let stage_src = tmp_deb.to_string_lossy().to_string();
+        let stage_sha = computed_sha256.to_lowercase();
+        let stage_status = Command::new("sudo")
+            .args([helper_str.as_str(), "--stage", stage_src.as_str(), stage_sha.as_str()])
+            .status();
+        let _ = fs::remove_dir_all(&tmp_dir);
+        match stage_status {
+            Ok(status) if status.success() => {}
+            Ok(status) => {
+                return Err(format!(
+                    "Güncelleme paketi güvenli staging dizinine alınamadı (Çıkış Kodu: {}).",
+                    status.code().unwrap_or(-1)
+                ));
+            }
+            Err(e) => {
+                return Err(format!("Güvenlik yardımcısı çalıştırılamadı: {}", e));
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = fs::rename(&tmp_deb, &deb_path);
     }
 
     let _ = window.emit("update-progress", UpdateProgressPayload {
@@ -3291,6 +3376,7 @@ fn main() {
             drag_window,
             scan_xdg_applications,
             install_deb_package,
+            install_vendor_package,
             remove_deb_package,
             run_terminal_command,
             read_document_file,

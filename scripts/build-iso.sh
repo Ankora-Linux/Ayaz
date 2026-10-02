@@ -345,9 +345,25 @@ xset -dpms 2>/dev/null || true
 xset s off 2>/dev/null || true
 xset s noblank 2>/dev/null || true
 
-# Yalnızca çözünürlük çok düşükse (ör. sanal makinenin varsayılanı) düzelt;
-# fiziksel ekranda orijinal çözünürlüğü düşürme, taskbar dahil her şey
-# kendi çözünürlüğünde kalsın.
+# 1) Ekranın önerilen (native) çözünürlüğüne geç: kurulu sistemde düşük
+#    modda kalan ekranın bulanık/sahte görünmesini böyle önlenir.
+# 2) Önerilen okunamazsa ve çözünürlük hâlâ çok düşükse (ör. sanal
+#    makinenin varsayılanı) eski düzeltme uygulanır; fiziksel ekranda
+#    orijinal çözünürlük asla düşürülmez.
+PREF=$(xrandr 2>/dev/null | awk '{
+    for (i = 2; i <= NF; i++) {
+        if (index($i, "+") && $(i - 1) ~ /^[0-9]+x[0-9]+$/) { print $(i - 1); exit }
+    }
+}')
+CURM=$(xrandr 2>/dev/null | awk '{
+    for (i = 2; i <= NF; i++) {
+        if (index($i, "*") && $(i - 1) ~ /^[0-9]+x[0-9]+$/) { print $(i - 1); exit }
+    }
+}')
+if [ -n "$PREF" ] && [ "$PREF" != "$CURM" ]; then
+    xrandr -s "$PREF" 2>/dev/null || true
+fi
+
 CURW=$(xrandr 2>/dev/null | awk '/\*/{print $1; exit}' | cut -dx -f1)
 case "$CURW" in
     ''|640*|720*|800*|854*|960*) xrandr -s 1280x800 2>/dev/null || xrandr -s 1024x768 2>/dev/null || true ;;
@@ -641,6 +657,69 @@ def _disk_usage():
     except Exception:
         return None
 
+# --- Ekran modu güvenli değiştirme yardımcıları ---------------------------
+# Çözünürlük değişikliği 15 saniye içinde onaylanmazsa eski moda geri
+# dönülür: kullanıcı yanlış mod seçerse ekran kararmaz/kurulmaz, sistem
+# kendini kurtarır. Onay arayüzden confirm_display_mode ile gelir.
+DISPLAY_REVERT_DELAY = 15
+_display_revert = {'pid': None, 'mode': None, 'rate': None, 'output': None}
+
+
+def _display_current_state():
+    """xrandr --query okuyup {'output','mode','rate'} döndürür; bulunamazsa None."""
+    try:
+        p = subprocess.run(['xrandr', '--query'], stdout=subprocess.PIPE,
+                           stderr=subprocess.DEVNULL, text=True, timeout=10)
+    except Exception:
+        return None
+    out = mode = rate = None
+    for line in p.stdout.splitlines():
+        if out is None:
+            m = re.match(r'^(\S+)\s+connected\b', line)
+            if m:
+                out = m.group(1)
+                sm = re.search(r'(\d+x\d+)\+\d+\+\d+', line)
+                if sm:
+                    mode = sm.group(1)
+        mm = re.match(r'^\s+(\d+x\d+)\s+(.+)$', line)
+        if mm:
+            for tok in mm.group(2).split():
+                if '*' in tok:
+                    rate = tok.replace('*', '').replace('+', '')
+    if out is None or mode is None:
+        return None
+    return {'output': out, 'mode': mode, 'rate': rate}
+
+
+def _display_cancel_revert():
+    pid = _display_revert.get('pid')
+    if pid:
+        try:
+            os.kill(pid, 15)  # SIGTERM
+        except Exception:
+            pass
+    _display_revert.update({'pid': None, 'mode': None, 'rate': None, 'output': None})
+
+
+def _display_schedule_revert(prev):
+    """prev hedefine DISPLAY_REVERT_DELAY saniye sonra geri dönen süreci
+    başlatır; confirm_display_mode çağrısı süreci öldürerek iptal eder."""
+    _display_cancel_revert()
+    if not prev:
+        return None
+    cmd = 'sleep %d; xrandr --output %s --mode %s' % (
+        DISPLAY_REVERT_DELAY, prev['output'], prev['mode'])
+    if prev.get('rate'):
+        cmd += ' --rate %s' % prev['rate']
+    cmd += ' >/dev/null 2>&1'
+    try:
+        proc = subprocess.Popen(['sh', '-c', cmd])
+    except Exception:
+        return None
+    _display_revert.update({'pid': proc.pid, 'mode': prev['mode'],
+                            'rate': prev.get('rate'), 'output': prev['output']})
+    return proc.pid
+
 def execute_ayaz_command(cmd, args):
     global TERM_CWD
     home_dir = os.path.expanduser('~')
@@ -834,6 +913,33 @@ def execute_ayaz_command(cmd, args):
 
         return {'id': app_id, 'name': app_name, 'exec': app_exec,
                 'cat': 'util', 'is_installed_by_user': True}
+
+    elif cmd == 'install_vendor_package':
+        # Üçüncü parti resmi depo kurulumları (Brave/Helium/Antigravity).
+        # Ad eşlemesi sabittir; URL/komut arayüzden ALINMAZ — hepsi
+        # root-owned ayaz-pkg-helper betiğinin içindedir.
+        vendor = str(args.get('vendor', '')).strip()
+        vendor_pkgs = {'brave': 'brave-browser',
+                       'helium': 'helium-bin',
+                       'antigravity': 'antigravity'}
+        if vendor not in vendor_pkgs:
+            raise Exception('Bilinmeyen uygulama kaynağı')
+        helper = '/usr/local/bin/ayaz-pkg-helper'
+        if not os.path.exists(helper):
+            raise Exception('Güvenlik: ayaz-pkg-helper bulunamadı; vendor kurulumu yapılamaz')
+        proc = subprocess.run(
+            ['sudo', helper, 'vendor', vendor],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=600
+        )
+        if proc.returncode != 0:
+            raise Exception(f'Kurulum başarısız: {proc.stderr or proc.stdout}')
+        # Depo eklendikten sonraki paket kurulumu ve .desktop yerleşimi normal
+        # kurulum akışının kendisiyle yapılır (apt ikinci çağrıda boştur).
+        return execute_ayaz_command('install_deb_package',
+                                    {'packageName': vendor_pkgs[vendor]})
 
     elif cmd == 'remove_deb_package':
         pkg = args.get('packageName', '').strip()
@@ -1604,7 +1710,8 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
     elif cmd == 'get_display_modes':
         # Çıktı listelemeyen sunucularda (Xvfb vb.) boş döner; arayüz sabit
         # listeye düşerek çalışmayı sürdürür.
-        info = {'output': None, 'current_mode': None, 'current_rate': None, 'modes': []}
+        info = {'output': None, 'current_mode': None, 'current_rate': None,
+                'preferred_mode': None, 'modes': []}
         try:
             p = subprocess.run(['xrandr', '--query'], stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, text=True, timeout=10)
@@ -1626,8 +1733,11 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             mm = re.match(r'^\s+(\d+x\d+)\s+(.+)$', line)
             if mm:
                 rates = []
+                preferred = False
                 for tok in mm.group(2).split():
                     marked = '*' in tok
+                    if '+' in tok:
+                        preferred = True
                     r = tok.replace('*', '').replace('+', '')
                     if re.match(r'^\d+(\.\d+)?$', r):
                         rates.append(r)
@@ -1636,8 +1746,11 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                 info['modes'].append({
                     'mode': mm.group(1),
                     'rates': rates,
-                    'current': mm.group(1) == info['current_mode']
+                    'current': mm.group(1) == info['current_mode'],
+                    'preferred': preferred
                 })
+                if preferred and not info['preferred_mode']:
+                    info['preferred_mode'] = mm.group(1)
             elif line and not line[0].isspace():
                 break
         return info
@@ -1646,17 +1759,29 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         mode = str(args.get('mode', '')).strip()
         rate = str(args.get('rate', '')).strip()
         output = str(args.get('output', '')).strip()
-        if not re.match(r'^\d+x\d+$', mode):
+        # 'preferred': ekranın önerilen (native) çözünürlüğü — kurulum sonrası
+        # bulanıklığı çözen seçenek.
+        if mode != 'preferred' and not re.match(r'^\d+x\d+$', mode):
             raise Exception('Geçersiz çözünürlük biçimi')
         if output and not re.match(r'^[A-Za-z0-9_-]+$', output):
             raise Exception('Geçersiz ekran çıkışı')
-        cmd_args = ['xrandr']
-        if output:
-            cmd_args += ['--output', output, '--mode', mode]
+        if mode == 'preferred':
+            if not output:
+                cur = _display_current_state()
+                output = (cur or {}).get('output') or ''
+            if not output:
+                raise Exception('Bağlı ekran bulunamadı')
+            cmd_args = ['xrandr', '--output', output, '--preferred']
         else:
-            cmd_args += ['--size', mode]
+            cmd_args = ['xrandr']
+            if output:
+                cmd_args += ['--output', output, '--mode', mode]
+            else:
+                cmd_args += ['--size', mode]
         if rate and re.match(r'^\d+(\.\d+)?$', rate):
             cmd_args += ['--rate', rate]
+
+        prev = _display_current_state()
         try:
             p = subprocess.run(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                text=True, timeout=15)
@@ -1664,6 +1789,29 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             raise Exception(f'Ekran modu ayarlanamadı: {e}')
         if p.returncode != 0:
             raise Exception(p.stderr.strip() or 'Ekran modu uygulanamadı')
+        # Güvenlik ağı: değişiklik onaylanmazsa eski moda otomatik geri dönüş.
+        revert_pid = _display_schedule_revert(prev)
+        return {'applied': True,
+                'revert_after': DISPLAY_REVERT_DELAY if revert_pid else 0}
+
+    elif cmd == 'confirm_display_mode':
+        # Arayüz onayı: geri dönüş sayacını iptal eder.
+        _display_cancel_revert()
+        return True
+
+    elif cmd == 'revert_display_mode':
+        # Kullanıcının "geri al" düğmesi: sayaç beklemeden eski moda dönülür.
+        prev = dict(_display_revert)
+        _display_cancel_revert()
+        if not prev.get('mode'):
+            raise Exception('Geri alınacak önceki ekran modu yok')
+        cmd_args = ['xrandr', '--output', prev['output'], '--mode', prev['mode']]
+        if prev.get('rate'):
+            cmd_args += ['--rate', prev['rate']]
+        p = subprocess.run(cmd_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, timeout=15)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Önceki ekran moduna dönülemedi')
         return True
 
     elif cmd == 'set_display_scale':

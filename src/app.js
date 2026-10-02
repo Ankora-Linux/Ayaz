@@ -1375,6 +1375,10 @@
       { id: 'git', name: 'Git Kaynak Kod Sürüm Kontrolü', deb: 'git', desc: 'Yazılım geliştiriciler için endüstri standardı kod versiyon kontrol sistemi', cat: 'dev', size: '36 MB', installed: false },
       { id: 'python3', name: 'Python 3 Programlama Dili', deb: 'python3', desc: 'Modern yapay zeka, veri analitiği ve otomasyon dili', cat: 'dev', size: '16 MB', installed: false },
       { id: 'p7zip-full', name: '7-Zip Yüksek Sıkıştırmalı Arşivleyici', deb: 'p7zip-full', desc: 'ZIP, 7z, TAR ve RAR arşivlerini açma ve sıkıştırma aracı', cat: 'util', size: '5 MB', installed: false },
+      { id: 'brave', name: 'Brave Hızlı & Gizli Tarayıcı', deb: 'brave-browser', vendor: 'brave', desc: 'Reklam ve izleyici engelleyicisi yerleşik; resmî deposundan kurulur', cat: 'net', size: '150 MB', installed: false },
+      { id: 'helium', name: 'Helium Hafif Web Tarayıcı', deb: 'helium-bin', vendor: 'helium', desc: 'ungoogle-chromium temelli, gizlilik odaklı hafif masaüstü tarayıcısı', cat: 'net', size: '130 MB', installed: false },
+      { id: 'antigravity', name: 'Antigravity Yapay Zekâ IDE', deb: 'antigravity', vendor: 'antigravity', desc: 'Google’ın ajan öncesi dönem için tasarladığı ajan destekli kod editörü', cat: 'dev', size: '420 MB', installed: false },
+      { id: 'opencode-desktop', name: 'OpenCode Masaüstü (AI Kod Ajanı)', deb: '', extUrl: 'https://opencode.ai', desc: 'Terminal, masaüstü ve IDE eklentisi olarak çalışan açık kaynak yapay zekâ kod ajanı', cat: 'dev', size: 'Site', installed: false },
 
 
       // 2. ORTAM & MEDYA (MEDIA)
@@ -1459,6 +1463,8 @@
       { id: 'memtest86+', name: 'Memtest86+ RAM Test Aracı', deb: 'memtest86+', desc: 'Bellek donanımında kararsızlık ve hücre bozulmalarını tarama', cat: 'sys', size: '2 MB', installed: false },
       { id: 'sysstat', name: 'Sysstat Sistem İstatistikleri (sar/iostat)', deb: 'sysstat', desc: 'İşletim sistemi performans sayaçları ve geçmiş kullanım loglayıcı', cat: 'sys', size: '5 MB', installed: false },
       { id: 'glances', name: 'Glances Kapsamlı Sistem Gözlemcisi', deb: 'glances', desc: 'Web tabanlı veya konsolda çalışan istemci-sunucu sistem monitörü', cat: 'sys', size: '14 MB', installed: false },
+      { id: 'flatpak', name: 'Flatpak Uygulama Mağazası', deb: 'flatpak', desc: 'Sandbox içinde çalışan evrensel Linux uygulama mağazası altyapısı', cat: 'sys', size: '26 MB', installed: false },
+      { id: 'synaptic', name: 'Synaptic Grafik Paket Yöneticisi', deb: 'synaptic', desc: 'Depo paketlerini gruplar hâlinde arayıp kurup kaldırabileceğiniz klasik arayüz', cat: 'sys', size: '12 MB', installed: false },
 
       // 7. ARAÇLAR & YARDIMCILAR (UTIL)
       { id: 'tmux', name: 'Tmux Terminal Çoklayıcı', deb: 'tmux', desc: 'Tek terminal penceresinde bölünmüş paneller ve kalıcı arka plan oturumları', cat: 'util', size: '4 MB', installed: false },
@@ -1561,7 +1567,9 @@
           <td><span class="pkg-desc">${escapeHtml(pkg.desc)}</span></td>
           <td><span style="color: var(--text-muted); font-family: var(--font-mono); font-size: 11px;">${escapeHtml(pkg.size)}</span></td>
           <td style="text-align: right;">
-            ${pkg.installed ? `
+            ${pkg.extUrl ? `
+              <button class="btn-pkg btn-pkg-site" id="btn-site-${pkg.id}" style="background: #334155; color: #e2e8f0; border-color: #475569;">Resmî Site</button>
+            ` : pkg.installed ? `
               <div style="display: inline-flex; gap: 6px; justify-content: flex-end;">
                 <button class="btn-pkg btn-pkg-open" id="btn-open-${pkg.id}" style="background: #2563eb; color: #fff; border-color: #3b82f6;">Aç</button>
                 <button class="btn-pkg installed" id="btn-pkg-${pkg.id}">Kaldır</button>
@@ -1572,9 +1580,22 @@
           </td>
         `;
 
-        const btn = tr.querySelector('.btn-pkg:not(.btn-pkg-open)');
+        const btn = tr.querySelector('.btn-pkg:not(.btn-pkg-open):not(.btn-pkg-site)');
         if (btn) {
           btn.addEventListener('click', () => this.togglePackage(pkg, tr));
+        }
+
+        const btnSite = tr.querySelector('.btn-pkg-site');
+        if (btnSite) {
+          btnSite.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+              await TauriBridge.invoke('open_url', { url: pkg.extUrl });
+              Terminal.log(`[AĞ] ${pkg.name} resmî sitesi açılıyor: ${pkg.extUrl}`, 'cmd');
+            } catch (err) {
+              Terminal.log(`[ERR] Resmî site açılamadı: ${err}`, 'error');
+            }
+          });
         }
 
         const btnOpen = tr.querySelector('.btn-pkg-open');
@@ -1647,7 +1668,9 @@
         btn.disabled = true;
         btn.textContent = 'İndiriliyor...';
       }
-      Terminal.log(`[APT] sudo apt-get install -y -- ${pkg.deb} yürütülüyor...`, 'cmd');
+      Terminal.log(pkg.vendor
+        ? `[DEPO] ${pkg.vendor} resmî deposu hazırlanıp '${pkg.deb}' kuruluyor...`
+        : `[APT] sudo apt-get install -y -- ${pkg.deb} yürütülüyor...`, 'cmd');
 
       let val = 0;
       const interval = setInterval(() => {
@@ -1657,7 +1680,11 @@
       }, 100);
 
       try {
-        const xdgApp = await TauriBridge.invoke('install_deb_package', { packageName: pkg.deb });
+        // vendor girdileri (Brave/Helium/Antigravity) root-owned
+        // ayaz-pkg-helper'ın vendor eylemiyle; diğerleri normal apt akışıyla kurulur.
+        const xdgApp = pkg.vendor
+          ? await TauriBridge.invoke('install_vendor_package', { vendor: pkg.vendor })
+          : await TauriBridge.invoke('install_deb_package', { packageName: pkg.deb });
         this.syncInstalledState(pkg.id, true);
         if (prog) prog.style.width = '0%';
 
@@ -3166,6 +3193,7 @@
       const savedAlign = SafeStorage.getItem('ankora_taskbar_align') || 'center';
       const savedHeight = SafeStorage.getItem('ankora_taskbar_height') || '44px';
       const savedAnim = SafeStorage.getItem('ankora_anim_speed') || 'smooth';
+      const savedIconSet = SafeStorage.getItem('ankora_icon_set') || 'monokrom';
 
       this.setTheme(savedTheme, false);
       this.setAccent(savedAccent, false);
@@ -3175,6 +3203,7 @@
       this.setTaskbarAlign(savedAlign, false);
       this.setTaskbarHeight(savedHeight, false);
       this.setAnimSpeed(savedAnim, false);
+      this.setIconSet(savedIconSet, false);
 
       // Tema Kartı, Vurgu Butonu ve Kişiselleştirme Seçimleri
       document.addEventListener('click', (e) => {
@@ -3230,6 +3259,13 @@
         if (animBtn) {
           const s = animBtn.getAttribute('data-anim');
           if (s) this.setAnimSpeed(s);
+        }
+
+        // İkon Seti (Başlat menüsü / masaüstü / görev çubuğu simgeleri)
+        const iconsetBtn = e.target.closest('#group-iconset .option-pill-btn');
+        if (iconsetBtn) {
+          const s = iconsetBtn.getAttribute('data-iconset');
+          if (s) this.setIconSet(s);
         }
       });
     },
@@ -3363,6 +3399,20 @@
         SafeStorage.setItem('ankora_anim_speed', animMode);
         Terminal.log(`[KİŞİSELLEŞTİRME] Arayüz animasyon hızı: ${animMode}`, 'cmd');
       }
+    },
+
+    setIconSet(setName, persist = true) {
+      this.currentIconSet = setName;
+      document.documentElement.setAttribute('data-iconset', setName);
+
+      document.querySelectorAll('#group-iconset .option-pill-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.getAttribute('data-iconset') === setName);
+      });
+
+      if (persist) {
+        SafeStorage.setItem('ankora_icon_set', setName);
+        Terminal.log(`[İKON SETİ] Uygulama simgeleri setine geçildi: ${setName}`, 'cmd');
+      }
     }
   };
 
@@ -3381,8 +3431,30 @@
       try {
         info = await TauriBridge.invoke('get_display_modes');
       } catch (e) {
-        return;
+        info = null;
       }
+
+      // Önerilen (native) çözünürlüğe dönüş — kurulu sistemde bulanık görünen
+      // ekranı bu düğme kurtarır. Dinamik mod listesi yoksa da bağlanır.
+      const btnPreferred = document.getElementById('btn-preferred-mode');
+      if (btnPreferred) {
+        btnPreferred.onclick = async () => {
+          if (!info || !info.preferred_mode) {
+            ReportManager.showToast('Ekranın önerilen çözünürlüğü bulunamadı.');
+            return;
+          }
+          try {
+            const res = await TauriBridge.invoke('set_display_mode', {
+              mode: 'preferred', rate: '', output: info.output
+            });
+            const after = (res && typeof res === 'object') ? Number(res.revert_after) || 0 : 0;
+            this.startRevertCountdown(after);
+          } catch (e) {
+            ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
+          }
+        };
+      }
+
       if (!info || !Array.isArray(info.modes) || info.modes.length === 0) return;
 
       const fillRates = (modeObj) => {
@@ -3402,7 +3474,10 @@
       info.modes.forEach(m => {
         const opt = document.createElement('option');
         opt.value = m.mode;
-        opt.textContent = `${m.mode.replace('x', ' x ')}${m.current ? ' (aktif)' : ''}`;
+        const tags = [];
+        if (m.current) tags.push('aktif');
+        if (m.preferred || m.mode === info.preferred_mode) tags.push('önerilen');
+        opt.textContent = `${m.mode.replace('x', ' x ')}${tags.length ? ` (${tags.join(', ')})` : ''}`;
         if (m.mode === info.current_mode) opt.selected = true;
         selMode.appendChild(opt);
         if (m.current) fillRates(m);
@@ -3410,9 +3485,13 @@
 
       const apply = async (rate) => {
         try {
-          await TauriBridge.invoke('set_display_mode', {
+          const res = await TauriBridge.invoke('set_display_mode', {
             mode: selMode.value, rate, output: info.output
           });
+          // Sunucu onay süresi döndürürse geri alma çubuğu açılır; süre
+          // dolarsa sistem eski moda kendisi döner.
+          const after = (res && typeof res === 'object') ? Number(res.revert_after) || 0 : 0;
+          this.startRevertCountdown(after);
         } catch (e) {
           ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
         }
@@ -3438,7 +3517,81 @@
       }
     },
 
+    // --- Çözünürlük onay / geri alma akışı (ekran boş kalmasın diye) ---
+    revertTimer: null,
+
+    startRevertCountdown(sec) {
+      const bar = document.getElementById('display-revert-bar');
+      const label = document.getElementById('display-revert-label');
+      if (!bar) return;
+      if (this.revertTimer) {
+        clearInterval(this.revertTimer);
+        this.revertTimer = null;
+      }
+      if (!sec) {
+        bar.style.display = 'none';
+        return;
+      }
+      let left = sec;
+      const tick = () => {
+        if (label) {
+          label.textContent = `Ekran modu uygulandı — ${left} saniye içinde onaylanmazsa eski haline dönecek.`;
+        }
+      };
+      tick();
+      bar.style.display = 'flex';
+      this.revertTimer = setInterval(() => {
+        left -= 1;
+        if (left <= 0) {
+          clearInterval(this.revertTimer);
+          this.revertTimer = null;
+          bar.style.display = 'none';
+          ReportManager.showToast('Ekran modu onaylanmadı; önceki çözünürlüğe geri dönüldü.');
+          this.loadDisplayModes();
+          return;
+        }
+        tick();
+      }, 1000);
+    },
+
+    async confirmDisplayMode() {
+      if (this.revertTimer) {
+        clearInterval(this.revertTimer);
+        this.revertTimer = null;
+      }
+      const bar = document.getElementById('display-revert-bar');
+      if (bar) bar.style.display = 'none';
+      try {
+        await TauriBridge.invoke('confirm_display_mode');
+        ReportManager.showToast('Ekran ayarı kalıcı olarak kaydedildi.');
+      } catch (e) {
+        ReportManager.showToast(`Onay gönderilemedi: ${e.message || e}`);
+      }
+    },
+
+    async revertDisplayModeNow() {
+      if (this.revertTimer) {
+        clearInterval(this.revertTimer);
+        this.revertTimer = null;
+      }
+      try {
+        await TauriBridge.invoke('revert_display_mode');
+        const bar = document.getElementById('display-revert-bar');
+        if (bar) bar.style.display = 'none';
+        ReportManager.showToast('Önceki ekran çözünürlüğüne dönüldü.');
+        this.loadDisplayModes();
+      } catch (e) {
+        ReportManager.showToast(`Geri alınamadı: ${e.message || e}`);
+      }
+    },
+
     async init() {
+      // Çözünürlük onay çubuğu düğmeleri (kepçe: tek bağlama, tekrarsız)
+      const btnKeep = document.getElementById('btn-display-keep');
+      if (btnKeep) btnKeep.addEventListener('click', () => this.confirmDisplayMode());
+      const btnRevert = document.getElementById('btn-display-revert');
+      if (btnRevert) btnRevert.addEventListener('click', () => this.revertDisplayModeNow());
+
       // 1. Sol Navigasyon Sekme Değişimi
       const navItems = document.querySelectorAll('.settings-nav-item');
       const panes = document.querySelectorAll('.settings-pane');
@@ -5190,18 +5343,25 @@
     historyIndex: 0,
     loadingBar: null,
     fallbackCard: null,
+    loadMask: null,
+    watchdog: null,
+    timedOut: false,
 
     init() {
       this.iframe = document.getElementById('browser-iframe');
       this.urlInput = document.getElementById('browser-url-input');
       this.loadingBar = document.getElementById('browser-loading-bar');
       this.fallbackCard = document.getElementById('browser-fallback-card');
+      this.loadMask = document.getElementById('browser-load-mask');
       // Sayfa doğrudan siteye açılsaydı X-Frame-Options çerçeveyi kapatır;
       // ilk yükleme de köprü üzerinden yapılır.
       // Host, köprü dışına çıkan geçişleri iptal edip hedefi buraya bildirir;
       // böylece bağlantı, form ve JavaScript geçişleri tek yoldan ilerler.
       window.__ayazProxyNav = (uri) => { if (uri) this.navigate(uri); };
-      if (this.iframe) this.iframe.src = this.toProxy(this.history[this.historyIndex]);
+      if (this.iframe) {
+        this.startLoading();
+        this.iframe.src = this.toProxy(this.history[this.historyIndex]);
+      }
 
       const btnGo = document.getElementById('btn-browser-go');
       const btnBack = document.getElementById('btn-browser-back');
@@ -5269,6 +5429,11 @@
           .catch(() => {});
       }
 
+      const btnFallbackExternal = document.getElementById('btn-browser-fallback-external');
+      if (btnFallbackExternal) {
+        btnFallbackExternal.addEventListener('click', () => this.openExternal());
+      }
+
       // Bookmark Chips
       const chips = document.querySelectorAll('.bookmark-chip[data-url]');
       chips.forEach(chip => {
@@ -5283,6 +5448,12 @@
       // Iframe Load Event
       if (this.iframe) {
         this.iframe.addEventListener('load', () => {
+          // Sayaç dolmuş ama sayfa sonunda yine gelmişse: hata kartı
+          // içeriğin üstünde kalmasın.
+          if (this.timedOut && this.fallbackCard) {
+            this.timedOut = false;
+            this.fallbackCard.style.display = 'none';
+          }
           this.finishLoading();
         });
       }
@@ -5368,10 +5539,12 @@
 
     reload() {
       if (this.iframe) {
-        this.startLoading();
         const cur = this.iframe.src;
         this.iframe.src = '';
+        // about:blank yüklemesi load olayını erken tetikler; sayaç ve maske
+        // gerçek hedef yazılırken başlatılır.
         setTimeout(() => {
+          this.startLoading();
           this.iframe.src = cur;
         }, 50);
       }
@@ -5387,9 +5560,44 @@
           }
         }, 300);
       }
+      // Yükleniyor maske: köprü yanıt verene kadar kullanıcı boş beyaz
+      // alan görmez.
+      if (this.loadMask) {
+        const txt = document.getElementById('browser-load-mask-text');
+        if (txt) txt.textContent = 'Sayfa yükleniyor…';
+        this.loadMask.style.display = 'flex';
+      }
+      // Bekleme sayacı: köprü/sunucu yanıt vermezse süre sonunda hata
+      // kartına düşülür, ekran boş beyaz kalmaz.
+      if (this.watchdog) clearTimeout(this.watchdog);
+      this.watchdog = setTimeout(() => this.onLoadTimeout(), 25000);
+    },
+
+    onLoadTimeout() {
+      if (this.watchdog) {
+        clearTimeout(this.watchdog);
+        this.watchdog = null;
+      }
+      if (this.loadMask) this.loadMask.style.display = 'none';
+      this.finishLoading();
+      if (this.fallbackCard) {
+        const title = document.getElementById('browser-fallback-title');
+        const desc = document.getElementById('browser-fallback-desc');
+        if (title) title.textContent = 'Sayfa yüklenemedi';
+        if (desc) {
+          desc.textContent = 'Köprü yanıt vermedi; ağ bağlantısı yavaş veya kopuk olabilir. Yeniden deneyebilir ya da sayfayı sistem tarayıcısında açabilirsiniz.';
+        }
+        this.timedOut = true;
+        this.fallbackCard.style.display = 'flex';
+      }
     },
 
     finishLoading() {
+      if (this.watchdog) {
+        clearTimeout(this.watchdog);
+        this.watchdog = null;
+      }
+      if (this.loadMask) this.loadMask.style.display = 'none';
       if (this.loadingBar) {
         this.loadingBar.style.width = '100%';
         setTimeout(() => {

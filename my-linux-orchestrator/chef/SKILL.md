@@ -48,6 +48,20 @@ DOGRULAMA: <komut + sonuc, tek satir>
 - Sürüm metni `2.0`; arayüz/kopya metinleri Türkçe.
 - Kod incelemesi yapılacaksa antislop akışı çalışma sırasında uygulanır (Mode 1).
 
+## 4a. Komut çalıştırma disiplini (guardrail)
+
+- Skill'ler **gerçek sistemde komut çalıştırmaz**; yalnız plan, dosya üretimi
+  ve gözetimli doğrulama (`bash -n`, `node --check`, `py_compile`, chroot
+  içi deneme) yapar.
+- Sistem değiştiren işlemler (paket kurulumu, `apt`, `dd`, `mkfs`, servis
+  durdurma, `/etc`-`/boot` yazma, disk bölütleme) **kullanıcı onayından sonra**
+  ve komut satırı raporlanarak teslim edilir; ajan komutu kendisi çalıştırmez.
+- Onaylı kısa bir **allowlist** (doğrulama/okuma komutları) dışına çıkan her
+  araç önce kullanıcıya sorulur; "hızlıca dene" bahanesiyle sessizce
+  çalıştırılmaz.
+- Doğrulamalar ana makineye değil, kopya (chroot/konteyner/geçici dizin)
+  içindedir; gerçek sistemin bölümleme ve önyükleme alanlarına dokunulmaz.
+
 ## 5. Çıktı
 
 Kapandığında şef tek blok rapor verir: niyet, aktif düğüm listesi, her düğümün `SONUC` satırı, üretilen dosyalar ve kalan belirsizlikler.

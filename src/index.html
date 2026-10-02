@@ -661,12 +661,21 @@
             <!-- Köprü içeriği uygulama kökeninden izole edilir: allow-same-origin
                  olmadan çerçevedeki sayfa üst belgeye (ve yerel depoya) erişemez. -->
             <iframe id="browser-iframe" class="browser-iframe" sandbox="allow-scripts allow-forms allow-popups" referrerpolicy="no-referrer"></iframe>
+            <!-- Köprü yanıt verene kadar boş beyaz alan yerine yükleniyor
+                 ekranı gösterilir; süre dolarsa hata kartına düşülür. -->
+            <div class="browser-load-mask" id="browser-load-mask" style="display: none;" aria-hidden="true">
+              <div class="load-mask-spinner"></div>
+              <p id="browser-load-mask-text">Sayfa yükleniyor…</p>
+            </div>
             <div id="browser-fallback-card" class="browser-fallback-card" style="display: none;">
               <div class="fallback-hero">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:36px;height:36px;"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
                 <h3 id="browser-fallback-title">Ankora Ağ Tarayıcısı</h3>
                 <p id="browser-fallback-desc">Hafif ve güvenli yerleşik WebKit görüntüleyicisi aktif.</p>
-                <button class="btn-pkg" id="btn-browser-refresh">Yeniden Yükle</button>
+                <div class="fallback-actions">
+                  <button class="btn-pkg" id="btn-browser-refresh">Yeniden Yükle</button>
+                  <button class="btn-pkg" id="btn-browser-fallback-external" style="background:#334155; color:#e2e8f0; border-color:#475569;">Dış Tarayıcıda Aç</button>
+                </div>
               </div>
             </div>
           </div>
@@ -932,6 +941,17 @@
                 </div>
               </div>
 
+              <!-- İkon Seti (Başlat Menüsü, Masaüstü ve Pencere simgeleri) -->
+              <div class="settings-card-group">
+                <span class="card-group-title">İkon Seti</span>
+                <div class="option-pill-group" id="group-iconset">
+                  <button class="option-pill-btn active" data-iconset="monokrom">Monokrom</button>
+                  <button class="option-pill-btn" data-iconset="faerie">Faerie Wren (Renkli)</button>
+                  <button class="option-pill-btn" data-iconset="outline">Çizgisel</button>
+                </div>
+                <p class="card-group-hint">Seçim Başlat menüsündeki ve masaüstündeki tüm uygulama simgelerine uygulanır.</p>
+              </div>
+
               <!-- Duvar Kağıdı Seçimi -->
               <div class="settings-card-group">
                 <span class="card-group-title">Duvar Kağıdı (8 Vektörel Arka Plan)</span>
@@ -1054,8 +1074,33 @@
                     <option value="1920x1080" selected>1920 x 1080 (16:9 Full HD - Önerilen)</option>
                     <option value="2560x1440">2560 x 1440 (16:9 2K QHD)</option>
                     <option value="3840x2160">3840 x 2160 (16:9 4K UHD)</option>
+                    <option value="1600x900">1600 x 900 (16:9 HD+)</option>
+                    <option value="1440x900">1440 x 900 (16:10 WXGA+)</option>
                     <option value="1366x768">1366 x 768 (16:9 WXGA)</option>
+                    <option value="1280x1024">1280 x 1024 (5:4 SXGA)</option>
+                    <option value="1280x800">1280 x 800 (16:10 WXGA)</option>
+                    <option value="1280x720">1280 x 720 (16:9 HD)</option>
+                    <option value="1024x768">1024 x 768 (4:3 XGA)</option>
+                    <option value="800x600">800 x 600 (4:3 SVGA)</option>
                   </select>
+                </div>
+              </div>
+
+              <div class="setting-row-item">
+                <div class="row-desc">
+                  <strong>Önerilen (Native) Çözünürlük</strong>
+                  <span>Panelin fabrika önerisi — kurulu sistemde bulanıklığı bu çözer</span>
+                </div>
+                <div class="row-control">
+                  <button type="button" class="btn-pill" id="btn-preferred-mode">Önerilene Dön</button>
+                </div>
+              </div>
+
+              <div class="display-revert-bar" id="display-revert-bar" style="display: none;" role="status">
+                <span id="display-revert-label">Ekran modu uygulandı.</span>
+                <div class="display-revert-actions">
+                  <button type="button" class="btn-pill" id="btn-display-keep">Bu Ayarı Koru</button>
+                  <button type="button" class="btn-pill btn-pill-ghost" id="btn-display-revert">Geri Al</button>
                 </div>
               </div>
 
@@ -1067,8 +1112,10 @@
                 <div class="row-control">
                   <select id="ctrl-refresh-rate" class="select-mono">
                     <option value="60">60 Hz (Standart)</option>
+                    <option value="75">75 Hz</option>
                     <option value="120">120 Hz (Akıcı)</option>
                     <option value="144">144 Hz (Yüksek Hız)</option>
+                    <option value="165">165 Hz (Oyuncu)</option>
                   </select>
                 </div>
               </div>
@@ -1083,6 +1130,8 @@
                     <option value="100" selected>%100 (Varsayılan)</option>
                     <option value="125">%125 (Büyütülmüş)</option>
                     <option value="150">%150 (Yüksek DPI)</option>
+                    <option value="175">%175 (Çok Yüksek DPI)</option>
+                    <option value="200">%200 (2x Büyük)</option>
                   </select>
                 </div>
               </div>
