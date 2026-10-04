@@ -167,100 +167,37 @@
 
         case 'system_reboot':
           return 'Sistem yeniden başlatılıyor...';
+
+        case 'system_suspend':
+          return 'Sistem askıya alınıyor...';
+
+        case 'system_logout':
+          return 'Oturum kapatılıyor...';
+
+        case 'take_screenshot':
+          return {
+            success: true,
+            file_path: '/home/ankora/Pictures/Screenshots/Ekran-Goruntusu.png',
+            file_name: 'Ekran-Goruntusu.png',
+            image_b64: null
+          };
         case 'drag_window':
           return null;
 
         case 'scan_xdg_applications':
           return [];
 
-        case 'install_deb_package':
-          return {
-            id: args.packageName || 'app',
-            name: (args.packageName || 'Uygulama').toUpperCase(),
-            exec: args.packageName || 'app',
-            icon: args.packageName || 'application-x-executable',
-            comment: 'Devuan paket deposundan kuruldu',
-            categories: ['Utility']
-          };
-
-        case 'remove_deb_package':
-          return `Paket '${args.packageName}' başarıyla kaldırıldı.`;
-
-        case 'launch_application':
-          return `[Uygulama Başlatıldı]: ${args.exec}`;
-
-        case 'run_terminal_command':
-          const c = (args.command || '').trim();
-          if (c === 'uname -a') return 'Linux ankora-os 6.1.0-22-amd64 #1 SMP PREEMPT Devuan x86_64 GNU/Linux';
-          if (c === 'whoami') return 'ankora (uid=1000 gid=1000 groups=sudo,audio,video)';
-          if (c === 'uptime') return 'up 21 hours, 2 users, load average: 0.05, 0.02, 0.00';
-          if (c === 'ls' || c === 'ls -la') return 'total 48\ndrwxr-xr-x 4 ankora ankora 4096 Sep 26 14:20 .\ndrwxr-xr-x 3 ankora ankora 4096 Sep 26 14:00 ..\n-rw-r--r-- 1 ankora ankora 1442 Sep 26 14:15 tauri.conf.json\n-rw-r--r-- 1 ankora ankora  561 Sep 26 14:23 Cargo.toml\ndrwxr-xr-x 2 ankora ankora 4096 Sep 26 14:10 src\n-rw-r--r-- 1 ankora ankora 6190 Sep 26 14:00 README.md';
-          if (c.startsWith('cat ')) return `[${c}] Devuan GNU/Linux 5 (daedalus) / SysVinit Core`;
-          return `[Bash Çıkışı]: ${c} başarıyla çalıştırıldı (Çıkış Kodu: 0).`;
-
-        case 'read_document_file':
-          return {
-            file_name: 'ankora-sistem-rehberi.pdf',
-            file_type: 'pdf',
-            file_size: 48200,
-            content: 'data:application/pdf;base64,JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PAovVHlwZSAvQ2F0YWxvZwovUGFnZXMgMiAwIFIKPj4KZW5kb2JqCjIgMCBvYmoKPDwKL1R5cGUgL1BhZ2VzCi9LaWRzIFszIDAgUl0KL0NvdW50IDEKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL1R5cGUgL1BhZ2UKL1BhcmVudCAyIDAgUgovTWVkaWFCb3ggWzAgMCA1OTUgODQyXQovQ29udGVudHMgNCAwIFIKPj4KZW5kb2JqCjQgMCBvYmoKPDwKL0xlbmd0aCA4NQo+PgpzdHJlYW0KQVQKL1RkIDAgLzAgRjEgMjQgVGYKKDFBYmtvcmEgTGludXggMi4wIFNpc3RlbSBSZWhiZXJpKSBUagogRVQKZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgNQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwMTUgMDAwMDAgbiAKMDAwMDAwMDA2OCAwMDAwMCBuIAowMDAwMDAwMTI1IDAwMDAwIG4gCjAwMDAwMDAyMjUgMDAwMDAgbiAKdHJhaWxlcgo8PAovU2l6ZSA1Ci9Sb290IDEgMCBSCj4+CnN0YXJ0eHJlZgogMzYxCiUlRU9GCg=='
-          };
-
-        case 'query_local_ai': {
-          const prov = (args.provider || 'ollama').toUpperCase();
-          const mode = (args.agent_mode || 'sysadmin').toLowerCase();
-          const p = (args.prompt || '').toLowerCase();
-          const hasKey = Boolean(args.api_key && args.api_key.trim().length > 0);
-          const prefix = `[${prov} / ${mode === 'developer' ? 'GELİŞTİRİCİ' : mode === 'general' ? 'ASİSTAN' : 'SİSTEM TEFTİŞ'} AJANI]: `;
-
-          if (p.includes('temizle') || p.includes('önbellek')) {
-            return {
-              reply: `${prefix}Sistem önbelleklerinin temizlenmesi ve disk alanının boşaltılması analiz edildi. Aşağıdaki işlem paket önbelleğini ve geçici dosyaları güvenli bir şekilde silecektir.`,
-              has_action: true,
-              action_command: 'apt-get clean && rm -rf /tmp/*',
-              action_desc: 'Sistem paket önbelleğini temizleme ve geçici dosyaları boşaltma'
-            };
-          } else if (p.includes('disk') || p.includes('ram') || p.includes('durum')) {
-            return {
-              reply: `${prefix}Sistem kaynakları denetleniyor. Kök dosya sistemi doluluğu ve bellek (RAM) tüketimi raporlanacaktır.`,
-              has_action: true,
-              action_command: 'df -h / && free -m',
-              action_desc: 'Kök dosya sistemi ve RAM kullanımını sorgulama'
-            };
-          } else if (p.includes('ağ') || p.includes('ip') || p.includes('network')) {
-            return {
-              reply: `${prefix}Ağ arabirimleri ve etkin IP adresleri taranıyor.`,
-              has_action: true,
-              action_command: 'hostname -I',
-              action_desc: 'Etkin arayüzlerin IP adreslerini listeleme'
-            };
-          } else if (p.includes('teftiş') || p.includes('çekirdek') || p.includes('telemetri')) {
-            return {
-              reply: `${prefix}Çekirdek telemetrisi, init sistemi ve donanım mimarisi taranıyor.`,
-              has_action: true,
-              action_command: 'uname -a',
-              action_desc: 'Sistem çekirdeği bilgisini listeleme'
-            };
-          }
-
-          return {
-            reply: `${prefix}Talebiniz '${args.prompt}' işlendi.\n• Model: ${args.model || 'varsayılan'}\n• Bağlantı: ${hasKey ? 'Özel Kullanıcı API Anahtarı Aktif ✓' : 'Yerel / Açık Uç Nokta'}\nAnkora Linux Devuan 5.0 (Daedalus) çekirdeği üzerinde otonom ajan hazır.`,
-            has_action: false,
-            action_command: null,
-            action_desc: null
-          };
-        }
-
-        case 'execute_agent_confirmed_action':
-          return `[SİSTEM ONAYLANDI] ${args.command} çalıştırıldı ve tamamlandı.`;
-
         case 'get_storage_devices':
-          return [
-            { name: 'sda', path: '/dev/sda', size_gb: 64.0, model: 'Sistem Depolama Diski (/dev/sda)', is_removable: false }
-          ];
+          return [];
 
         case 'execute_system_installation':
-          return `Kurulum tamamlandı: ${args.payload?.target_disk || '/dev/sda'} üzerine ${args.payload?.username || 'ankora'} kullanıcısıyla kuruldu.`;
+          throw new Error('Sistem kurulumu yalnızca canlı Ankora Linux ortamında yerel köprü üzerinden çalıştırılabilir. Yerel IPC köprüsüne bağlanılamadı.');
+
+        case 'install_deb_package':
+          throw new Error('Paket kurulumu için yerel sistem köprüsü gereklidir.');
+
+        case 'remove_deb_package':
+          throw new Error('Paket kaldırma için yerel sistem köprüsü gereklidir.');
 
         case 'get_system_telemetry':
           return {
@@ -395,11 +332,15 @@
   const WindowManager = {
     highestZ: 30,
     windows: [],
+    nativeWindows: [],
+    _desktopHidden: false,
     tabsContainer: null,
 
     init() {
       this.windows = Array.from(document.querySelectorAll('.window'));
       this.tabsContainer = document.getElementById('running-tabs');
+      setInterval(() => this.refreshNativeWindows(), 1500);
+      this.refreshNativeWindows();
 
       this.windows.forEach(win => {
         win.addEventListener('mousedown', () => this.bringToFront(win));
@@ -447,7 +388,7 @@
 
             this.bringToFront(win);
 
-            const snapGhost = document.getElementById('window-snap-preview');
+            const snapGhost = document.getElementById('snap-ghost-indicator') || document.getElementById('window-snap-preview');
             const rect = win.getBoundingClientRect();
             const shiftX = e.clientX - rect.left;
             const shiftY = e.clientY - rect.top;
@@ -455,7 +396,7 @@
             let rafId = null;
             let targetX = rect.left;
             let targetY = rect.top;
-            let activeSnap = null; // 'left' | 'right' | 'top' | null
+            let activeSnap = null; // 'left' | 'right' | 'top' | 'corner-tl' | 'corner-tr' | 'corner-bl' | 'corner-br' | null
 
             document.body.classList.add('is-dragging');
             win.classList.add('is-dragging');
@@ -475,37 +416,88 @@
                 rafId = requestAnimationFrame(applyPos);
               }
 
-              // Ayaz DE Akıcı Edge Snapping Algılama
-              if (moveEvent.clientX < 18) {
+              const tbVar = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--taskbar-height'), 10);
+              const tbH = Number.isFinite(tbVar) ? tbVar : 44;
+              const sw = window.innerWidth;
+              const sh = window.innerHeight - tbH;
+
+              // Ayaz DE Akıcı Köşe ve Kenar Kenetleme Algılayıcı (Aero Snap)
+              if (moveEvent.clientX < 20 && moveEvent.clientY < 35) {
+                activeSnap = 'corner-tl';
+                if (snapGhost) {
+                  snapGhost.style.display = 'block';
+                  snapGhost.style.left = '4px';
+                  snapGhost.style.top = '4px';
+                  snapGhost.style.width = `calc(${sw * 0.5}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh * 0.5}px - 8px)`;
+                  snapGhost.classList.add('visible');
+                }
+              } else if (moveEvent.clientX > sw - 20 && moveEvent.clientY < 35) {
+                activeSnap = 'corner-tr';
+                if (snapGhost) {
+                  snapGhost.style.display = 'block';
+                  snapGhost.style.left = `calc(${sw * 0.5}px + 4px)`;
+                  snapGhost.style.top = '4px';
+                  snapGhost.style.width = `calc(${sw * 0.5}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh * 0.5}px - 8px)`;
+                  snapGhost.classList.add('visible');
+                }
+              } else if (moveEvent.clientX < 20 && moveEvent.clientY > window.innerHeight - 80) {
+                activeSnap = 'corner-bl';
+                if (snapGhost) {
+                  snapGhost.style.display = 'block';
+                  snapGhost.style.left = '4px';
+                  snapGhost.style.top = `calc(${sh * 0.5}px + 4px)`;
+                  snapGhost.style.width = `calc(${sw * 0.5}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh * 0.5}px - 8px)`;
+                  snapGhost.classList.add('visible');
+                }
+              } else if (moveEvent.clientX > sw - 20 && moveEvent.clientY > window.innerHeight - 80) {
+                activeSnap = 'corner-br';
+                if (snapGhost) {
+                  snapGhost.style.display = 'block';
+                  snapGhost.style.left = `calc(${sw * 0.5}px + 4px)`;
+                  snapGhost.style.top = `calc(${sh * 0.5}px + 4px)`;
+                  snapGhost.style.width = `calc(${sw * 0.5}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh * 0.5}px - 8px)`;
+                  snapGhost.classList.add('visible');
+                }
+              } else if (moveEvent.clientX < 18) {
                 activeSnap = 'left';
                 if (snapGhost) {
+                  snapGhost.style.display = 'block';
                   snapGhost.style.left = '4px';
                   snapGhost.style.top = '4px';
-                  snapGhost.style.width = 'calc(50vw - 8px)';
-                  snapGhost.style.height = 'calc(100vh - var(--taskbar-height) - 8px)';
+                  snapGhost.style.width = `calc(${sw * 0.5}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh}px - 8px)`;
                   snapGhost.classList.add('visible');
                 }
-              } else if (moveEvent.clientX > window.innerWidth - 18) {
+              } else if (moveEvent.clientX > sw - 18) {
                 activeSnap = 'right';
                 if (snapGhost) {
-                  snapGhost.style.left = 'calc(50vw + 4px)';
+                  snapGhost.style.display = 'block';
+                  snapGhost.style.left = `calc(${sw * 0.5}px + 4px)`;
                   snapGhost.style.top = '4px';
-                  snapGhost.style.width = 'calc(50vw - 8px)';
-                  snapGhost.style.height = 'calc(100vh - var(--taskbar-height) - 8px)';
+                  snapGhost.style.width = `calc(${sw * 0.5}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh}px - 8px)`;
                   snapGhost.classList.add('visible');
                 }
-              } else if (moveEvent.clientY < 12) {
+              } else if (moveEvent.clientY < 14) {
                 activeSnap = 'top';
                 if (snapGhost) {
+                  snapGhost.style.display = 'block';
                   snapGhost.style.left = '4px';
                   snapGhost.style.top = '4px';
-                  snapGhost.style.width = 'calc(100vw - 8px)';
-                  snapGhost.style.height = 'calc(100vh - var(--taskbar-height) - 8px)';
+                  snapGhost.style.width = `calc(${sw}px - 8px)`;
+                  snapGhost.style.height = `calc(${sh}px - 8px)`;
                   snapGhost.classList.add('visible');
                 }
               } else {
                 activeSnap = null;
-                if (snapGhost) snapGhost.classList.remove('visible');
+                if (snapGhost) {
+                  snapGhost.classList.remove('visible');
+                  snapGhost.style.display = 'none';
+                }
               }
             };
 
@@ -513,26 +505,29 @@
               if (rafId) cancelAnimationFrame(rafId);
               document.body.classList.remove('is-dragging');
               win.classList.remove('is-dragging');
-              if (snapGhost) snapGhost.classList.remove('visible');
+              if (snapGhost) {
+                snapGhost.classList.remove('visible');
+                snapGhost.style.display = 'none';
+              }
 
               document.removeEventListener('mousemove', onMouseMove);
               document.removeEventListener('mouseup', onMouseUp);
 
               // Snapping Eylemini Uygula
               if (activeSnap === 'left') {
-                win.style.left = '0px';
-                win.style.top = '0px';
-                win.style.width = '50vw';
-                win.style.height = 'calc(100vh - var(--taskbar-height))';
-                win.classList.remove('maximized');
+                this.snapWindow(win, 'left-half');
               } else if (activeSnap === 'right') {
-                win.style.left = '50vw';
-                win.style.top = '0px';
-                win.style.width = '50vw';
-                win.style.height = 'calc(100vh - var(--taskbar-height))';
-                win.classList.remove('maximized');
+                this.snapWindow(win, 'right-half');
               } else if (activeSnap === 'top') {
                 this.toggleMaximize(win);
+              } else if (activeSnap === 'corner-tl') {
+                this.snapWindow(win, 'corner-tl');
+              } else if (activeSnap === 'corner-tr') {
+                this.snapWindow(win, 'corner-tr');
+              } else if (activeSnap === 'corner-bl') {
+                this.snapWindow(win, 'corner-bl');
+              } else if (activeSnap === 'corner-br') {
+                this.snapWindow(win, 'corner-br');
               }
             };
 
@@ -556,23 +551,33 @@
             const startW = win.offsetWidth;
             const startH = win.offsetHeight;
             const startX = e.clientX;
-            const startY = e.clientY;
+            let resizeRaf = null;
+            let targetW = startW;
+            let targetH = startH;
+
+            const applyResize = () => {
+              win.style.width = `${targetW}px`;
+              win.style.height = `${targetH}px`;
+              resizeRaf = null;
+            };
 
             const onResizeMove = (moveEvent) => {
               if (win.classList.contains('maximized')) return;
-              const newW = Math.max(300, startW + (moveEvent.clientX - startX));
-              const newH = Math.max(260, startH + (moveEvent.clientY - startY));
-              win.style.width = `${newW}px`;
-              win.style.height = `${newH}px`;
+              targetW = Math.max(300, startW + (moveEvent.clientX - startX));
+              targetH = Math.max(260, startH + (moveEvent.clientY - startY));
+              if (!resizeRaf) {
+                resizeRaf = requestAnimationFrame(applyResize);
+              }
             };
 
             const onResizeUp = () => {
+              if (resizeRaf) cancelAnimationFrame(resizeRaf);
               document.removeEventListener('mousemove', onResizeMove);
               document.removeEventListener('mouseup', onResizeUp);
             };
 
-            document.addEventListener('mousemove', onResizeMove);
-            document.addEventListener('mouseup', onResizeUp);
+            document.addEventListener('mousemove', onResizeMove, { passive: true });
+            document.addEventListener('mouseup', onResizeUp, { once: true });
           });
         }
       });
@@ -725,6 +730,29 @@
       SessionManager.touch();
     },
 
+    getActiveWindow() {
+      const openWins = this.windows.filter(w => w.classList.contains('open') && !w.classList.contains('minimized'));
+      if (openWins.length === 0) return null;
+      return openWins.reduce((max, w) => {
+        const z = parseInt(w.style.zIndex || '0', 10);
+        const maxZ = parseInt(max.style.zIndex || '0', 10);
+        return z > maxZ ? w : max;
+      }, openWins[0]);
+    },
+
+    snapActive(direction) {
+      const win = this.getActiveWindow();
+      if (!win) return;
+      if (direction === 'left') this.snapWindow(win, 'left-half');
+      else if (direction === 'right') this.snapWindow(win, 'right-half');
+      else if (direction === 'up') {
+        if (!win.classList.contains('maximized')) this.toggleMaximize(win);
+      } else if (direction === 'down') {
+        if (win.classList.contains('maximized')) this.toggleMaximize(win);
+        else this.minimize(win);
+      }
+    },
+
     cascadeWindows() {
       const openWins = this.windows.filter(w => w.classList.contains('open') && !w.classList.contains('minimized'));
       if (openWins.length === 0) return;
@@ -800,6 +828,62 @@
           this.tabsContainer.appendChild(tab);
         }
       });
+
+      // Gerçek X11 Yerel Uygulama Pencereleri Görev Çubuğunda Listelenir
+      if (Array.isArray(this.nativeWindows)) {
+        this.nativeWindows.forEach(nw => {
+          const tab = document.createElement('div');
+          tab.className = `task-tab native-task-tab ${nw.is_active ? 'active' : ''}`;
+          const shortTitle = (nw.title || nw.app_name || 'Uygulama').split('—')[0].trim().substring(0, 20);
+          tab.innerHTML = `<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:#38bdf8;margin-right:6px;"></span><span>${escapeHtml(shortTitle)}</span>`;
+          tab.title = `${nw.title} (${nw.app_name})\n• Tıkla: Öne getir / Küçült\n• Sağ tık: Kapat`;
+          tab.addEventListener('click', () => {
+            if (nw.is_active) {
+              TauriBridge.invoke('minimize_native_window', { id: nw.id }).catch(() => {});
+            } else {
+              TauriBridge.invoke('activate_native_window', { id: nw.id }).catch(() => {});
+            }
+            setTimeout(() => this.refreshNativeWindows(), 250);
+          });
+          tab.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            TauriBridge.invoke('close_native_window', { id: nw.id }).catch(() => {});
+            setTimeout(() => this.refreshNativeWindows(), 300);
+          });
+          this.tabsContainer.appendChild(tab);
+        });
+      }
+    },
+
+    async refreshNativeWindows() {
+      if (document.hidden || (window.LockManager && window.LockManager.isLocked)) return;
+      try {
+        const wins = await TauriBridge.invoke('get_native_windows');
+        if (Array.isArray(wins)) {
+          const prevSig = (this.nativeWindows || []).map(w => `${w.id}:${w.is_active}`).join('|');
+          const newSig = wins.map(w => `${w.id}:${w.is_active}`).join('|');
+          if (prevSig !== newSig) {
+            this.nativeWindows = wins;
+            this.syncTabs();
+          }
+        }
+      } catch (e) {}
+    },
+
+    toggleShowDesktop() {
+      this._desktopHidden = !this._desktopHidden;
+      if (this._desktopHidden) {
+        this.windows.forEach(w => {
+          if (w.classList.contains('open')) w.classList.add('minimized');
+        });
+        TauriBridge.invoke('minimize_all_windows').catch(() => {});
+      } else {
+        this.windows.forEach(w => {
+          if (w.classList.contains('open')) w.classList.remove('minimized');
+        });
+      }
+      this.syncTabs();
     }
   };
 
@@ -823,6 +907,7 @@
         const ws = parseInt(win.getAttribute('data-ws'), 10) || 1;
         win.classList.toggle('ws-hide', ws !== this.active);
       });
+      TauriBridge.invoke('set_native_workspace', { index: this.active - 1 }).catch(() => {});
       this.syncDots();
       SessionManager.touch();
     },
@@ -845,8 +930,9 @@
         const dot = document.createElement('button');
         dot.type = 'button';
         dot.className = `ws-dot${i === this.active ? ' active' : ''}`;
-        dot.title = `Çalışma alanı ${i}`;
-        dot.setAttribute('aria-label', `Çalışma alanı ${i}`);
+        dot.textContent = String(i);
+        dot.title = `Masaüstü ${i} (Tıkla ve Geç)`;
+        dot.setAttribute('aria-label', `Masaüstü ${i}`);
         dot.setAttribute('aria-current', i === this.active ? 'true' : 'false');
         dot.addEventListener('click', () => this.set(i));
         host.appendChild(dot);
@@ -862,8 +948,9 @@
       grid.textContent = '';
       const wins = WindowManager.windows.filter(w =>
         w.classList.contains('open') && !w.classList.contains('ws-hide'));
+      const nativeWins = Array.isArray(WindowManager.nativeWindows) ? WindowManager.nativeWindows : [];
 
-      if (wins.length === 0) {
+      if (wins.length === 0 && nativeWins.length === 0) {
         grid.innerHTML = '<div class="overview-empty">Açık pencere yok</div>';
       }
 
@@ -880,6 +967,22 @@
           this.closeOverview();
           win.classList.remove('minimized');
           WindowManager.bringToFront(win);
+        });
+        grid.appendChild(card);
+      });
+
+      nativeWins.forEach(nw => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `overview-card ${nw.is_active ? 'active' : ''}`;
+        const title = (nw.title || nw.app_name || 'Uygulama').split('—')[0].trim();
+        card.innerHTML = '<span class="overview-glyph" style="background:linear-gradient(135deg,#0284c7,#38bdf8);color:#fff;"></span><span class="overview-title"></span>';
+        card.querySelector('.overview-glyph').textContent = (nw.app_name || title).charAt(0).toLocaleUpperCase('tr');
+        card.querySelector('.overview-title').textContent = title;
+        card.title = `${nw.title} (${nw.app_name})`;
+        card.addEventListener('click', () => {
+          this.closeOverview();
+          TauriBridge.invoke('activate_native_window', { id: nw.id }).catch(() => {});
         });
         grid.appendChild(card);
       });
@@ -947,12 +1050,21 @@
           is_installed_by_user: true
         },
         {
-          id: 'ankora-browser',
-          name: 'Web Tarayıcı',
-          exec: 'internal:win-browser',
-          targetWindow: 'win-browser',
+          id: 'brave-browser',
+          name: 'Brave Web Tarayıcı',
+          exec: 'brave-browser',
+          targetWindow: null,
           cat: 'net',
-          comment: 'İnternet Gezgini ve Web Arayüzü',
+          comment: 'Hızlı, Gizlilik Odaklı Güvenli Web Tarayıcısı',
+          is_installed_by_user: true
+        },
+        {
+          id: 'ankora-screenshot',
+          name: 'Ekran Görüntüsü',
+          exec: 'internal:win-screenshot',
+          targetWindow: 'win-screenshot',
+          cat: 'util',
+          comment: 'Tam ekran, pencere veya serbest alan yakalama aracı',
           is_installed_by_user: true
         },
         {
@@ -971,6 +1083,15 @@
           targetWindow: 'win-widgets',
           cat: 'util',
           comment: 'Saat ve sistem bilgisi bileşenlerini masaüstüne yerleştirir',
+          is_installed_by_user: true
+        },
+        {
+          id: 'ankora-flasher',
+          name: 'USB & ISO Yazıcı',
+          exec: 'internal:win-flasher',
+          targetWindow: 'win-flasher',
+          cat: 'sys',
+          comment: 'USB bellek biçimlendirici ve ISO kalıbı yazıcı',
           is_installed_by_user: true
         }
       ];
@@ -1140,6 +1261,7 @@
         return;
       }
 
+      const frag = document.createDocumentFragment();
       onDesktop.forEach(app => {
         const item = document.createElement('div');
         const cat = app.cat || 'util';
@@ -1186,8 +1308,9 @@
           this.showShortcutContextMenu(e, app);
         });
 
-        container.appendChild(item);
+        frag.appendChild(item);
       });
+      container.appendChild(frag);
     },
 
     renderToStartMenu() {
@@ -1207,6 +1330,7 @@
       if (countEl) countEl.textContent = `${this.installedApps.length} Uygulama`;
       container.style.display = 'grid';
 
+      const frag = document.createDocumentFragment();
       this.installedApps.forEach(app => {
         const card = document.createElement('div');
         const cat = app.cat || 'util';
@@ -1253,8 +1377,9 @@
           this.showShortcutContextMenu(e, app);
         });
 
-        container.appendChild(card);
+        frag.appendChild(card);
       });
+      container.appendChild(frag);
     },
 
     getAppSvgIcon(app) {
@@ -1276,8 +1401,11 @@
       if (id === 'ankora-store' || id.includes('store') || id.includes('package')) {
         return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path><line x1="3" y1="6" x2="21" y2="6"></line><path d="M16 10a4 4 0 0 1-8 0"></path></svg>`;
       }
-      if (id === 'ankora-browser' || id.includes('browser')) {
-        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
+      if (id.includes('brave') || id === 'ankora-browser' || id.includes('browser')) {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3z"></path><path d="M9 12l2 2 4-4"></path></svg>`;
+      }
+      if (id.includes('screenshot') || id.includes('scrot') || id.includes('snip')) {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`;
       }
       if (id === 'ankora-office' || id.includes('office')) {
         return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
@@ -1310,6 +1438,18 @@
 
     async launchApp(app) {
       if (!app) return;
+      if (app.id === 'brave-browser' || app.exec === 'brave-browser') {
+        Terminal.log('[AYAZ BAŞLATICI] Brave Browser başlatılıyor...', 'cmd');
+        try {
+          await TauriBridge.invoke('launch_application', { exec: 'brave-browser' });
+          ReportManager.showToast('Brave Web Tarayıcı başlatıldı.');
+          return;
+        } catch (e) {
+          // Canlı ortamda kurulu değilse pencereye yönlendir
+          WindowManager.open('win-browser');
+          return;
+        }
+      }
       if (app.targetWindow || (app.exec && app.exec.startsWith('internal:'))) {
         const winId = app.targetWindow || app.exec.replace('internal:', '');
         const winEl = document.getElementById(winId);
@@ -1427,6 +1567,16 @@
   // ============================================================================
   const StoreManager = {
     packages: [
+      // 0. FLATHUB MODERN UYGULAMALAR (SANDBOX)
+      { id: 'flatpak-spotify', name: 'Spotify Müzik & Podcast', flatpak: 'com.spotify.Client', desc: 'Milyonlarca şarkı, albüm ve podcast dinleme akış platformu', cat: 'media', size: '180 MB', installed: false },
+      { id: 'flatpak-discord', name: 'Discord Sesli & Yazılı Sohbet', flatpak: 'com.discordapp.Discord', desc: 'Oyuncular ve topluluklar için kristal netliğinde sesli ve yazılı iletişim', cat: 'net', size: '120 MB', installed: false },
+      { id: 'flatpak-vscode', name: 'Visual Studio Code IDE', flatpak: 'com.visualstudio.code', desc: 'Gelişmiş eklenti ve hata ayıklama destekli modern kod editörü', cat: 'dev', size: '240 MB', installed: false },
+      { id: 'flatpak-telegram', name: 'Telegram Desktop', flatpak: 'org.telegram.desktop', desc: 'Hızlı, şifreli ve senkronize bulut mesajlaşma istemcisi', cat: 'net', size: '85 MB', installed: false },
+      { id: 'flatpak-heroic', name: 'Heroic Games Launcher (Epic & GOG)', flatpak: 'com.heroicgameslauncher.hgl', desc: 'Epic Games ve GOG kütüphaneleri için açık kaynak Linux başlatıcı', cat: 'util', size: '110 MB', installed: false },
+      { id: 'flatpak-lutris', name: 'Lutris Açık Oyun Yöneticisi', flatpak: 'net.lutris.Lutris', desc: 'Tüm emülatör, Windows ve Linux oyunlarını tek çatıda toplayan kütüphane', cat: 'util', size: '95 MB', installed: false },
+      { id: 'flatpak-onlyoffice', name: 'ONLYOFFICE Desktop Editors', flatpak: 'org.onlyoffice.desktopeditors', desc: 'Microsoft Office belgeleriyle %100 uyumlu modern ofis paketi', cat: 'office', size: '320 MB', installed: false },
+      { id: 'flatpak-obsidian', name: 'Obsidian Not & Bilgi Tabanı', flatpak: 'md.obsidian.Obsidian', desc: 'Markdown tabanlı, bağlantılı ikinci beyin ve kişisel not bankası', cat: 'office', size: '130 MB', installed: false },
+
       // 1. POPÜLER & TEMEL UYGULAMALAR (FLAGSHIP)
       { id: 'firefox-esr', name: 'Firefox ESR Web Tarayıcısı', deb: 'firefox-esr', desc: 'Mozilla güvenli, gizlilik odaklı ve hızlı web tarayıcısı', cat: 'net', size: '78 MB', installed: false },
       { id: 'chromium', name: 'Chromium Web Tarayıcı', deb: 'chromium', desc: 'Google açık kaynak motorlu yüksek performanslı modern tarayıcı', cat: 'net', size: '124 MB', installed: false },
@@ -1452,6 +1602,10 @@
       { id: 'p7zip-full', name: '7-Zip Yüksek Sıkıştırmalı Arşivleyici', deb: 'p7zip-full', desc: 'ZIP, 7z, TAR ve RAR arşivlerini açma ve sıkıştırma aracı', cat: 'util', size: '5 MB', installed: false },
       { id: 'brave', name: 'Brave Hızlı & Gizli Tarayıcı', deb: 'brave-browser', vendor: 'brave', desc: 'Reklam ve izleyici engelleyicisi yerleşik; resmî deposundan kurulur', cat: 'net', size: '150 MB', installed: false },
       { id: 'helium', name: 'Helium Hafif Web Tarayıcı', deb: 'helium-bin', vendor: 'helium', desc: 'ungoogle-chromium temelli, gizlilik odaklı hafif masaüstü tarayıcısı', cat: 'net', size: '130 MB', installed: false },
+      { id: 'timeshift', name: 'Timeshift Sistem Yedekleme & Anlık Görüntü', deb: 'timeshift', desc: 'Sistem kararsızlığına karşı tek tıkla geri dönüş ve kurtarma noktası oluşturucu', cat: 'sys', size: '15 MB', installed: false },
+      { id: 'steam', name: 'Steam Dijital Oyun Platformu', deb: 'steam-installer', desc: 'Valve resmi Linux oyun mağazası, Proton ve topluluk kütüphanesi', cat: 'util', size: '22 MB', installed: false },
+      { id: 'wine', name: 'Wine Windows Uyumluluk Katmanı', deb: 'wine', desc: 'Windows programlarını ve oyunlarını emülasyonsuz yerel hızda çalıştırma', cat: 'util', size: '140 MB', installed: false },
+      { id: 'neofetch', name: 'Neofetch Sistem Bilgi Kartı', deb: 'neofetch', desc: 'Terminal açılışında dağıtım logosu ve donanım özetini gösteren klasik araç', cat: 'sys', size: '1 MB', installed: false },
       { id: 'antigravity', name: 'Antigravity Yapay Zekâ IDE', deb: 'antigravity', vendor: 'antigravity', desc: 'Google’ın ajan öncesi dönem için tasarladığı ajan destekli kod editörü', cat: 'dev', size: '420 MB', installed: false },
       { id: 'opencode-desktop', name: 'OpenCode Masaüstü (AI Kod Ajanı)', deb: '', extUrl: 'https://opencode.ai', desc: 'Terminal, masaüstü ve IDE eklentisi olarak çalışan açık kaynak yapay zekâ kod ajanı', cat: 'dev', size: 'Site', installed: false },
 
@@ -1563,6 +1717,7 @@
     ],
     tableBody: null,
     currentCat: 'all',
+    currentSource: 'all',
 
     init() {
       // Kaydedilmiş kurulu paketleri yükle
@@ -1578,11 +1733,10 @@
         } catch (e) {}
       }
 
-      // Kart ızgarası da aynı doku nesnesine yazılır (eski tablo gövdesiyle
-      // dönüşümlü olarak uyumlu).
       this.tableBody = document.getElementById('store-grid') || document.getElementById('store-table-body');
       const searchInput = document.getElementById('store-search');
       const filterBtns = document.querySelectorAll('.store-filter-btn');
+      const sourceBtns = document.querySelectorAll('.store-source-btn');
 
       filterBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -1593,9 +1747,24 @@
         });
       });
 
+      sourceBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          sourceBtns.forEach(b => {
+            b.classList.remove('active');
+            b.style.background = 'rgba(255,255,255,0.04)';
+            b.style.borderColor = 'rgba(255,255,255,0.1)';
+            b.style.color = '#cbd5e1';
+          });
+          btn.classList.add('active');
+          btn.style.background = 'rgba(56,189,248,0.15)';
+          btn.style.borderColor = 'rgba(56,189,248,0.3)';
+          btn.style.color = '#38bdf8';
+          this.currentSource = btn.getAttribute('data-source');
+          this.render(searchInput ? searchInput.value : '');
+        });
+      });
+
       if (searchInput) {
-        // Her tuş vuruşunda tüm mağaza tablosunu yeniden kurmak yerine
-        // kısa bir bekletme: yazarken DOM yalnızca yazmayı bitirince çizilir.
         let storeSearchTimer = 0;
         searchInput.addEventListener('input', (e) => {
           const value = e.target.value;
@@ -1606,14 +1775,30 @@
 
       this.render();
 
-      // dpkg ile çapraz doğrulama: terminalden kurulan paketler de mağazada
-      // "Kurulu" görünür; localStorage tek başına bunu bilemiyordu.
+      // APT kurulu paketleri sorgula
       TauriBridge.invoke('list_installed_deb_packages').then((list) => {
         if (!Array.isArray(list)) return;
         const installed = new Set(list.map(s => String(s).trim()));
         let changed = false;
         this.packages.forEach(p => {
           if (!p.installed && p.deb && installed.has(p.deb)) {
+            p.installed = true;
+            changed = true;
+          }
+        });
+        if (changed) {
+          this.saveInstalledState();
+          this.render(document.getElementById('store-search') ? document.getElementById('store-search').value : '');
+        }
+      }).catch(() => {});
+
+      // Flatpak kurulu paketleri sorgula
+      TauriBridge.invoke('list_installed_flatpaks').then((list) => {
+        if (!Array.isArray(list)) return;
+        const installedFp = new Set(list.map(s => String(s).trim()));
+        let changed = false;
+        this.packages.forEach(p => {
+          if (!p.installed && p.flatpak && installedFp.has(p.flatpak)) {
             p.installed = true;
             changed = true;
           }
@@ -1634,18 +1819,19 @@
       if (!this.tableBody) return;
       this.tableBody.innerHTML = '';
 
-      // Satırlar önce fragment'a doldurulur, tek eklemede girer: satır
-      // başına ayrı appendChild her seferinde ayrı reflow tetikliyordu.
       const frag = document.createDocumentFragment();
-
       const q = query.toLowerCase();
       const seen = new Set();
       const filtered = this.packages.filter(p => {
+        const matchSource = this.currentSource === 'all'
+          || (this.currentSource === 'flathub' && Boolean(p.flatpak))
+          || (this.currentSource === 'apt' && Boolean(!p.flatpak));
         const matchCat = this.currentCat === 'all' || p.cat === this.currentCat;
-        const matchQ = p.name.toLowerCase().includes(q) || p.deb.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q);
-        if (!matchCat || !matchQ) return false;
-        // Aynı paket iki bölümde listeleniyor; "Tümü" görünümünde iki satır
-        // ve iki adet aynı id üretiyordu.
+        const matchQ = p.name.toLowerCase().includes(q)
+          || (p.deb && p.deb.toLowerCase().includes(q))
+          || (p.flatpak && p.flatpak.toLowerCase().includes(q))
+          || p.desc.toLowerCase().includes(q);
+        if (!matchSource || !matchCat || !matchQ) return false;
         if (seen.has(p.id)) return false;
         seen.add(p.id);
         return true;
@@ -1654,15 +1840,24 @@
       filtered.forEach(pkg => {
         const card = document.createElement('article');
         card.className = 'store-card';
-        const repoLabel = pkg.vendor
-          ? `${pkg.vendor} resmî deposu`
-          : (pkg.extUrl ? 'Harici kaynak' : 'Devuan resmî deposu');
+        const isFlatpak = Boolean(pkg.flatpak);
+        const pkgSub = pkg.flatpak || pkg.deb || '';
+        const repoLabel = isFlatpak
+          ? 'Flathub Resmî Sandbox'
+          : (pkg.vendor ? `${pkg.vendor} resmî deposu` : (pkg.extUrl ? 'Harici kaynak' : 'Devuan resmî deposu'));
+        const badgeHtml = isFlatpak
+          ? '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.3);letter-spacing:0.5px;">FLATHUB</span>'
+          : '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:4px;background:rgba(16,185,129,0.18);color:#10b981;border:1px solid rgba(16,185,129,0.3);letter-spacing:0.5px;">APT DEPO</span>';
+
         card.innerHTML = `
           <div class="store-card-head">
-            <span class="store-card-icon">${XdgDesktopEngine.getAppSvgIcon({ id: pkg.id, exec: pkg.deb, cat: pkg.cat })}</span>
+            <span class="store-card-icon">${XdgDesktopEngine.getAppSvgIcon({ id: pkg.id, exec: pkgSub, cat: pkg.cat })}</span>
             <span class="store-card-titles">
-              <span class="store-card-name">${escapeHtml(pkg.name)}</span>
-              <span class="store-card-pkg">${escapeHtml(pkg.deb)}</span>
+              <span class="store-card-name" style="display:flex;align-items:center;gap:6px;">
+                ${escapeHtml(pkg.name)}
+                ${badgeHtml}
+              </span>
+              <span class="store-card-pkg">${escapeHtml(pkgSub)}</span>
             </span>
           </div>
           <p class="store-card-desc">${escapeHtml(pkg.desc)}</p>
@@ -1715,9 +1910,13 @@
     },
 
     async launchPackage(pkg) {
-      Terminal.log(`[UYGULAMA BAŞLATILIYOR] ${pkg.name} (${pkg.deb})...`, 'cmd');
+      Terminal.log(`[UYGULAMA BAŞLATILIYOR] ${pkg.name}...`, 'cmd');
       try {
-        await TauriBridge.invoke('launch_application', { exec: pkg.deb });
+        if (pkg.flatpak) {
+          await TauriBridge.invoke('launch_application', { exec: `flatpak run ${pkg.flatpak}` });
+        } else {
+          await TauriBridge.invoke('launch_application', { exec: pkg.deb });
+        }
         Terminal.log(`[BAŞARILI] ${pkg.name} başlatıldı.`, 'success');
       } catch (err) {
         Terminal.log(`[BAŞLATMA BİLGİSİ] ${err}`, 'muted');
@@ -1737,6 +1936,51 @@
                       : document.getElementById(`btn-pkg-${pkg.id}`);
       const prog = row ? row.querySelector('.pkg-progress-bar')
                        : document.getElementById(`prog-${pkg.id}`);
+
+      if (pkg.flatpak) {
+        if (pkg.installed) {
+          if (btn) { btn.disabled = true; btn.textContent = 'Kaldırılıyor...'; }
+          Terminal.log(`[FLATPAK] flatpak uninstall -y ${pkg.flatpak} yürütülüyor...`, 'cmd');
+          try {
+            await TauriBridge.invoke('remove_flatpak_app', { appId: pkg.flatpak });
+            this.syncInstalledState(pkg.id, false);
+            this.saveInstalledState();
+            XdgDesktopEngine.removeApplication(pkg.id);
+            Terminal.log(`[FLATPAK] '${pkg.name}' (${pkg.flatpak}) kaldırıldı.`, 'success');
+            ReportManager.showToast(`${pkg.name} kaldırıldı.`);
+            this.render(document.getElementById('store-search')?.value || '');
+          } catch (err) {
+            if (btn) { btn.disabled = false; btn.textContent = 'Kaldır'; }
+            Terminal.log(`[ERR] Flatpak kaldırma hatası: ${err}`, 'error');
+            ReportManager.showToast(`Kaldırılamadı: ${err.message || err}`, 'error');
+          }
+        } else {
+          if (btn) { btn.disabled = true; btn.textContent = 'İndiriliyor...'; }
+          Terminal.log(`[FLATPAK] flatpak install -y flathub ${pkg.flatpak} yürütülüyor...`, 'cmd');
+          try {
+            await TauriBridge.invoke('install_flatpak_app', { appId: pkg.flatpak });
+            this.syncInstalledState(pkg.id, true);
+            this.saveInstalledState();
+            XdgDesktopEngine.addApplication({
+              id: pkg.id,
+              name: pkg.name,
+              exec: `flatpak run ${pkg.flatpak}`,
+              cat: pkg.cat,
+              comment: pkg.desc,
+              is_installed_by_user: true
+            });
+            XdgDesktopEngine.rescanXdgApps(false);
+            Terminal.log(`[FLATPAK] '${pkg.name}' (${pkg.flatpak}) başarıyla kuruldu ve masaüstüne eklendi!`, 'success');
+            ReportManager.showToast(`${pkg.name} kuruldu ve masaüstüne eklendi!`);
+            this.render(document.getElementById('store-search')?.value || '');
+          } catch (err) {
+            if (btn) { btn.disabled = false; btn.textContent = 'Kur'; }
+            Terminal.log(`[ERR] Flatpak kurulum hatası: ${err}`, 'error');
+            ReportManager.showToast(`Kurulum hatası: ${err.message || err}`, 'error');
+          }
+        }
+        return;
+      }
 
       if (pkg.installed) {
         if (btn) {
@@ -1807,6 +2051,7 @@
           comment: resolved.comment || pkg.desc,
           is_installed_by_user: true
         });
+        XdgDesktopEngine.rescanXdgApps(false);
 
         Terminal.log(`[XDG OK] ${resolved.name || pkg.name} kuruldu ve masaüstüne eklendi.`, 'success');
         ReportManager.showToast(`${resolved.name || pkg.name} kuruldu; masaüstüne eklendi.`);
@@ -2046,6 +2291,8 @@
           item.classList.add('active');
           const p = item.getAttribute('data-path');
           if (p === 'home') this.loadDirectory('');
+          else if (p === 'trash') this.loadTrash();
+          else if (p === 'network') this.promptNetworkShare();
           else if (['desktop', 'downloads', 'docs', 'pics', 'music', 'videos'].includes(p)) {
             const trMap = {
               desktop: 'Masaüstü',
@@ -2066,6 +2313,7 @@
     },
 
     async loadDirectory(dirPath) {
+      this.isTrashView = false;
       const breadcrumbs = document.getElementById('files-breadcrumbs');
       const grid = document.getElementById('files-grid');
       const statusCount = document.getElementById('files-status-count');
@@ -2134,10 +2382,12 @@
             return;
           }
 
+          const frag = document.createDocumentFragment();
           visibleItems.forEach(item => {
             const card = document.createElement('div');
             card.className = 'files-item-card';
             card.title = `${item.name} (${item.size_str || '-'})`;
+            card.draggable = true;
 
             let icon = '<svg class="glyph" aria-hidden="true"><use href="#ico-file"></use></svg>';
             let badge = '';
@@ -2154,6 +2404,7 @@
               icon = '<svg class="glyph" aria-hidden="true"><use href="#ico-edit"></use></svg>';
             } else if (['zip', 'tar', 'gz', 'xz', '7z', 'bz2'].includes(item.ext)) {
               icon = '<svg class="glyph" aria-hidden="true"><use href="#ico-archive"></use></svg>';
+              badge = '<span class="file-card-badge" style="background:rgba(234,179,8,0.2);color:#fde047;border-color:rgba(234,179,8,0.3);">ARŞİV</span>';
             } else if (['mp3', 'ogg', 'wav', 'flac'].includes(item.ext)) {
               icon = '<svg class="glyph" aria-hidden="true"><use href="#ico-music"></use></svg>';
             } else if (['mp4', 'mkv', 'avi', 'webm', 'mov'].includes(item.ext)) {
@@ -2166,6 +2417,29 @@
               <div class="files-item-size">${escapeHtml(item.size_str || (item.is_dir ? 'Klasör' : '-'))}</div>
               ${badge}
             `;
+
+            // Sürükle-Bırak (Drag & Drop)
+            card.addEventListener('dragstart', (e) => {
+              e.dataTransfer.setData('text/plain', item.path);
+            });
+
+            if (item.is_dir) {
+              card.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                card.classList.add('drag-over');
+              });
+              card.addEventListener('dragleave', () => {
+                card.classList.remove('drag-over');
+              });
+              card.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                card.classList.remove('drag-over');
+                const srcPath = e.dataTransfer.getData('text/plain');
+                if (srcPath && srcPath !== item.path) {
+                  await this.moveItem(srcPath, item.path);
+                }
+              });
+            }
 
             card.addEventListener('click', (e) => {
               e.stopPropagation();
@@ -2182,8 +2456,16 @@
               this.openItem(item);
             });
 
-            grid.appendChild(card);
+            // Sağ Tık Özel Dosya Bağlam Menüsü
+            card.addEventListener('contextmenu', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              this.showFileContextMenu(e, item);
+            });
+
+            frag.appendChild(card);
           });
+          grid.appendChild(frag);
         }
 
       } catch (err) {
@@ -2326,13 +2608,444 @@
     },
 
     refresh() {
-      this.loadDirectory(this.currentPath || this.userHome || '/home/ankora');
+      if (this.isTrashView) {
+        this.loadTrash();
+      } else {
+        this.loadDirectory(this.currentPath || this.userHome || '/home/ankora');
+      }
     },
 
     openTerminalHere() {
       WindowManager.open('win-terminal');
       if (Terminal && Terminal.runCommand) {
         Terminal.runCommand(`cd "${this.currentPath}"`);
+      }
+    },
+
+    async loadTrash() {
+      this.isTrashView = true;
+      const breadcrumbs = document.getElementById('files-breadcrumbs');
+      const grid = document.getElementById('files-grid');
+      const statusCount = document.getElementById('files-status-count');
+      const statusSelected = document.getElementById('files-status-selected');
+
+      if (breadcrumbs) {
+        breadcrumbs.innerHTML = '<span class="files-crumb active">🗑️ Çöp Kutusu (Trash)</span>';
+      }
+
+      if (grid) {
+        grid.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px;">Çöp kutusu yükleniyor...</div>';
+      }
+
+      try {
+        const items = await TauriBridge.invoke('list_trash') || [];
+        this.items = items;
+        this.selectedItem = null;
+
+        if (statusCount) statusCount.textContent = `${items.length} öge`;
+        if (statusSelected) statusSelected.textContent = 'Seçili öge yok';
+
+        if (!grid) return;
+        grid.innerHTML = '';
+
+        const banner = document.createElement('div');
+        banner.className = 'trash-banner';
+        banner.innerHTML = `
+          <span>🗑️ <strong>Çöp Kutusu</strong> (${items.length} öge) — Silinen dosyalar burada saklanır.</span>
+          <button class="btn-pkg" id="btn-empty-trash-action" style="background:#ef4444;border:none;color:#fff;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:11.5px;font-weight:600;">Çöpü Boşalt</button>
+        `;
+        banner.querySelector('#btn-empty-trash-action').addEventListener('click', () => this.emptyTrash());
+        grid.appendChild(banner);
+
+        if (items.length === 0) {
+          const emptyNotice = document.createElement('div');
+          emptyNotice.className = 'files-empty-state';
+          emptyNotice.innerHTML = `
+            <div style="font-size: 38px; opacity: 0.5; margin-bottom: 8px;">🗑️</div>
+            <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary);">Çöp Kutusu Boş</div>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px;">Silinen dosyalarınız burada güvenle saklanır.</div>
+          `;
+          grid.appendChild(emptyNotice);
+          return;
+        }
+
+        const frag = document.createDocumentFragment();
+        items.forEach(item => {
+          const card = document.createElement('div');
+          card.className = 'files-item-card';
+          card.title = `${item.name} (${item.size_str || '-'})`;
+
+          let icon = '<svg class="glyph" aria-hidden="true"><use href="#ico-file"></use></svg>';
+          if (item.is_dir) {
+            icon = '<svg class="glyph" aria-hidden="true"><use href="#ico-folder"></use></svg>';
+          }
+
+          card.innerHTML = `
+            <div class="files-item-icon">${icon}</div>
+            <div class="files-item-name">${escapeHtml(item.name)}</div>
+            <div class="files-item-size">${escapeHtml(item.size_str || (item.is_dir ? 'Klasör' : '-'))}</div>
+            <button class="btn-restore-item" style="margin-top:6px;font-size:10.5px;padding:3px 8px;background:rgba(37,99,235,0.2);color:#93c5fd;border:1px solid rgba(59,130,246,0.3);border-radius:4px;cursor:pointer;">Geri Yükle</button>
+          `;
+
+          card.querySelector('.btn-restore-item').addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.restoreTrashItem(item.name);
+          });
+
+          card.addEventListener('click', (e) => {
+            e.stopPropagation();
+            document.querySelectorAll('.files-item-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            this.selectedItem = item;
+            if (statusSelected) {
+              statusSelected.textContent = `${item.name} (${item.is_dir ? 'Klasör' : item.size_str})`;
+            }
+          });
+
+          card.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.showFileContextMenu(e, item);
+          });
+
+          frag.appendChild(card);
+        });
+        grid.appendChild(frag);
+
+      } catch (err) {
+        Terminal.log(`[ÇÖP KUTUSU HATASI] ${err}`, 'error');
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Çöp kutusu listelenemedi: ' + err, 'error');
+        }
+      }
+    },
+
+    async emptyTrash() {
+      if (!confirm('Çöp kutusundaki tüm dosyaları kalıcı olarak silmek istediğinizden emin misiniz?')) return;
+      try {
+        const res = await TauriBridge.invoke('empty_trash');
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(res || 'Çöp kutusu boşaltıldı.');
+        }
+        this.loadTrash();
+      } catch (e) {
+        alert('Çöp kutusu boşaltılamadı: ' + e);
+      }
+    },
+
+    async restoreTrashItem(fileName) {
+      try {
+        const res = await TauriBridge.invoke('restore_trash_item', { fileName });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(res || 'Dosya geri yüklendi.');
+        }
+        this.loadTrash();
+      } catch (e) {
+        alert('Geri yüklenemedi: ' + e);
+      }
+    },
+
+    async moveToTrash(filePath) {
+      try {
+        await TauriBridge.invoke('move_to_trash', { path: filePath });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Öge çöp kutusuna taşındı.');
+        }
+        this.refresh();
+      } catch (e) {
+        alert('Çöpe taşınamadı: ' + e);
+      }
+    },
+
+    async moveItem(srcPath, destDir) {
+      try {
+        await TauriBridge.invoke('move_path', { sourcePath: srcPath, destPath: destDir });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Öge taşındı.');
+        }
+        this.refresh();
+      } catch (e) {
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Taşınamadı: ' + e, 'error');
+        }
+      }
+    },
+
+    async extractArchive(archivePath) {
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast('📦 Arşiv çıkartılıyor...');
+      }
+      try {
+        const res = await TauriBridge.invoke('extract_archive', { archivePath });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(res || 'Arşiv çıkarıldı.');
+        }
+        this.refresh();
+      } catch (e) {
+        alert('Arşiv çıkartılamadı: ' + e);
+      }
+    },
+
+    async createArchive(sourcePath, type = 'zip') {
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast('📦 Arşiv oluşturuluyor...');
+      }
+      try {
+        const res = await TauriBridge.invoke('create_archive', { sourcePath, archiveType: type });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(res || 'Arşiv oluşturuldu.');
+        }
+        this.refresh();
+      } catch (e) {
+        alert('Arşiv oluşturulamadı: ' + e);
+      }
+    },
+
+    promptNetworkShare() {
+      const uri = prompt(
+        'Ağ Paylaşımına Bağlan (SMB / SFTP / FTP / NFS):\nÖrnek:\n  smb://192.168.1.100/paylasim\n  sftp://kullanici@sunucu/var/www\n\nAdres:',
+        'smb://192.168.1.'
+      );
+      if (!uri || !uri.trim()) return;
+      const cleanUri = uri.trim();
+      Terminal.log(`[AĞ BAĞLANTISI] ${cleanUri} bağlanılıyor...`, 'cmd');
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast(`Ağ paylaşımına bağlanılıyor: ${cleanUri}`);
+      }
+      TauriBridge.invoke('open_path', { path: cleanUri })
+        .then(() => {
+          if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+            ReportManager.showToast('Ağ bağlantısı açıldı.');
+          }
+        })
+        .catch(err => {
+          Terminal.log(`[AĞ HATASI] ${err}`, 'error');
+          alert('Ağ paylaşımına bağlanılamadı: ' + err);
+        });
+    },
+
+    showFileContextMenu(e, item) {
+      let menu = document.getElementById('file-context-menu');
+      if (!menu) {
+        menu = document.createElement('div');
+        menu.id = 'file-context-menu';
+        menu.className = 'desktop-context-menu file-context-menu';
+        document.body.appendChild(menu);
+      }
+
+      const isArchive = ['zip', 'tar', 'gz', 'xz', '7z', 'bz2', 'tgz', 'txz'].includes(item.ext);
+      const isTrash = this.isTrashView;
+
+      let menuHtml = '';
+      if (isTrash) {
+        menuHtml = `
+          <div class="ctx-item" data-action="restore">
+            <svg class="glyph"><use href="#ico-refresh"></use></svg>
+            <span>Ögeyi Geri Yükle</span>
+          </div>
+          <div class="ctx-divider"></div>
+          <div class="ctx-item ctx-danger" data-action="permanent-delete">
+            <svg class="glyph"><use href="#ico-x"></use></svg>
+            <span>Kalıcı Olarak Sil</span>
+          </div>
+        `;
+      } else {
+        const isImage = ['png', 'jpg', 'jpeg', 'webp', 'svg', 'gif'].includes(item.ext);
+        menuHtml = `
+          <div class="ctx-item" data-action="open">
+            <svg class="glyph"><use href="#ico-folder-open"></use></svg>
+            <span>Aç</span>
+          </div>
+          ${!item.is_dir ? `
+          <div class="ctx-item" data-action="open-with">
+            <svg class="glyph"><use href="#ico-settings"></use></svg>
+            <span>Birlikte Aç...</span>
+          </div>
+          ` : ''}
+          ${isImage ? `
+          <div class="ctx-item" data-action="set-wallpaper">
+            <svg class="glyph"><use href="#ico-image"></use></svg>
+            <span>Masaüstü Arka Planı Yap</span>
+          </div>
+          ` : ''}
+          <div class="ctx-item" data-action="open-term-here">
+            <svg class="glyph"><use href="#ico-terminal"></use></svg>
+            <span>Burada Uçbirim Aç</span>
+          </div>
+          <div class="ctx-item" data-action="open-as-root">
+            <svg class="glyph"><use href="#ico-lock"></use></svg>
+            <span>Yönetici Olarak Aç</span>
+          </div>
+          <div class="ctx-divider"></div>
+          ${isArchive ? `
+          <div class="ctx-item" data-action="extract">
+            <svg class="glyph"><use href="#ico-archive"></use></svg>
+            <span>Arşivi Buraya Çıkar</span>
+          </div>
+          ` : ''}
+          <div class="ctx-item" data-action="archive-zip">
+            <svg class="glyph"><use href="#ico-archive"></use></svg>
+            <span>Zip Olarak Sıkıştır</span>
+          </div>
+          <div class="ctx-item" data-action="archive-tar">
+            <svg class="glyph"><use href="#ico-archive"></use></svg>
+            <span>Tar.gz Olarak Sıkıştır</span>
+          </div>
+          <div class="ctx-item" data-action="copy-path">
+            <svg class="glyph"><use href="#ico-copy"></use></svg>
+            <span>Dosya Yolunu Kopyala</span>
+          </div>
+          <div class="ctx-divider"></div>
+          <div class="ctx-item ctx-danger" data-action="trash">
+            <svg class="glyph"><use href="#ico-trash"></use></svg>
+            <span>Çöp Kutusuna Taşı</span>
+          </div>
+          <div class="ctx-item ctx-danger" data-action="permanent-delete">
+            <svg class="glyph"><use href="#ico-x"></use></svg>
+            <span>Kalıcı Olarak Sil</span>
+          </div>
+        `;
+      }
+
+      menu.innerHTML = menuHtml;
+
+      const x = Math.min(e.clientX, window.innerWidth - 250);
+      const y = Math.min(e.clientY, window.innerHeight - 250);
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+      menu.classList.add('open');
+
+      const closeMenu = () => {
+        menu.classList.remove('open');
+        document.removeEventListener('click', closeMenu);
+      };
+      setTimeout(() => document.addEventListener('click', closeMenu), 10);
+
+      menu.querySelectorAll('.ctx-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const act = btn.getAttribute('data-action');
+          closeMenu();
+          if (act === 'open') {
+            this.openItem(item);
+          } else if (act === 'open-with') {
+            this.promptOpenWith(item);
+          } else if (act === 'set-wallpaper') {
+            TauriBridge.invoke('set_desktop_wallpaper', { filePath: item.path })
+              .then(msg => {
+                if (typeof ThemeManager !== 'undefined' && ThemeManager.setCustomWallpaper) {
+                  ThemeManager.setCustomWallpaper(item.path);
+                }
+                ReportManager?.showToast(msg || 'Duvar kağıdı güncellendi.');
+              })
+              .catch(err => ReportManager?.showToast(`Hata: ${err.message || err}`, 'error'));
+          } else if (act === 'open-term-here') {
+            const targetDir = item.is_dir ? item.path : (item.path.substring(0, item.path.lastIndexOf('/')) || '/');
+            WindowManager.open('win-terminal');
+            if (typeof Terminal !== 'undefined' && Terminal.runCommand) {
+              Terminal.runCommand(`cd "${targetDir}"`);
+            }
+          } else if (act === 'open-as-root') {
+            TauriBridge.invoke('launch_application', { exec: `pkexec xdg-open "${item.path}"` })
+              .catch(() => {
+                TauriBridge.invoke('launch_application', { exec: `sudo -A xdg-open "${item.path}"` })
+                  .catch(err => ReportManager?.showToast(`Yönetici olarak açılamadı: ${err.message || err}`, 'error'));
+              });
+          } else if (act === 'restore') {
+            this.restoreTrashItem(item.name);
+          } else if (act === 'extract') {
+            this.extractArchive(item.path);
+          } else if (act === 'archive-zip') {
+            this.createArchive(item.path, 'zip');
+          } else if (act === 'archive-tar') {
+            this.createArchive(item.path, 'tar.gz');
+          } else if (act === 'copy-path') {
+            navigator.clipboard.writeText(item.path).then(() => {
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast('Dosya yolu panoya kopyalandı.');
+              }
+            });
+          } else if (act === 'trash') {
+            this.moveToTrash(item.path);
+          } else if (act === 'permanent-delete') {
+            if (confirm(`'${item.name}' kalıcı olarak silinsin mi? Bu işlem geri alınamaz!`)) {
+              TauriBridge.invoke('delete_file', { path: item.path })
+                .then(() => {
+                  if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                    ReportManager.showToast('Öge kalıcı olarak silindi.');
+                  }
+                  if (this.isTrashView) this.loadTrash();
+                  else this.refresh();
+                })
+                .catch(err => alert('Silinemedi: ' + err));
+            }
+          }
+        });
+      });
+    },
+
+    async promptOpenWith(item) {
+      const modal = document.getElementById('modal-open-with');
+      const listEl = document.getElementById('open-with-apps-list');
+      const titleEl = document.getElementById('open-with-title');
+      const subEl = document.getElementById('open-with-subtitle');
+      const inputCustom = document.getElementById('open-with-custom-cmd');
+      const btnCustom = document.getElementById('btn-open-with-custom');
+      const btnClose = document.getElementById('btn-close-open-with');
+
+      if (!modal || !listEl) return;
+
+      if (titleEl) titleEl.textContent = `Birlikte Aç — ${item.name}`;
+      if (subEl) subEl.textContent = `'${item.name}' dosyasını açmak için bir uygulama seçin:`;
+      if (inputCustom) inputCustom.value = '';
+
+      modal.style.display = 'flex';
+
+      const closeModal = () => {
+        modal.style.display = 'none';
+        btnClose?.removeEventListener('click', closeModal);
+      };
+      btnClose?.addEventListener('click', closeModal);
+
+      listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Uygulamalar taranıyor...</div>';
+
+      try {
+        const apps = await TauriBridge.invoke('get_open_with_apps', { filePath: item.path });
+        listEl.innerHTML = '';
+
+        if (!Array.isArray(apps) || apps.length === 0) {
+          listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Bu dosya türü için ilişkili uygulama bulunamadı. Aşağıdan özel bir komut yazabilirsiniz.</div>';
+        } else {
+          apps.forEach(app => {
+            const row = document.createElement('div');
+            row.className = 'open-with-app-row';
+            row.innerHTML = `
+              <div class="open-with-app-name">${escapeHtml(app.name)}</div>
+              ${app.is_default ? '<span class="open-with-app-badge">Varsayılan</span>' : ''}
+            `;
+            row.addEventListener('click', () => {
+              closeModal();
+              const cmd = `${app.exec} "${item.path}"`;
+              TauriBridge.invoke('launch_application', { exec: cmd })
+                .then(() => ReportManager?.showToast(`${app.name} ile açıldı.`))
+                .catch(err => ReportManager?.showToast(`Açılamadı: ${err.message || err}`, 'error'));
+            });
+            listEl.appendChild(row);
+          });
+        }
+      } catch (err) {
+        listEl.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Uygulama listesi alınamadı.</div>';
+      }
+
+      if (btnCustom && inputCustom) {
+        btnCustom.onclick = () => {
+          const val = inputCustom.value.trim();
+          if (!val) return;
+          closeModal();
+          const cmd = val.includes('%f') ? val.replace('%f', `"${item.path}"`) : `${val} "${item.path}"`;
+          TauriBridge.invoke('launch_application', { exec: cmd })
+            .then(() => ReportManager?.showToast('Özel komutla başlatıldı.'))
+            .catch(err => ReportManager?.showToast(`Başlatılamadı: ${err.message || err}`, 'error'));
+        };
       }
     }
   };
@@ -3194,7 +3907,7 @@
   // 8. KURULUM ARACI (INSTALLER WIZARD)
   // ============================================================================
   const InstallerWizard = {
-    selectedDisk: '/dev/sda',
+    selectedDisk: null,
 
     async init() {
       const step1Next = document.getElementById('btn-step1-next');
@@ -3219,7 +3932,6 @@
           try {
             await TauriBridge.invoke('system_reboot');
           } catch (e) {
-            // Yedek komut izin listesinden geçmez; hata görünürde bildirilir.
             ReportManager.showToast(`Yeniden başlatılamadı: ${e.message || e}`);
           }
         });
@@ -3232,12 +3944,36 @@
       const box = document.getElementById('disk-selection-box');
       if (!box) return;
 
+      const step1Next = document.getElementById('btn-step1-next');
+
       try {
         const disks = await TauriBridge.invoke('get_storage_devices');
         box.innerHTML = '';
-        disks.forEach((d, i) => {
+
+        if (!disks || disks.length === 0) {
+          this.selectedDisk = null;
+          box.innerHTML = `
+            <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
+              ⚠️ Kurulum yapılabilecek uygun bir sabit disk veya depolama sürücüsü bulunamadı.<br>
+              <span style="font-size: 11px; opacity: 0.7;">Canlı USB medyası koruma altındadır ve üzerine kurulum yapılamaz.</span>
+            </div>
+          `;
+          if (step1Next) step1Next.disabled = true;
+          return;
+        }
+
+        if (step1Next) step1Next.disabled = false;
+
+        const existingValid = disks.some(d => d.path === this.selectedDisk);
+        if (!existingValid && disks.length > 0) {
+          this.selectedDisk = disks[0].path;
+        }
+        const activeDisk = this.selectedDisk;
+
+        disks.forEach((d) => {
+          const isActive = d.path === activeDisk;
           const card = document.createElement('div');
-          card.className = `disk-card ${i === 0 ? 'active' : ''}`;
+          card.className = `disk-card ${isActive ? 'active' : ''}`;
           card.innerHTML = `
             <div class="disk-meta">
               <strong>${escapeHtml(d.path)} — ${escapeHtml(d.model)}</strong>
@@ -3254,11 +3990,21 @@
           });
           box.appendChild(card);
         });
-        if (disks.length > 0) this.selectedDisk = disks[0].path;
-      } catch (e) {}
+        const sumDisk = document.getElementById('sum-disk');
+        if (sumDisk && this.selectedDisk) sumDisk.textContent = this.selectedDisk;
+      } catch (e) {
+        box.innerHTML = `<div style="padding: 20px; color: var(--danger, #ef4444); text-align: center;">Disk tarama hatası: ${escapeHtml(e.message || e)}</div>`;
+        if (step1Next) step1Next.disabled = true;
+      }
     },
 
     goToStep(num) {
+      if (num === 2) {
+        if (!this.selectedDisk) {
+          alert('Lütfen kurulum yapılacak bir hedef disk seçin!');
+          return;
+        }
+      }
       if (num === 3) {
         const u = document.getElementById('inst-username')?.value?.trim();
         const h = document.getElementById('inst-hostname')?.value?.trim() || 'ankora-pc';
@@ -3270,7 +4016,7 @@
         const sumDisk = document.getElementById('sum-disk');
         const sumUser = document.getElementById('sum-user');
         const sumHost = document.getElementById('sum-host');
-        if (sumDisk) sumDisk.textContent = this.selectedDisk;
+        if (sumDisk) sumDisk.textContent = this.selectedDisk || 'Seçilmedi';
         if (sumUser) sumUser.textContent = u;
         if (sumHost) sumHost.textContent = h;
       }
@@ -3279,6 +4025,12 @@
     },
 
     async runInstall() {
+      if (!this.selectedDisk) {
+        alert('Lütfen önce kurulum yapılacak hedef diski seçin!');
+        this.goToStep(1);
+        return;
+      }
+
       const u = document.getElementById('inst-username')?.value?.trim();
       const p = document.getElementById('inst-password')?.value?.trim();
       const fn = document.getElementById('inst-fullname')?.value?.trim() || u;
@@ -3309,7 +4061,7 @@
       if (progress) progress.style.width = '15%';
 
       try {
-        append(`[2/5] GPT bölüm tablosu ve EFI / EXT4 dosya sistemleri oluşturuluyor...`);
+        append(`[2/5] Hibrit GPT bölüm tablosu (BIOS + UEFI) ve dosya sistemleri oluşturuluyor...`);
         if (progress) progress.style.width = '35%';
 
         const res = await TauriBridge.invoke('execute_system_installation', {
@@ -3324,12 +4076,14 @@
         });
 
         if (progress) progress.style.width = '100%';
-        append(`[3/5] Canlı kök sistem dosyaları hedef diske kopyalandı.`);
-        append(`[4/5] GRUB EFI önyükleyici ve /etc/fstab yapılandırıldı.`);
+        append(`[3/5] Canlı kök sistem dosyaları hedef diske başarıyla kopyalandı.`);
+        append(`[4/5] GRUB önyükleyici (UEFI + BIOS) ve sistem yapılandırması tamamlandı.`);
         append(`[5/5] ${res}`, 'cmd');
         if (finishNav) finishNav.style.display = 'flex';
       } catch (err) {
-        append(`[KURULUM HATASI] ${err}`, 'error');
+        if (progress) progress.style.backgroundColor = 'var(--danger, #ef4444)';
+        append(`[KURULUM HATASI] ${err.message || err}`, 'error');
+        ReportManager.showToast(`Kurulum hatası: ${err.message || err}`);
       }
     }
   };
@@ -3452,6 +4206,10 @@
         SafeStorage.setItem('ankora_theme_mode', themeName);
         Terminal.log(`[TEMA] Sistem teması uygulandı: ${themeName}`, 'cmd');
       }
+
+      // XSettings & GTK Tema Senkronizasyonu (xsettingsd, GTK-2/3/4, gsettings)
+      const isDark = themeName !== 'theme-light';
+      TauriBridge.invoke('sync_desktop_theme', { isDark, accent: this.currentAccent || '#2563eb' }).catch(() => {});
     },
 
     setAccent(colorHex, persist = true) {
@@ -3469,6 +4227,9 @@
         SafeStorage.setItem('ankora_accent_color', colorHex);
         Terminal.log(`[VURGU] Sistem vurgu rengi değiştirildi: ${colorHex}`, 'cmd');
       }
+
+      const isDark = this.currentTheme !== 'theme-light';
+      TauriBridge.invoke('sync_desktop_theme', { isDark, accent: colorHex }).catch(() => {});
     },
 
     setWallpaper(wpFile, persist = true) {
@@ -3576,6 +4337,11 @@
         btn.classList.toggle('active', btn.getAttribute('data-iconset') === setName);
       });
 
+      if (typeof XdgDesktopEngine !== 'undefined') {
+        if (typeof XdgDesktopEngine.renderToStartMenu === 'function') XdgDesktopEngine.renderToStartMenu();
+        if (typeof XdgDesktopEngine.renderToDesktop === 'function') XdgDesktopEngine.renderToDesktop();
+      }
+
       if (persist) {
         SafeStorage.setItem('ankora_icon_set', setName);
         Terminal.log(`[İKON SETİ] Uygulama simgeleri setine geçildi: ${setName}`, 'cmd');
@@ -3622,7 +4388,27 @@
         };
       }
 
-      if (!info || !Array.isArray(info.modes) || info.modes.length === 0) return;
+      const apply = async (rate) => {
+        try {
+          const res = await TauriBridge.invoke('set_display_mode', {
+            mode: selMode.value, rate, output: info ? info.output : ''
+          });
+          // Sunucu onay süresi döndürürse geri alma çubuğu açılır; süre
+          // dolarsa sistem eski moda kendisi döner.
+          const after = (res && typeof res === 'object') ? Number(res.revert_after) || 0 : 0;
+          this.startRevertCountdown(after);
+        } catch (e) {
+          ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
+        }
+      };
+
+      if (!info || !Array.isArray(info.modes) || info.modes.length === 0) {
+        selMode.onchange = () => {
+          apply(selRate?.value || '');
+        };
+        if (selRate) selRate.onchange = () => apply(selRate.value);
+        return;
+      }
 
       const fillRates = (modeObj) => {
         if (!selRate) return;
@@ -3650,38 +4436,12 @@
         if (m.current) fillRates(m);
       });
 
-      const apply = async (rate) => {
-        try {
-          const res = await TauriBridge.invoke('set_display_mode', {
-            mode: selMode.value, rate, output: info.output
-          });
-          // Sunucu onay süresi döndürürse geri alma çubuğu açılır; süre
-          // dolarsa sistem eski moda kendisi döner.
-          const after = (res && typeof res === 'object') ? Number(res.revert_after) || 0 : 0;
-          this.startRevertCountdown(after);
-        } catch (e) {
-          ReportManager.showToast(`Ekran modu uygulanamadı: ${e.message || e}`);
-        }
-      };
-
       selMode.onchange = () => {
         const nextMode = info.modes.find(m => m.mode === selMode.value);
         fillRates(nextMode);
         if (nextMode && selRate && selRate.value) apply(selRate.value);
       };
       if (selRate) selRate.onchange = () => apply(selRate.value);
-
-      const selScale = document.getElementById('ctrl-scaling');
-      if (selScale && !selScale.dataset.bound) {
-        selScale.dataset.bound = '1';
-        selScale.addEventListener('change', async () => {
-          try {
-            await TauriBridge.invoke('set_display_scale', { percent: Number(selScale.value) });
-          } catch (e) {
-            ReportManager.showToast(`Ölçek uygulanamadı: ${e.message || e}`);
-          }
-        });
-      }
     },
 
     // --- Çözünürlük onay / geri alma akışı (ekran boş kalmasın diye) ---
@@ -3859,17 +4619,23 @@
           if (targetPaneId === 'pane-set-display') this.loadDisplayModes();
           if (targetPaneId === 'pane-set-storage') this.fillStorage();
           if (targetPaneId === 'pane-set-about') this.fillTelemetry();
-          if (targetPaneId === 'pane-set-audio') this.loadVolume();
+          if (targetPaneId === 'pane-set-audio') {
+            this.loadVolume();
+            if (typeof AudioDeviceManager !== 'undefined') AudioDeviceManager.refreshDevices();
+          }
+          if (targetPaneId === 'pane-set-bluetooth' && typeof BluetoothManager !== 'undefined') BluetoothManager.checkStatus();
+          if (targetPaneId === 'pane-set-shortcuts' && typeof ShortcutManager !== 'undefined') ShortcutManager.renderSettings();
+          if (targetPaneId === 'pane-set-recovery' && typeof SnapshotManager !== 'undefined') SnapshotManager.loadSnapshots();
         });
       });
 
-      // 2. Arama Filtresi
+      // 2. Arama Filtresi (Türkçe harf duyarsız evrensel eşleme)
       const filterInput = document.getElementById('settings-filter');
       if (filterInput) {
         filterInput.addEventListener('input', (e) => {
-          const q = e.target.value.toLowerCase().trim();
+          const q = typeof launcherNorm === 'function' ? launcherNorm(e.target.value) : e.target.value.toLowerCase().trim();
           navItems.forEach(item => {
-            const text = item.textContent.toLowerCase();
+            const text = typeof launcherNorm === 'function' ? launcherNorm(item.textContent) : item.textContent.toLowerCase();
             item.style.display = text.includes(q) ? 'flex' : 'none';
           });
           const first = document.querySelector('.settings-nav-item:not([style*="display: none"])');
@@ -3877,7 +4643,7 @@
         });
       }
 
-      // 3. Parlaklık ve Gece Işığı (yeniden başlatmada korunur)
+      // 3. Parlaklık ve Gece Işığı (yeniden başlatmada korunur, QS ile tam senkron)
       const sliderBrightness = document.getElementById('ctrl-brightness');
       const labelBrightness = document.getElementById('brightness-val-label');
       const dimmer = document.getElementById('screen-dimmer');
@@ -3904,15 +4670,58 @@
       }
 
       const chkNight = document.getElementById('ctrl-night');
+      const qsNight = document.getElementById('qs-nightlight-toggle');
+      const qsNightSub = document.getElementById('qs-nightlight-sub');
       const nightScreen = document.getElementById('screen-night');
-      if (chkNight && nightScreen) {
+      const updateNightState = (enabled) => {
+        if (nightScreen) {
+          nightScreen.style.opacity = enabled ? '0.35' : '0';
+          nightScreen.style.background = enabled ? 'rgba(245, 158, 11, 0.35)' : 'transparent';
+        }
+        if (chkNight) chkNight.checked = enabled;
+        if (qsNight) qsNight.classList.toggle('active', enabled);
+        if (qsNightSub) qsNightSub.textContent = enabled ? 'Açık' : 'Kapalı';
+        SafeStorage.setItem('ankora_night_light', enabled ? '1' : '0');
+      };
+      if (chkNight || qsNight) {
         const nightOn = SafeStorage.getItem('ankora_night_light') === '1';
-        chkNight.checked = nightOn;
-        nightScreen.style.opacity = nightOn ? '0.35' : '0';
-        chkNight.addEventListener('change', (e) => {
-          nightScreen.style.opacity = e.target.checked ? '0.35' : '0';
-          SafeStorage.setItem('ankora_night_light', e.target.checked ? '1' : '0');
-          Terminal.log(`[EKRAN] Gece ışığı filtresi: ${e.target.checked ? 'Etkin' : 'Kapalı'}`, 'cmd');
+        updateNightState(nightOn);
+        if (chkNight) {
+          chkNight.addEventListener('change', (e) => {
+            updateNightState(e.target.checked);
+            Terminal.log(`[EKRAN] Gece ışığı filtresi: ${e.target.checked ? 'Etkin' : 'Kapalı'}`, 'cmd');
+          });
+        }
+        if (qsNight && !qsNight.dataset.bound) {
+          qsNight.dataset.bound = '1';
+          qsNight.addEventListener('click', () => {
+            const next = SafeStorage.getItem('ankora_night_light') !== '1';
+            updateNightState(next);
+            Terminal.log(`[EKRAN] Gece Işığı (Mavi Işık Filtresi): ${next ? 'Etkin' : 'Kapalı'}`, 'cmd');
+          });
+        }
+      }
+
+      // 3b. Arayüz Ölçekleme (DPI) & UI Zoom
+      const selScale = document.getElementById('ctrl-scaling');
+      if (selScale && !selScale.dataset.bound) {
+        selScale.dataset.bound = '1';
+        const savedScale = SafeStorage.getItem('ankora_display_scale');
+        if (savedScale && Array.from(selScale.options).some(o => o.value === savedScale)) {
+          selScale.value = savedScale;
+          const factor = Number(savedScale) / 100;
+          document.documentElement.style.zoom = String(factor);
+          TauriBridge.invoke('set_display_scale', { percent: Number(savedScale) }).catch(() => {});
+        }
+        selScale.addEventListener('change', async () => {
+          const val = Number(selScale.value);
+          SafeStorage.setItem('ankora_display_scale', String(val));
+          document.documentElement.style.zoom = String(val / 100);
+          try {
+            await TauriBridge.invoke('set_display_scale', { percent: val });
+          } catch (e) {
+            ReportManager.showToast(`Ölçek uygulanamadı: ${e.message || e}`);
+          }
         });
       }
 
@@ -3962,7 +4771,10 @@
       const selTimeout = document.getElementById('ctrl-screen-timeout');
       if (selTimeout) {
         const savedDpms = SafeStorage.getItem('ankora_dpms_secs');
-        if (savedDpms !== null) selTimeout.value = savedDpms;
+        if (savedDpms !== null) {
+          selTimeout.value = savedDpms;
+          TauriBridge.invoke('set_dpms_timeout', { seconds: parseInt(savedDpms, 10) || 0 }).catch(() => {});
+        }
         selTimeout.addEventListener('change', async (e) => {
           const secs = parseInt(e.target.value, 10) || 0;
           SafeStorage.setItem('ankora_dpms_secs', String(secs));
@@ -3986,6 +4798,7 @@
         const savedProfile = SafeStorage.getItem('ankora_cpu_profile');
         if (savedProfile && Array.from(selProfile.options).some(o => o.value === savedProfile)) {
           selProfile.value = savedProfile;
+          TauriBridge.invoke('set_cpu_governor', { profile: savedProfile }).catch(() => {});
         }
         selProfile.addEventListener('change', async (e) => {
           const profile = e.target.value;
@@ -4421,28 +5234,61 @@
         return;
       }
 
-      // Super + Enter -> Terminal
-      if (e.metaKey && e.key === 'Enter') {
+      // Terminal: Ctrl + Alt + T veya Super + Enter
+      if ((e.ctrlKey && e.altKey && (e.key === 't' || e.key === 'T')) || (e.metaKey && e.key === 'Enter')) {
         e.preventDefault();
         WindowManager.open('win-terminal');
         return;
       }
 
-      // Super + E -> Ankora Office
+      // Dosya Yöneticisi: Super + E (Masaüstü Standardı)
       if (e.metaKey && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault();
+        WindowManager.open('win-files');
+        return;
+      }
+
+      // Ofis Uygulaması: Super + O
+      if (e.metaKey && (e.key === 'o' || e.key === 'O')) {
         e.preventDefault();
         WindowManager.open('win-office');
         return;
       }
 
-      // Super + , -> Ayarlar
+      // Masaüstünü Göster / Gizle: Super + D
+      if (e.metaKey && (e.key === 'd' || e.key === 'D')) {
+        e.preventDefault();
+        WindowManager.toggleShowDesktop();
+        return;
+      }
+
+      // Ekran Görüntüsü: PrintScreen
+      if (e.key === 'PrintScreen') {
+        e.preventDefault();
+        if (typeof ScreenshotManager !== 'undefined') {
+          ScreenshotManager.open();
+        }
+        return;
+      }
+
+      // Aktif Pencereyi Kapat: Alt + F4
+      if (e.altKey && e.key === 'F4') {
+        e.preventDefault();
+        const activeWin = WindowManager.windows.find(w => w.classList.contains('active') && w.classList.contains('open'));
+        if (activeWin) {
+          WindowManager.close(activeWin);
+        }
+        return;
+      }
+
+      // Ayarlar: Super + ,
       if (e.metaKey && e.key === ',') {
         e.preventDefault();
         WindowManager.open('win-settings');
         return;
       }
 
-      // Super + L -> Gerçek Kilit Ekranı
+      // Gerçek Kilit Ekranı: Super + L
       if (e.metaKey && (e.key === 'l' || e.key === 'L')) {
         e.preventDefault();
         if (typeof LockManager !== 'undefined') {
@@ -4461,8 +5307,15 @@
     // 1. Sabitlenmiş Uygulamalar (Pinned Apps Grid)
     document.querySelectorAll('.pinned-app-card').forEach(card => {
       card.addEventListener('click', () => {
+        const launch = card.getAttribute('data-launch');
         const target = card.getAttribute('data-open');
-        if (target) WindowManager.open(target);
+        if (launch) {
+          TauriBridge.invoke('launch_application', { exec: launch })
+            .then(() => ReportManager.showToast('Uygulama başlatıldı.'))
+            .catch((err) => ReportManager.showToast(`Başlatılamadı: ${err.message || err}`));
+        } else if (target) {
+          WindowManager.open(target);
+        }
         toggleStart(false);
       });
     });
@@ -4520,20 +5373,50 @@
     const pinMap = [
       { id: 'quick-term-btn', win: 'win-terminal' },
       { id: 'quick-files-btn', win: 'win-files' },
+      { id: 'quick-ayaz-browser-btn', win: 'win-browser' },
+      { id: 'quick-brave-btn', launch: 'brave-browser' },
       { id: 'quick-browser-btn', win: 'win-browser' },
+      { id: 'quick-screenshot-btn', win: 'win-screenshot' },
       { id: 'quick-store-btn', win: 'win-store' },
       { id: 'quick-calc-btn', win: 'win-calc' },
       { id: 'quick-ai-btn', win: 'win-ai' },
       { id: 'quick-settings-btn', win: 'win-settings' },
-      { id: 'tray-anchor-btn', win: 'win-welcome' }
+      { id: 'tray-anchor-btn', action: 'show-desktop' }
     ];
 
     pinMap.forEach(item => {
       const el = document.getElementById(item.id);
       if (el) {
-        el.addEventListener('click', () => WindowManager.open(item.win));
+        el.addEventListener('click', () => {
+          if (item.launch) {
+            TauriBridge.invoke('launch_application', { exec: item.launch })
+              .then(() => ReportManager.showToast('Brave Browser başlatıldı.'))
+              .catch((err) => ReportManager.showToast(`Başlatılamadı: ${err.message || err}`));
+            return;
+          }
+          if (item.action === 'show-desktop') {
+            WindowManager.toggleShowDesktop();
+            return;
+          }
+          if (item.win) {
+            WindowManager.open(item.win);
+          }
+        });
       }
     });
+
+    const btnLaunchBrave = document.getElementById('btn-launch-brave-direct');
+    if (btnLaunchBrave) {
+      btnLaunchBrave.addEventListener('click', async () => {
+        Terminal.log('[AYAZ] Brave Browser başlatılıyor...', 'cmd');
+        try {
+          await TauriBridge.invoke('launch_application', { exec: 'brave-browser' });
+          ReportManager.showToast('Brave Web Tarayıcı başlatıldı.');
+        } catch (e) {
+          ReportManager.showToast(`Brave başlatılamadı: ${e.message || e}`);
+        }
+      });
+    }
 
     const btnShowAllApps = document.getElementById('btn-show-all-apps');
     if (btnShowAllApps) {
@@ -4587,20 +5470,7 @@
       });
     }
 
-    const qsNight = document.getElementById('qs-nightlight-toggle');
-    const screenNight = document.getElementById('screen-night');
-    if (qsNight) {
-      qsNight.addEventListener('click', () => {
-        const isActive = qsNight.classList.toggle('active');
-        const sub = document.getElementById('qs-nightlight-sub');
-        if (sub) sub.textContent = isActive ? 'Açık' : 'Kapalı';
-        if (screenNight) {
-          screenNight.style.opacity = isActive ? '0.24' : '0';
-          screenNight.style.background = isActive ? 'rgba(245, 158, 11, 0.35)' : 'transparent';
-        }
-        Terminal.log(`[EKRAN] Gece Işığı (Mavi Işık Filtresi): ${isActive ? 'Etkin' : 'Kapalı'}`, 'cmd');
-      });
-    }
+    // qs-nightlight-toggle artık SettingsManager.updateNightState ile tam senkron yönetilir
 
     const qsTheme = document.getElementById('qs-theme-toggle');
     if (qsTheme) {
@@ -5844,11 +6714,12 @@
       }
     },
 
-    // Adres çubuğunda gerçek URL durur; çerçeveye yalnızca köprüden girilir.
+    // Adres çubuğunda gerçek URL durur; yerel test sunucusu varsa proxy üzerinden, Tauri'de doğrudan yüklenir.
     toProxy(url) {
-      const base = (typeof window !== 'undefined' && window.location.origin.includes('49152'))
-        ? '' : 'http://127.0.0.1:49152';
-      return `${base}/proxy?url=${encodeURIComponent(url)}`;
+      if (typeof window !== 'undefined' && window.location.origin.includes('49152')) {
+        return `/proxy?url=${encodeURIComponent(url)}`;
+      }
+      return url;
     },
 
     navigate(input) {
@@ -6155,22 +7026,336 @@
     }
   };
 
+  // ============================================================================
+  // 17. KLAVYE KISAYOL YÖNETİCİSİ (SHORTCUT MANAGER - TAM ÖZELLEŞTİRİLEBİLİR)
+  // ============================================================================
+  const ShortcutManager = {
+    defaults: [
+      { id: 'start_menu', name: 'Başlat Menüsü Aç/Kapat', keys: 'Super' },
+      { id: 'terminal', name: 'Uçbirim (Terminal) Başlat', keys: 'Ctrl+Alt+T' },
+      { id: 'files', name: 'Dosya Yöneticisi', keys: 'Super+E' },
+      { id: 'browser', name: 'Web Tarayıcı (Brave/Ayaz)', keys: 'Super+B' },
+      { id: 'taskmgr', name: 'Görev Yöneticisi', keys: 'Ctrl+Shift+Escape' },
+      { id: 'settings', name: 'Sistem Ayarları', keys: 'Ctrl+Alt+S' },
+      { id: 'clipboard', name: 'Pano Geçmişi (Clipboard)', keys: 'Super+V' },
+      { id: 'show_desktop', name: 'Masaüstünü Göster/Gizle', keys: 'Super+D' },
+      { id: 'ram_clean', name: 'Hızlı RAM Temizleme', keys: 'Ctrl+Alt+R' },
+      { id: 'quick_search', name: 'Evrensel Arama (Spotlight)', keys: 'Alt+Space' },
+      { id: 'snap_left', name: 'Pencereyi Sola Yasla (Aero Snap)', keys: 'Super+Left' },
+      { id: 'snap_right', name: 'Pencereyi Sağa Yasla (Aero Snap)', keys: 'Super+Right' },
+      { id: 'snap_up', name: 'Pencereyi Büyüt / Yukarı Yasla', keys: 'Super+Up' },
+      { id: 'snap_down', name: 'Pencereyi Küçült / Aşağı Yasla', keys: 'Super+Down' },
+      { id: 'notif_drawer', name: 'Bildirim Merkezi Paneli', keys: 'Super+N' },
+      { id: 'lock_screen', name: 'Ekranı Kilitle', keys: 'Super+L' },
+      { id: 'screenshot', name: 'Ekran Görüntüsü Al', keys: 'PrintScreen' }
+    ],
+
+    shortcuts: [],
+    recordingId: null,
+
+    init() {
+      this.load();
+      const btnReset = document.getElementById('btn-reset-shortcuts');
+      if (btnReset) {
+        btnReset.addEventListener('click', () => this.resetDefaults());
+      }
+    },
+
+    load() {
+      const saved = SafeStorage.getItem('ankora_custom_shortcuts');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.shortcuts = this.defaults.map(def => {
+              const f = parsed.find(p => p.id === def.id);
+              return f ? { ...def, keys: f.keys } : def;
+            });
+            return;
+          }
+        } catch (e) {}
+      }
+      this.shortcuts = JSON.parse(JSON.stringify(this.defaults));
+    },
+
+    save() {
+      SafeStorage.setItem('ankora_custom_shortcuts', JSON.stringify(this.shortcuts));
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast('Klavye kısayolları kaydedildi.');
+      }
+    },
+
+    resetDefaults() {
+      if (confirm('Tüm klavye kısayolları varsayılan değerlerine sıfırlansın mı?')) {
+        this.shortcuts = JSON.parse(JSON.stringify(this.defaults));
+        this.save();
+        this.renderSettings();
+      }
+    },
+
+    renderSettings() {
+      const container = document.getElementById('shortcuts-list-container');
+      if (!container) return;
+      container.innerHTML = '';
+
+      this.shortcuts.forEach(sc => {
+        const row = document.createElement('div');
+        row.className = 'shortcut-item-row';
+        const isRec = this.recordingId === sc.id;
+        row.innerHTML = `
+          <div class="shortcut-info">
+            <span class="shortcut-title">${escapeHtml(sc.name)}</span>
+            <span class="shortcut-desc">Eylem: ${escapeHtml(sc.id)}</span>
+          </div>
+          <div class="shortcut-action-wrap">
+            <span class="shortcut-key-badge ${isRec ? 'recording' : ''}">${isRec ? 'Tuşa Basın...' : escapeHtml(sc.keys)}</span>
+            <button class="btn-pkg btn-edit-shortcut" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);color:#cbd5e1;border-radius:4px;cursor:pointer;">${isRec ? 'İptal' : 'Değiştir'}</button>
+          </div>
+        `;
+
+        const btnEdit = row.querySelector('.btn-edit-shortcut');
+        btnEdit.addEventListener('click', () => {
+          if (this.recordingId === sc.id) {
+            this.recordingId = null;
+            this.renderSettings();
+          } else {
+            this.recordKey(sc.id);
+          }
+        });
+
+        container.appendChild(row);
+      });
+    },
+
+    recordKey(id) {
+      this.recordingId = id;
+      this.renderSettings();
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast('Yeni tuş kombinasyonuna basın (örn: Ctrl+Alt+K)... (Çıkmak için Esc)');
+      }
+
+      const onKeyDownCapture = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (e.key === 'Escape') {
+          this.recordingId = null;
+          window.removeEventListener('keydown', onKeyDownCapture, true);
+          this.renderSettings();
+          return;
+        }
+
+        if (['Control', 'Alt', 'Shift', 'Meta', 'OS'].includes(e.key)) {
+          return;
+        }
+
+        const parts = [];
+        if (e.ctrlKey) parts.push('Ctrl');
+        if (e.altKey) parts.push('Alt');
+        if (e.shiftKey) parts.push('Shift');
+        if (e.metaKey) parts.push('Super');
+
+        let keyName = e.key;
+        if (keyName === ' ') keyName = 'Space';
+        else if (keyName === 'ArrowLeft') keyName = 'Left';
+        else if (keyName === 'ArrowRight') keyName = 'Right';
+        else if (keyName === 'ArrowUp') keyName = 'Up';
+        else if (keyName === 'ArrowDown') keyName = 'Down';
+        else if (keyName.length === 1) keyName = keyName.toUpperCase();
+        parts.push(keyName);
+
+        const newCombination = parts.join('+');
+        const target = this.shortcuts.find(s => s.id === this.recordingId);
+        if (target) {
+          target.keys = newCombination;
+          this.save();
+        }
+
+        this.recordingId = null;
+        window.removeEventListener('keydown', onKeyDownCapture, true);
+        this.renderSettings();
+      };
+
+      window.addEventListener('keydown', onKeyDownCapture, true);
+    },
+
+    matches(e, keyComboStr) {
+      if (!keyComboStr) return false;
+      const parts = keyComboStr.split('+').map(p => p.trim().toLowerCase());
+      
+      const hasCtrl = parts.includes('ctrl') || parts.includes('control');
+      const hasAlt = parts.includes('alt');
+      const hasShift = parts.includes('shift');
+      const hasSuper = parts.includes('super') || parts.includes('meta') || parts.includes('win');
+
+      const nonModifiers = parts.filter(p => !['ctrl', 'control', 'alt', 'shift', 'super', 'meta', 'win'].includes(p));
+
+      if (nonModifiers.length === 0 && hasSuper) {
+        return (e.key === 'Meta' || e.key === 'OS') && !e.ctrlKey && !e.altKey && !e.shiftKey;
+      }
+
+      if (e.ctrlKey !== hasCtrl) return false;
+      if (e.altKey !== hasAlt) return false;
+      if (e.shiftKey !== hasShift) return false;
+      if (e.metaKey !== hasSuper) return false;
+
+      if (nonModifiers.length === 0) return false;
+
+      const mainKey = nonModifiers[0].toLowerCase();
+      let eventKey = (e.key || '').toLowerCase();
+      let eventCode = (e.code || '').toLowerCase();
+
+      if (mainKey === 'space') return eventKey === ' ' || eventCode === 'space';
+      if (mainKey === 'escape' || mainKey === 'esc') return eventKey === 'escape';
+      if (mainKey === 'printscreen' || mainKey === 'prntscrn') return eventKey === 'printscreen' || eventCode === 'printscreen';
+      if (mainKey === 'left' || mainKey === 'arrowleft') return eventKey === 'arrowleft' || eventCode === 'arrowleft';
+      if (mainKey === 'right' || mainKey === 'arrowright') return eventKey === 'arrowright' || eventCode === 'arrowright';
+      if (mainKey === 'up' || mainKey === 'arrowup') return eventKey === 'arrowup' || eventCode === 'arrowup';
+      if (mainKey === 'down' || mainKey === 'arrowdown') return eventKey === 'arrowdown' || eventCode === 'arrowdown';
+
+      return eventKey === mainKey || eventCode === 'key' + mainKey || eventCode === 'digit' + mainKey;
+    },
+
+    dispatch(id) {
+      switch (id) {
+        case 'start_menu': {
+          const btn = document.getElementById('start-btn');
+          if (btn) btn.click();
+          break;
+        }
+        case 'terminal':
+          WindowManager.open('win-terminal');
+          break;
+        case 'files':
+          WindowManager.open('win-files');
+          break;
+        case 'clipboard':
+          if (typeof ClipboardManager !== 'undefined') ClipboardManager.toggle();
+          break;
+        case 'show_desktop':
+          WindowManager.toggleShowDesktop();
+          break;
+        case 'browser':
+          TauriBridge.invoke('launch_application', { exec: 'brave-browser' })
+            .then(() => ReportManager?.showToast('Brave Browser başlatıldı.'))
+            .catch(() => WindowManager.open('win-browser'));
+          break;
+        case 'taskmgr':
+          WindowManager.open('win-taskmgr');
+          break;
+        case 'settings':
+          WindowManager.open('win-settings');
+          break;
+        case 'ram_clean':
+          if (typeof MemoryManager !== 'undefined') MemoryManager.optimizeRam();
+          break;
+        case 'quick_search':
+        case 'spotlight':
+          if (typeof SpotlightManager !== 'undefined') {
+            SpotlightManager.toggle();
+          } else {
+            const startBtn = document.getElementById('start-btn');
+            if (startBtn) startBtn.click();
+            setTimeout(() => document.getElementById('start-search')?.focus(), 60);
+          }
+          break;
+        case 'snap_left':
+          WindowManager.snapActive('left');
+          break;
+        case 'snap_right':
+          WindowManager.snapActive('right');
+          break;
+        case 'snap_up':
+          WindowManager.snapActive('up');
+          break;
+        case 'snap_down':
+          WindowManager.snapActive('down');
+          break;
+        case 'notif_drawer':
+          if (typeof NotificationManager !== 'undefined') {
+            NotificationManager.toggleDrawer();
+          }
+          break;
+        case 'lock_screen':
+          if (typeof LockScreenManager !== 'undefined') LockScreenManager.lock();
+          break;
+        case 'screenshot':
+          if (typeof ScreenshotManager !== 'undefined') ScreenshotManager.quickCapture();
+          break;
+      }
+    },
+
+    handleKeyDown(e) {
+      if (this.recordingId) return true;
+      const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+      const isInput = activeTag === 'input' || activeTag === 'textarea' || document.activeElement?.isContentEditable;
+
+      for (const sc of this.shortcuts) {
+        if (this.matches(e, sc.keys)) {
+          if (isInput && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            continue;
+          }
+          e.preventDefault();
+          this.dispatch(sc.id);
+          return true;
+        }
+      }
+      return false;
+    }
+  };
+
   // Global Klavye Kısayolları (Keyboard Shortcuts)
   window.addEventListener('keydown', (e) => {
-    // Ctrl + Alt + T -> Terminal
-    if (e.ctrlKey && e.altKey && (e.key === 't' || e.key === 'T')) {
-      e.preventDefault();
-      WindowManager.open('win-terminal');
+    // 1. Özelleştirilebilir Kısayol Yöneticisi Kontrolü
+    if (typeof ShortcutManager !== 'undefined' && ShortcutManager.handleKeyDown(e)) {
+      return;
     }
-    // Ctrl + Alt + S -> Sistem Ayarları
-    else if (e.ctrlKey && e.altKey && (e.key === 's' || e.key === 'S')) {
-      e.preventDefault();
-      WindowManager.open('win-settings');
+
+    // 2. Süper / Windows Tuşu Fallback
+    if (e.key === 'Meta' || e.key === 'OS') {
+      const startBtn = document.getElementById('start-btn');
+      if (startBtn) startBtn.click();
     }
-    // Ctrl + Alt + R veya Ctrl + Alt + M -> Hızlı RAM Temizleme
-    else if (e.ctrlKey && e.altKey && (e.key === 'r' || e.key === 'R' || e.key === 'm' || e.key === 'M')) {
+    // Donanım Medya Tuşları: Ses Artırma
+    else if (e.key === 'AudioVolumeUp') {
       e.preventDefault();
-      MemoryManager.optimizeRam();
+      TauriBridge.invoke('get_volume').then((cur) => {
+        const nxt = Math.min(100, (typeof cur === 'number' ? cur : 50) + 5);
+        TauriBridge.invoke('set_volume', { level: nxt });
+        ReportManager?.showToast(`🔊 Ses: %${nxt}`);
+      }).catch(() => {});
+    }
+    // Donanım Medya Tuşları: Ses Azaltma
+    else if (e.key === 'AudioVolumeDown') {
+      e.preventDefault();
+      TauriBridge.invoke('get_volume').then((cur) => {
+        const nxt = Math.max(0, (typeof cur === 'number' ? cur : 50) - 5);
+        TauriBridge.invoke('set_volume', { level: nxt });
+        ReportManager?.showToast(`🔉 Ses: %${nxt}`);
+      }).catch(() => {});
+    }
+    // Donanım Medya Tuşları: Sessize Alma
+    else if (e.key === 'AudioVolumeMute') {
+      e.preventDefault();
+      TauriBridge.invoke('get_volume').then((cur) => {
+        const nxt = (cur > 0) ? 0 : 50;
+        TauriBridge.invoke('set_volume', { level: nxt });
+        ReportManager?.showToast(nxt === 0 ? '🔇 Ses Kapatıldı' : `🔊 Ses: %${nxt}`);
+      }).catch(() => {});
+    }
+    // Donanım Medya Tuşları: Ekran Parlaklığı Artırma
+    else if (e.key === 'BrightnessUp') {
+      e.preventDefault();
+      TauriBridge.invoke('set_brightness', { level: 90 }).then(() => {
+        ReportManager?.showToast('☀️ Parlaklık Artırıldı');
+      }).catch(() => {});
+    }
+    // Donanım Medya Tuşları: Ekran Parlaklığı Azaltma
+    else if (e.key === 'BrightnessDown') {
+      e.preventDefault();
+      TauriBridge.invoke('set_brightness', { level: 40 }).then(() => {
+        ReportManager?.showToast('🔅 Parlaklık Azaltıldı');
+      }).catch(() => {});
     }
     // Esc: başlangıç menüsü ve genel görünüm kapatma initDesktopControls
     // dinleyicisinde tek elden yapılır; burada tekrarı yok.
@@ -6439,7 +7624,9 @@
       try {
         await TauriBridge.invoke('set_lock_credentials', {
           currentPin: currentPin || null,
-          newPin: newPin
+          newPin: newPin,
+          current_pin: currentPin || null,
+          new_pin: newPin
         });
         return { success: true };
       } catch (err) {
@@ -7230,12 +8417,27 @@
         btn.textContent = 'Bağlanıyor…';
       }
       try {
-        const msg = await TauriBridge.invoke('wifi_connect', { ssid });
+        let msg;
+        try {
+          msg = await TauriBridge.invoke('wifi_connect', { ssid });
+        } catch (firstErr) {
+          const errStr = String(firstErr.message || firstErr);
+          if (errStr.includes('parol') || errStr.includes('Secrets') || errStr.includes('password') || errStr.includes('şifre')) {
+            const pass = prompt(`"${ssid}" kablosuz ağı için parolayı girin:`);
+            if (pass === null) {
+              if (btn) { btn.disabled = false; btn.textContent = 'Bağlan'; }
+              return;
+            }
+            msg = await TauriBridge.invoke('wifi_connect', { ssid, password: pass });
+          } else {
+            throw firstErr;
+          }
+        }
         ReportManager.showToast(msg || `Bağlanıldı: ${ssid}`);
         await this.loadState();
         await this.scan(false);
       } catch (err) {
-        ReportManager.showToast(`Bağlanılamadı: ${err.message || err}`);
+        ReportManager.showToast(`Bağlanılamadı: ${err.message || err}`, 'error');
         if (btn) {
           btn.disabled = false;
           btn.textContent = 'Bağlan';
@@ -7425,6 +8627,1791 @@
     }
   }
 
+
+  // ============================================================================
+  // EKRAN GÖRÜNTÜSÜ ALMA ARACI (SCREENSHOT MANAGER)
+  // ============================================================================
+  const ScreenshotManager = {
+    currentMode: 'fullscreen',
+    currentDelay: 0,
+    saveToDisk: true,
+    copyClipboard: true,
+    lastCapturedPath: null,
+
+    init() {
+      // 1. Mod seçimleri
+      document.querySelectorAll('#win-screenshot .ss-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#win-screenshot .ss-mode-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          this.currentMode = btn.getAttribute('data-mode') || 'fullscreen';
+        });
+      });
+
+      // 2. Gecikme seçimleri
+      document.querySelectorAll('#win-screenshot .ss-delay-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('#win-screenshot .ss-delay-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          this.currentDelay = parseInt(btn.getAttribute('data-delay') || '0', 10);
+        });
+      });
+
+      // 3. Yakalama eylemi
+      const btnCapture = document.getElementById('ss-btn-capture');
+      if (btnCapture) {
+        btnCapture.addEventListener('click', () => this.capture());
+      }
+
+      // 4. Panoya Kopyala ve Klasörde Aç butonları
+      const btnCopy = document.getElementById('ss-btn-copy');
+      if (btnCopy) {
+        btnCopy.addEventListener('click', () => {
+          ReportManager.showToast('Ekran görüntüsü panoya kopyalandı.');
+        });
+      }
+
+      const btnOpenDir = document.getElementById('ss-btn-open-dir');
+      if (btnOpenDir) {
+        btnOpenDir.addEventListener('click', async () => {
+          try {
+            await TauriBridge.invoke('run_terminal_command', { command: 'xdg-open ~/Pictures/Screenshots 2>/dev/null || true' });
+          } catch (e) {
+            ReportManager.showToast('Resimler klasörü açılamadı.');
+          }
+        });
+      }
+
+      // 5. Global Klavye Kısayolları (PrintScreen & Super+Shift+S)
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+          e.preventDefault();
+          this.quickCapture();
+        } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key.toLowerCase() === 's' || e.code === 'KeyS')) {
+          e.preventDefault();
+          WindowManager.open('win-screenshot');
+        }
+      });
+    },
+
+    async quickCapture() {
+      ReportManager.showToast('📸 Ekran görüntüsü alınıyor...');
+      try {
+        const res = await TauriBridge.invoke('take_screenshot', {
+          mode: 'fullscreen',
+          delay: 0,
+          save_to_disk: true,
+          copy_clipboard: true
+        });
+        ReportManager.showToast(`📸 Ekran görüntüsü kaydedildi: ${res.file_name || 'Ekran-Goruntusu.png'}`);
+      } catch (err) {
+        ReportManager.showToast(`Ekran görüntüsü alınamadı: ${err.message || err}`);
+      }
+    },
+
+    async capture() {
+      const btnCapture = document.getElementById('ss-btn-capture');
+      const prevBox = document.getElementById('ss-preview-box');
+      const prevImg = document.getElementById('ss-preview-img');
+      const statusText = document.getElementById('ss-status-text');
+
+      if (this.currentDelay > 0) {
+        if (btnCapture) btnCapture.disabled = true;
+        let remaining = this.currentDelay;
+        if (statusText) statusText.textContent = `${remaining} saniye sonra yakalanacak...`;
+        const timer = setInterval(() => {
+          remaining--;
+          if (remaining > 0) {
+            if (statusText) statusText.textContent = `${remaining} saniye sonra yakalanacak...`;
+          } else {
+            clearInterval(timer);
+          }
+        }, 1000);
+      }
+
+      try {
+        const res = await TauriBridge.invoke('take_screenshot', {
+          mode: this.currentMode,
+          delay: this.currentDelay,
+          save_to_disk: this.saveToDisk,
+          copy_clipboard: this.copyClipboard
+        });
+
+        this.lastCapturedPath = res.file_path;
+        if (statusText) statusText.textContent = `Yakalandı: ${res.file_name || 'Başarılı'}`;
+        if (prevBox) prevBox.style.display = 'flex';
+        if (prevImg && res.image_b64) {
+          prevImg.src = `data:image/png;base64,${res.image_b64}`;
+          prevImg.style.display = 'block';
+        }
+        ReportManager.showToast(`📸 Ekran görüntüsü yakalandı: ${res.file_name || ''}`);
+      } catch (e) {
+        if (statusText) statusText.textContent = `Hata: ${e.message || e}`;
+        ReportManager.showToast(`Ekran görüntüsü hatası: ${e.message || e}`);
+      } finally {
+        if (btnCapture) btnCapture.disabled = false;
+      }
+    }
+  };
+
+  // ============================================================================
+  // SİSTEM GÜÇ VE ÇIKIŞ YÖNETİCİSİ (POWER MANAGER)
+  // ============================================================================
+  const PowerManager = {
+    init() {
+      const btnShutdown = document.getElementById('btn-shutdown');
+      if (btnShutdown) {
+        btnShutdown.addEventListener('click', () => this.confirmPower('shutdown'));
+      }
+
+      const btnRestart = document.getElementById('btn-restart');
+      if (btnRestart) {
+        btnRestart.addEventListener('click', () => this.confirmPower('reboot'));
+      }
+
+      const btnSuspend = document.getElementById('btn-suspend');
+      if (btnSuspend) {
+        btnSuspend.addEventListener('click', () => this.confirmPower('suspend'));
+      }
+
+      const btnLogout = document.getElementById('btn-logout');
+      if (btnLogout) {
+        btnLogout.addEventListener('click', () => this.confirmPower('logout'));
+      }
+
+      const lockRestart = document.getElementById('lock-btn-restart');
+      if (lockRestart) {
+        lockRestart.addEventListener('click', () => this.executeAction('reboot'));
+      }
+
+      const lockShutdown = document.getElementById('lock-btn-shutdown');
+      if (lockShutdown) {
+        lockShutdown.addEventListener('click', () => this.executeAction('shutdown'));
+      }
+
+      const lockSuspend = document.getElementById('lock-btn-suspend');
+      if (lockSuspend) {
+        lockSuspend.addEventListener('click', () => this.executeAction('suspend'));
+      }
+
+      const modal = document.getElementById('modal-power-dialog');
+      if (modal) {
+        modal.querySelectorAll('.power-modal-item').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const action = btn.getAttribute('data-action');
+            if (action === 'cancel') {
+              this.closeModal();
+            } else if (action) {
+              this.executeAction(action);
+            }
+          });
+        });
+
+        const cancelBtn = modal.querySelector('.power-modal-cancel');
+        if (cancelBtn) {
+          cancelBtn.addEventListener('click', () => this.closeModal());
+        }
+
+        modal.addEventListener('click', (e) => {
+          if (e.target === modal) this.closeModal();
+        });
+      }
+    },
+
+    showDialog(action = 'shutdown') {
+      this.confirmPower(action);
+    },
+
+    confirmPower(action) {
+      const modal = document.getElementById('modal-power-dialog');
+      if (modal) {
+        modal.classList.add('open');
+        modal.setAttribute('aria-hidden', 'false');
+      } else {
+        this.executeAction(action);
+      }
+    },
+
+    closeModal() {
+      const modal = document.getElementById('modal-power-dialog');
+      if (modal) {
+        modal.classList.remove('open');
+        modal.setAttribute('aria-hidden', 'true');
+      }
+    },
+
+    async executeAction(action) {
+      this.closeModal();
+      Terminal.log(`[GÜÇ] İşlem yürütülüyor: ${action}`, 'cmd');
+
+      try {
+        switch (action) {
+          case 'shutdown':
+            ReportManager.showToast('Sistem kapatılıyor...');
+            await TauriBridge.invoke('system_poweroff');
+            break;
+          case 'reboot':
+            ReportManager.showToast('Sistem yeniden başlatılıyor...');
+            await TauriBridge.invoke('system_reboot');
+            break;
+          case 'suspend':
+            ReportManager.showToast('Sistem askıya alınıyor...');
+            await TauriBridge.invoke('system_suspend');
+            break;
+          case 'logout':
+            ReportManager.showToast('Oturum kapatılıyor...');
+            await TauriBridge.invoke('system_logout');
+            break;
+          case 'lock':
+            if (typeof LockManager !== 'undefined') {
+              LockManager.lock();
+            }
+            break;
+          default:
+            break;
+        }
+      } catch (err) {
+        ReportManager.showToast(`Güç işlemi hatası: ${err.message || err}`);
+      }
+    }
+  };
+
+  // ============================================================================
+  // ANKORA PANO GEÇMİŞİ YÖNETİCİSİ (SUPER + V CLIPBOARD MANAGER)
+  // ============================================================================
+  const ClipboardManager = {
+    history: [],
+    maxItems: 20,
+    isOpen: false,
+    _lastText: '',
+
+    init() {
+      try {
+        const stored = SafeStorage.getItem('ankora_clipboard_history');
+        if (stored) this.history = JSON.parse(stored);
+      } catch (e) {
+        this.history = [];
+      }
+
+      const btnClear = document.getElementById('btn-clipboard-clear');
+      if (btnClear) {
+        btnClear.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.history = [];
+          this.save();
+          this.render();
+          ReportManager?.showToast('Pano geçmişi temizlendi.');
+        });
+      }
+
+      document.addEventListener('click', (e) => {
+        const flyout = document.getElementById('clipboard-flyout');
+        if (this.isOpen && flyout && !flyout.contains(e.target)) {
+          this.close();
+        }
+      });
+
+      this.pollClipboard();
+      setInterval(() => this.pollClipboard(), 3000);
+    },
+
+    save() {
+      try {
+        SafeStorage.setItem('ankora_clipboard_history', JSON.stringify(this.history.slice(0, this.maxItems)));
+      } catch (e) {}
+    },
+
+    async pollClipboard() {
+      if (document.hidden || (window.LockManager && window.LockManager.isLocked)) return;
+      try {
+        const text = await TauriBridge.invoke('get_clipboard_text');
+        if (text && typeof text === 'string' && text.trim().length > 0 && text !== this._lastText) {
+          this._lastText = text;
+          this.add(text);
+        }
+      } catch (e) {}
+    },
+
+    add(text) {
+      if (!text || !text.trim()) return;
+      const trimmed = text.trim();
+      this.history = this.history.filter(item => item !== trimmed);
+      this.history.unshift(trimmed);
+      if (this.history.length > this.maxItems) {
+        this.history = this.history.slice(0, this.maxItems);
+      }
+      this.save();
+      if (this.isOpen) this.render();
+    },
+
+    toggle() {
+      if (this.isOpen) this.close(); else this.open();
+    },
+
+    open() {
+      const flyout = document.getElementById('clipboard-flyout');
+      if (!flyout) return;
+      this.render();
+      flyout.style.display = 'flex';
+      this.isOpen = true;
+    },
+
+    close() {
+      const flyout = document.getElementById('clipboard-flyout');
+      if (flyout) flyout.style.display = 'none';
+      this.isOpen = false;
+    },
+
+    render() {
+      const container = document.getElementById('clipboard-items-list');
+      if (!container) return;
+      container.innerHTML = '';
+
+      if (this.history.length === 0) {
+        container.innerHTML = '<div style="color:#64748b;font-size:12px;text-align:center;padding:24px 0;">Henüz kopyalanan metin yok</div>';
+        return;
+      }
+
+      this.history.forEach((text) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:8px 10px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.07);border-radius:8px;font-size:12px;color:#e2e8f0;cursor:pointer;white-space:pre-wrap;word-break:break-all;max-height:64px;overflow:hidden;transition:background 0.15s;';
+        item.textContent = text.length > 120 ? text.substring(0, 120) + '...' : text;
+        item.title = text;
+        item.addEventListener('mouseenter', () => {
+          item.style.background = 'rgba(56,189,248,0.15)';
+          item.style.borderColor = 'rgba(56,189,248,0.3)';
+        });
+        item.addEventListener('mouseleave', () => {
+          item.style.background = 'rgba(255,255,255,0.04)';
+          item.style.borderColor = 'rgba(255,255,255,0.07)';
+        });
+        item.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          try {
+            await TauriBridge.invoke('set_clipboard_text', { text });
+            if (navigator.clipboard) await navigator.clipboard.writeText(text);
+          } catch (err) {}
+          ReportManager?.showToast('Seçilen metin panoya kopyalandı.');
+          this.close();
+        });
+        container.appendChild(item);
+      });
+    }
+  };
+
+  // ============================================================================
+  // ANKORA ÇIKARILABİLİR SÜRÜCÜ VE USB İZLEYİCİSİ (USB AUTO-MOUNT & NOTIFICATION)
+  // ============================================================================
+  const UsbDriveWatcher = {
+    knownDrives: new Set(),
+    _timer: null,
+
+    init() {
+      this.pollDrives(true);
+      this._timer = setInterval(() => this.pollDrives(false), 4000);
+    },
+
+    async pollDrives(isFirst) {
+      if (document.hidden && !isFirst) return;
+      try {
+        const drives = await TauriBridge.invoke('get_removable_drives');
+        if (!Array.isArray(drives)) return;
+
+        const currentNames = new Set(drives.map(d => d.name));
+
+        if (!isFirst) {
+          drives.forEach(d => {
+            if (!this.knownDrives.has(d.name)) {
+              const label = d.label || d.name;
+              ReportManager?.showToast(`💾 USB Sürücü Algılandı: ${label} (${d.size || ''})`);
+              if (d.mountpoint) {
+                const filesWin = document.getElementById('win-files');
+                if (filesWin && filesWin.classList.contains('open')) {
+                  FileManager?.loadDirectory(d.mountpoint);
+                }
+              }
+            }
+          });
+        }
+
+        this.knownDrives = currentNames;
+        this.updateFilesSidebar(drives);
+      } catch (e) {}
+    },
+
+    updateFilesSidebar(drives) {
+      const sidebar = document.querySelector('.files-sidebar-section');
+      if (!sidebar) return;
+
+      sidebar.querySelectorAll('.usb-dynamic-drive').forEach(el => el.remove());
+
+      drives.forEach(d => {
+        if (!d.mountpoint) return;
+        const item = document.createElement('div');
+        item.className = 'files-sidebar-item usb-dynamic-drive';
+        item.setAttribute('data-path', d.mountpoint);
+        item.style.cssText = 'color:#38bdf8;font-weight:500;';
+        item.innerHTML = `<svg class="files-sidebar-glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"></path><line x1="8" y1="12" x2="8.01" y2="12"></line><line x1="12" y1="12" x2="12.01" y2="12"></line></svg><span>${escapeHtml(d.label || d.name)}</span>`;
+        item.title = `${d.label} (${d.size})\nBağlantı: ${d.mountpoint}\n• Tıkla: Aç\n• Sağ tık: Güvenle Çıkar`;
+        item.addEventListener('click', () => {
+          document.querySelectorAll('.files-sidebar-item').forEach(i => i.classList.remove('active'));
+          item.classList.add('active');
+          FileManager?.loadDirectory(d.mountpoint);
+        });
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          TauriBridge.invoke('unmount_drive', { device: d.name })
+            .then(msg => {
+              ReportManager?.showToast(msg || 'Sürücü çıkarıldı.');
+              setTimeout(() => this.pollDrives(false), 500);
+            })
+            .catch(err => ReportManager?.showToast(`Çıkarılamadı: ${err.message || err}`));
+        });
+        sidebar.appendChild(item);
+      });
+    }
+  };
+
+  // ============================================================================
+  // 19. BİLDİRİM SUNUCUSU & BİLDİRİM MERKEZİ (NOTIFICATION MANAGER)
+  // ============================================================================
+  const NotificationManager = {
+    notifications: [],
+    seenIds: new Set(),
+    pollInterval: null,
+
+    init() {
+      const btnTray = document.getElementById('tray-btn-notifications');
+      const drawer = document.getElementById('notification-center-drawer');
+      const btnClose = document.getElementById('btn-close-notif-drawer');
+      const btnClear = document.getElementById('btn-clear-all-notifs');
+
+      if (btnTray) {
+        btnTray.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.toggleDrawer();
+        });
+      }
+
+      if (btnClose) {
+        btnClose.addEventListener('click', () => this.closeDrawer());
+      }
+
+      if (btnClear) {
+        btnClear.addEventListener('click', () => this.clearAll());
+      }
+
+      // Çekmece dışına tıklandığında otomatik kapatma
+      document.addEventListener('click', (e) => {
+        if (!drawer || drawer.hidden) return;
+        if (!drawer.contains(e.target) && (!btnTray || !btnTray.contains(e.target))) {
+          this.closeDrawer();
+        }
+      });
+
+      // İlk bildirim çekme ve düzenli yoklama (4.5 sn)
+      this.poll();
+      this.pollInterval = setInterval(() => this.poll(), 4500);
+    },
+
+    toggleDrawer() {
+      const drawer = document.getElementById('notification-center-drawer');
+      if (!drawer) return;
+      if (drawer.classList.contains('open')) {
+        this.closeDrawer();
+      } else {
+        this.openDrawer();
+      }
+    },
+
+    openDrawer() {
+      const drawer = document.getElementById('notification-center-drawer');
+      if (!drawer) return;
+      drawer.hidden = false;
+      void drawer.offsetWidth;
+      drawer.classList.add('open');
+      this.markAllAsRead();
+      if (typeof MprisManager !== 'undefined' && MprisManager.update) {
+        MprisManager.update();
+      }
+    },
+
+    closeDrawer() {
+      const drawer = document.getElementById('notification-center-drawer');
+      if (!drawer) return;
+      drawer.classList.remove('open');
+      setTimeout(() => {
+        if (!drawer.classList.contains('open')) drawer.hidden = true;
+      }, 250);
+    },
+
+    async poll() {
+      try {
+        const list = await TauriBridge.invoke('get_system_notifications');
+        if (Array.isArray(list)) {
+          list.forEach(n => {
+            if (!this.seenIds.has(n.id)) {
+              this.seenIds.add(n.id);
+              if (this.seenIds.size > list.length) {
+                this.showDesktopToast(n);
+              }
+            }
+          });
+          this.notifications = list;
+          this.updateBadge();
+          this.renderList();
+        }
+      } catch (e) {
+        // Fallback
+      }
+    },
+
+    showDesktopToast(n) {
+      if (SafeStorage.getItem('ankora_dnd') === '1') return;
+      const title = n.summary || 'Bildirim';
+      const body = n.body || '';
+      const app = n.app_name ? `[${n.app_name}] ` : '';
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast(`${app}${title}: ${body}`);
+      }
+    },
+
+    updateBadge() {
+      const badge = document.getElementById('tray-notif-badge');
+      if (!badge) return;
+      const unreadCount = this.notifications.filter(n => !n.read).length;
+      if (unreadCount > 0) {
+        badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+        badge.style.display = 'inline-flex';
+      } else {
+        badge.style.display = 'none';
+      }
+    },
+
+    markAllAsRead() {
+      this.notifications.forEach(n => { n.read = true; });
+      this.updateBadge();
+      this.renderList();
+    },
+
+    async clearAll() {
+      try {
+        await TauriBridge.invoke('clear_system_notifications');
+      } catch (e) {}
+      this.notifications = [];
+      this.updateBadge();
+      this.renderList();
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast('Tüm bildirimler temizlendi.');
+      }
+    },
+
+    removeNotification(id) {
+      this.notifications = this.notifications.filter(n => n.id !== id);
+      this.updateBadge();
+      this.renderList();
+    },
+
+    renderList() {
+      const container = document.getElementById('notif-items-container');
+      const emptyState = document.getElementById('notif-empty-state');
+      if (!container) return;
+
+      const items = container.querySelectorAll('.notif-card-item');
+      items.forEach(el => el.remove());
+
+      if (this.notifications.length === 0) {
+        if (emptyState) emptyState.style.display = 'flex';
+        return;
+      }
+
+      if (emptyState) emptyState.style.display = 'none';
+
+      const sorted = [...this.notifications].reverse();
+
+      sorted.forEach(n => {
+        const card = document.createElement('div');
+        card.className = 'notif-card-item';
+        card.style.cssText = 'padding:12px 14px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;display:flex;flex-direction:column;gap:5px;position:relative;margin-bottom:8px;transition:background 0.15s ease;';
+
+        const timeStr = n.timestamp ? new Date(n.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+
+        card.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <span style="font-size:11px;font-weight:600;color:var(--accent-active,#38bdf8);background:rgba(56,189,248,0.12);padding:2px 6px;border-radius:4px;">${escapeHtml(n.app_name || 'Sistem')}</span>
+              <span style="font-size:10px;color:var(--text-muted,#94a3b8);">${escapeHtml(timeStr)}</span>
+            </div>
+            <button class="btn-dismiss-single-notif" style="background:none;border:none;color:var(--text-muted,#64748b);font-size:13px;cursor:pointer;padding:2px 6px;border-radius:3px;" title="Kaldır">✕</button>
+          </div>
+          <div style="font-size:12.5px;font-weight:600;color:#fff;margin-top:2px;">${escapeHtml(n.summary || '')}</div>
+          <div style="font-size:11.5px;color:var(--text-secondary,#cbd5e1);line-height:1.4;word-break:break-word;">${escapeHtml(n.body || '')}</div>
+        `;
+
+        const btnDismiss = card.querySelector('.btn-dismiss-single-notif');
+        btnDismiss?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.removeNotification(n.id);
+        });
+
+        container.appendChild(card);
+      });
+    },
+
+    async notify(summary, body = '', appName = 'AyazDE', icon = 'dialog-information') {
+      try {
+        await TauriBridge.invoke('send_desktop_notification', {
+          summary,
+          body,
+          appName: appName,
+          icon: icon
+        });
+      } catch (e) {
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(`${summary}: ${body}`);
+        }
+      }
+      setTimeout(() => this.poll(), 300);
+    }
+  };
+
+  // ============================================================================
+  // 20. GELİŞMİŞ SES AYGITLARI YÖNETİCİSİ (AUDIO DEVICE MANAGER)
+  // ============================================================================
+  const AudioDeviceManager = {
+    init() {
+      const sinkSelect = document.getElementById('select-audio-sink');
+      const sourceSelect = document.getElementById('select-audio-source');
+
+      if (sinkSelect) {
+        sinkSelect.addEventListener('change', (e) => {
+          const val = e.target.value;
+          if (!val) return;
+          TauriBridge.invoke('set_default_audio_device', { name: val, isSink: true })
+            .then(() => {
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast('Ses çıkış aygıtı değiştirildi: ' + e.target.options[e.target.selectedIndex].text);
+              }
+            })
+            .catch(err => {
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast('Aygıt seçilemedi: ' + (err.message || err), 'error');
+              }
+            });
+        });
+      }
+
+      if (sourceSelect) {
+        sourceSelect.addEventListener('change', (e) => {
+          const val = e.target.value;
+          if (!val) return;
+          TauriBridge.invoke('set_default_audio_device', { name: val, isSink: false })
+            .then(() => {
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast('Mikrofon giriş aygıtı değiştirildi: ' + e.target.options[e.target.selectedIndex].text);
+              }
+            })
+            .catch(err => {
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast('Mikrofon seçilemedi: ' + (err.message || err), 'error');
+              }
+            });
+        });
+      }
+
+      this.refreshDevices();
+    },
+
+    async refreshDevices() {
+      try {
+        const devices = await TauriBridge.invoke('get_audio_devices');
+        if (!Array.isArray(devices)) return;
+
+        const sinkSelect = document.getElementById('select-audio-sink');
+        const sourceSelect = document.getElementById('select-audio-source');
+
+        const sinks = devices.filter(d => d.is_sink);
+        const sources = devices.filter(d => !d.is_sink);
+
+        if (sinkSelect && sinks.length > 0) {
+          sinkSelect.innerHTML = sinks.map(s => `
+            <option value="${escapeHtml(s.name)}" ${s.is_default ? 'selected' : ''}>
+              ${escapeHtml(s.description || s.name)}
+            </option>
+          `).join('');
+        }
+
+        if (sourceSelect && sources.length > 0) {
+          sourceSelect.innerHTML = sources.map(s => `
+            <option value="${escapeHtml(s.name)}" ${s.is_default ? 'selected' : ''}>
+              ${escapeHtml(s.description || s.name)}
+            </option>
+          `).join('');
+        }
+      } catch (e) {
+        // Fallback
+      }
+    }
+  };
+
+  // ============================================================================
+  // 21. BLUETOOTH YÖNETİCİSİ (BLUETOOTH MANAGER)
+  // ============================================================================
+  const BluetoothManager = {
+    status: { is_available: false, is_powered: false, devices: [] },
+    isScanning: false,
+
+    init() {
+      const togglePower = document.getElementById('toggle-bt-power');
+      const btnScan = document.getElementById('btn-bt-scan');
+
+      if (togglePower) {
+        togglePower.addEventListener('change', (e) => {
+          this.togglePower(e.target.checked);
+        });
+      }
+
+      if (btnScan) {
+        btnScan.addEventListener('click', () => {
+          this.scan();
+        });
+      }
+
+      this.checkStatus();
+    },
+
+    async checkStatus() {
+      try {
+        const res = await TauriBridge.invoke('get_bluetooth_status');
+        if (res && typeof res === 'object') {
+          this.status = res;
+          this.render();
+        }
+      } catch (e) {
+        this.status = { is_available: false, is_powered: false, devices: [] };
+        this.render();
+      }
+    },
+
+    async togglePower(enable) {
+      try {
+        await TauriBridge.invoke('toggle_bluetooth', { enable });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(enable ? 'Bluetooth etkinleştirildi.' : 'Bluetooth kapatıldı.');
+        }
+        setTimeout(() => this.checkStatus(), 500);
+      } catch (e) {
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Bluetooth durumu değiştirilemedi: ' + (e.message || e), 'error');
+        }
+        this.checkStatus();
+      }
+    },
+
+    async scan() {
+      if (this.isScanning) return;
+      this.isScanning = true;
+      const btnScan = document.getElementById('btn-bt-scan');
+      if (btnScan) {
+        btnScan.disabled = true;
+        btnScan.textContent = 'Aranıyor...';
+      }
+
+      try {
+        const devs = await TauriBridge.invoke('scan_bluetooth');
+        if (Array.isArray(devs)) {
+          this.status.devices = devs;
+        }
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Bluetooth taraması tamamlandı.');
+        }
+        await this.checkStatus();
+      } catch (e) {
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Tarama hatası: ' + (e.message || e), 'error');
+        }
+      } finally {
+        this.isScanning = false;
+        if (btnScan) {
+          btnScan.disabled = false;
+          btnScan.textContent = 'Cihaz Ara';
+        }
+      }
+    },
+
+    async connect(address, name) {
+      if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+        ReportManager.showToast(`${name || address} cihazına bağlanılıyor...`);
+      }
+      try {
+        const msg = await TauriBridge.invoke('connect_bluetooth_device', { address });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(msg || 'Bağlantı başarılı!');
+        }
+        setTimeout(() => this.checkStatus(), 1200);
+      } catch (e) {
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Bağlantı hatası: ' + (e.message || e), 'error');
+        }
+      }
+    },
+
+    async disconnect(address, name) {
+      try {
+        const msg = await TauriBridge.invoke('disconnect_bluetooth_device', { address });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(msg || 'Bağlantı kesildi.');
+        }
+        setTimeout(() => this.checkStatus(), 1200);
+      } catch (e) {
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Hata: ' + (e.message || e), 'error');
+        }
+      }
+    },
+
+    render() {
+      const desc = document.getElementById('bt-status-desc');
+      const toggle = document.getElementById('toggle-bt-power');
+      const list = document.getElementById('bt-devices-list');
+      if (!list) return;
+
+      if (!this.status.is_available) {
+        if (desc) desc.textContent = 'Bluetooth adaptörü bulunamadı veya BlueZ servisi kapalı.';
+        if (toggle) {
+          toggle.checked = false;
+          toggle.disabled = true;
+        }
+        list.innerHTML = '<div style="color:var(--text-muted,#94a3b8);font-size:12px;padding:8px 0;">Sistemde kullanılabilir bir Bluetooth adaptörü algılanamadı.</div>';
+        return;
+      }
+
+      if (!this.status.is_powered) {
+        if (desc) desc.textContent = 'Bluetooth adaptörü kapalı.';
+        if (toggle) {
+          toggle.checked = false;
+          toggle.disabled = false;
+        }
+        list.innerHTML = '<div style="color:var(--text-muted,#94a3b8);font-size:12px;padding:8px 0;">Bluetooth kapalı. Aygıtları taramak ve bağlanmak için açın.</div>';
+        return;
+      }
+
+      if (desc) desc.textContent = 'Bluetooth açık ve hazır.';
+      if (toggle) {
+        toggle.checked = true;
+        toggle.disabled = false;
+      }
+
+      const devs = this.status.devices || [];
+      if (devs.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-muted,#94a3b8);font-size:12px;padding:8px 0;">Eşleşmiş cihaz yok. "Cihaz Ara" butonuna basarak yakındaki cihazları keşfedin.</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      devs.forEach(d => {
+        const row = document.createElement('div');
+        row.className = 'bt-device-row';
+
+        let badgeStyle = 'background:rgba(255,255,255,0.08);color:var(--text-secondary,#cbd5e1);';
+        let badgeText = 'Eşleşti';
+        if (d.connected) {
+          badgeStyle = 'background:rgba(34,197,94,0.15);color:#4ade80;border:1px solid rgba(34,197,94,0.3);';
+          badgeText = 'Bağlı';
+        }
+
+        row.innerHTML = `
+          <div class="bt-device-meta">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="bt-device-name">${escapeHtml(d.name || 'Bilinmeyen Cihaz')}</span>
+              <span style="font-size:10px;padding:1px 6px;border-radius:4px;${badgeStyle}">${badgeText}</span>
+            </div>
+            <span class="bt-device-addr">${escapeHtml(d.address)}</span>
+          </div>
+          <div style="display:flex;gap:6px;">
+            ${d.connected 
+              ? `<button class="btn-pkg btn-bt-disconnect" style="padding:4px 10px;font-size:11px;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.25);color:#f87171;border-radius:4px;cursor:pointer;">Bağlantıyı Kes</button>`
+              : `<button class="btn-pkg btn-pkg-primary btn-bt-connect" style="padding:4px 10px;font-size:11px;border-radius:4px;cursor:pointer;">Bağlan</button>`
+            }
+          </div>
+        `;
+
+        const btnConn = row.querySelector('.btn-bt-connect');
+        btnConn?.addEventListener('click', () => this.connect(d.address, d.name));
+
+        const btnDisc = row.querySelector('.btn-bt-disconnect');
+        btnDisc?.addEventListener('click', () => this.disconnect(d.address, d.name));
+
+        list.appendChild(row);
+      });
+    }
+  };
+
+  // ============================================================================
+  // 22. EVRENSEL HIZLI ARAMA (SPOTLIGHT / KRUNNER - ALT+SPACE)
+  // ============================================================================
+  const SpotlightManager = {
+    overlay: null,
+    input: null,
+    results: null,
+    isOpen: false,
+    selectedIndex: 0,
+    currentItems: [],
+    searchTimer: null,
+
+    init() {
+      this.overlay = document.getElementById('spotlight-overlay');
+      this.input = document.getElementById('spotlight-input');
+      this.results = document.getElementById('spotlight-results');
+
+      if (!this.overlay || !this.input || !this.results) return;
+
+      this.overlay.addEventListener('click', (e) => {
+        if (e.target === this.overlay) this.close();
+      });
+
+      this.input.addEventListener('keydown', (e) => this.handleKeyDown(e));
+      this.input.addEventListener('input', () => {
+        clearTimeout(this.searchTimer);
+        this.searchTimer = setTimeout(() => this.search(this.input.value), 40);
+      });
+    },
+
+    open() {
+      if (!this.overlay || !this.input) return;
+      this.isOpen = true;
+      this.overlay.style.display = 'flex';
+      this.input.value = '';
+      this.selectedIndex = 0;
+      this.input.focus();
+      this.renderDefaults();
+    },
+
+    close() {
+      if (!this.overlay || !this.input) return;
+      this.isOpen = false;
+      this.overlay.style.display = 'none';
+      this.input.blur();
+    },
+
+    toggle() {
+      if (this.isOpen) {
+        this.close();
+      } else {
+        this.open();
+      }
+    },
+
+    handleKeyDown(e) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.close();
+        return;
+      }
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (this.currentItems.length > 0) {
+          this.selectedIndex = (this.selectedIndex + 1) % this.currentItems.length;
+          this.updateActiveItem();
+        }
+        return;
+      }
+
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (this.currentItems.length > 0) {
+          this.selectedIndex = (this.selectedIndex - 1 + this.currentItems.length) % this.currentItems.length;
+          this.updateActiveItem();
+        }
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (this.currentItems.length > 0 && this.currentItems[this.selectedIndex]) {
+          const item = this.currentItems[this.selectedIndex];
+          this.close();
+          item.onSelect();
+        }
+      }
+    },
+
+    evaluateMath(expr) {
+      const clean = expr.trim();
+      if (!clean) return null;
+      if (!/^[\d\s\+\-\*\/\%\^\(\)\.\,]|(sqrt|sin|cos|tan|log|abs|pi|pow)/i.test(clean)) return null;
+      if (!/[\+\-\*\/\%\^]/.test(clean) && !/(sqrt|sin|cos|tan|log|abs)/i.test(clean)) return null;
+      try {
+        const jsExpr = clean
+          .replace(/,/g, '.')
+          .replace(/\bsqrt\b/gi, 'Math.sqrt')
+          .replace(/\bsin\b/gi, 'Math.sin')
+          .replace(/\bcos\b/gi, 'Math.cos')
+          .replace(/\btan\b/gi, 'Math.tan')
+          .replace(/\babs\b/gi, 'Math.abs')
+          .replace(/\bpi\b/gi, 'Math.PI')
+          .replace(/\^/g, '**');
+        const val = Function('"use strict"; return (' + jsExpr + ')')();
+        if (typeof val === 'number' && !isNaN(val) && isFinite(val)) {
+          return val;
+        }
+      } catch (e) {}
+      return null;
+    },
+
+    renderDefaults() {
+      const items = [
+        {
+          title: 'Uçbirim (Terminal)',
+          subtitle: 'Sistem komut satırı ve araçlar (Ctrl+Alt+T)',
+          badge: 'UYGULAMA',
+          iconSvg: '<polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line>',
+          onSelect: () => WindowManager.open('win-terminal')
+        },
+        {
+          title: 'Dosya Yöneticisi',
+          subtitle: 'Kişisel dosyalar ve depolama birimleri (Super+E)',
+          badge: 'UYGULAMA',
+          iconSvg: '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>',
+          onSelect: () => WindowManager.open('win-files')
+        },
+        {
+          title: 'Sistem Ayarları',
+          subtitle: 'Ekran, tema, ses, ağ ve cihaz tercihleri (Ctrl+Alt+S)',
+          badge: 'SİSTEM',
+          iconSvg: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+          onSelect: () => WindowManager.open('win-settings')
+        },
+        {
+          title: 'Görev Yöneticisi',
+          subtitle: 'İşlemler, RAM, CPU ve disk monitörü (Ctrl+Shift+Esc)',
+          badge: 'SİSTEM',
+          iconSvg: '<line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line>',
+          onSelect: () => WindowManager.open('win-taskmgr')
+        }
+      ];
+      this.currentItems = items;
+      this.selectedIndex = 0;
+      this.renderItems();
+    },
+
+    async search(rawQuery) {
+      const q = (rawQuery || '').trim();
+      if (!q) {
+        this.renderDefaults();
+        return;
+      }
+
+      const items = [];
+
+      // 1. Matematiksel İfade Değerlendirme
+      const mathVal = this.evaluateMath(q);
+      if (mathVal !== null) {
+        items.push({
+          title: `= ${mathVal}`,
+          subtitle: `Hesaplama sonucu — Enter'a basarak panoya kopyalayın`,
+          badge: 'HESAPLAMA',
+          iconSvg: '<line x1="4" y1="9" x2="20" y2="9"></line><line x1="4" y1="15" x2="20" y2="15"></line><line x1="10" y1="3" x2="10" y2="21"></line><line x1="14" y1="3" x2="14" y2="21"></line>',
+          onSelect: () => {
+            navigator.clipboard.writeText(String(mathVal)).then(() => {
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast(`Sonuç panoya kopyalandı: ${mathVal}`);
+              }
+            });
+          }
+        });
+      }
+
+      // 2. Kabuk Komutu Çalıştırma (> veya $ ile başlarsa)
+      if (q.startsWith('>') || q.startsWith('$')) {
+        const cmd = q.slice(1).trim();
+        if (cmd) {
+          items.push({
+            title: `Komut Çalıştır: ${cmd}`,
+            subtitle: `Terminal penceresinde yürüt`,
+            badge: 'UÇBİRİM',
+            iconSvg: '<polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line>',
+            onSelect: () => {
+              WindowManager.open('win-terminal');
+              if (typeof Terminal !== 'undefined' && Terminal.runCommand) {
+                Terminal.runCommand(cmd);
+              }
+            }
+          });
+        }
+      }
+
+      const normQ = typeof launcherNorm === 'function' ? launcherNorm(q) : q.toLowerCase();
+
+      // 3. Uygulamalar Araması (XdgDesktopEngine)
+      if (typeof XdgDesktopEngine !== 'undefined') {
+        const allApps = [
+          ...(XdgDesktopEngine.getDefaultApps ? XdgDesktopEngine.getDefaultApps() : []),
+          ...(XdgDesktopEngine.installedApps || [])
+        ];
+
+        const matchedApps = allApps.filter(app => {
+          const name = typeof launcherNorm === 'function' ? launcherNorm(app.name || '') : (app.name || '').toLowerCase();
+          const comment = typeof launcherNorm === 'function' ? launcherNorm(app.comment || '') : (app.comment || '').toLowerCase();
+          const exec = (app.exec || '').toLowerCase();
+          return name.includes(normQ) || comment.includes(normQ) || exec.includes(normQ);
+        });
+
+        matchedApps.slice(0, 6).forEach(app => {
+          items.push({
+            title: app.name,
+            subtitle: app.comment || app.exec || 'Uygulama',
+            badge: 'UYGULAMA',
+            iconSvg: '<rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect>',
+            onSelect: () => XdgDesktopEngine.launchApp(app)
+          });
+        });
+      }
+
+      // 4. Ayarlar Hızlı Geçişleri
+      const settingPanes = [
+        { name: 'Ekran & Çözünürlük Ayarları', id: 'pane-set-display', terms: ['ekran', 'cozunurluk', 'display', 'monitör'] },
+        { name: 'Duvar Kağıdı & Görünüm Ayarları', id: 'pane-set-theme', terms: ['tema', 'duvar kagidi', 'arka plan', 'wallpaper'] },
+        { name: 'Ses & Bildirim Ayarları', id: 'pane-set-audio', terms: ['ses', 'audio', 'hoparlor', 'mikrofon', 'volume', 'sound'] },
+        { name: 'Bluetooth Aygıtları', id: 'pane-set-bluetooth', terms: ['bluetooth', 'bt', 'kulaklik', 'kablosuz'] },
+        { name: 'Klavye Kısayolları', id: 'pane-set-shortcuts', terms: ['kisayol', 'klavye', 'shortcuts', 'tus'] },
+        { name: 'Depolama & Disk Yönetimi', id: 'pane-set-storage', terms: ['depolama', 'disk', 'storage', 'hdd', 'ssd'] },
+        { name: 'Güç & Kiosk Modu', id: 'pane-set-power', terms: ['guc', 'power', 'pil', 'kiosk', 'uyku'] },
+        { name: 'Sistem Bilgisi & Telemetri', id: 'pane-set-about', terms: ['sistem', 'hakkinda', 'surum', 'about', 'ankora'] }
+      ];
+
+      settingPanes.forEach(sp => {
+        const matches = sp.terms.some(t => normQ.includes(t) || t.includes(normQ));
+        if (matches) {
+          items.push({
+            title: sp.name,
+            subtitle: `Sistem Ayarları sekmesini doğrudan aç`,
+            badge: 'AYARLAR',
+            iconSvg: '<circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>',
+            onSelect: () => {
+              WindowManager.open('win-settings');
+              const navItem = document.querySelector(`.settings-nav-item[data-pane="${sp.id}"]`);
+              if (navItem) navItem.click();
+            }
+          });
+        }
+      });
+
+      // 5. Hızlı Dosya Araması (IPC)
+      if (q.length >= 2 && !q.startsWith('>') && !q.startsWith('$')) {
+        try {
+          const files = await TauriBridge.invoke('spotlight_search_files', { query: q, maxResults: 8 });
+          if (Array.isArray(files)) {
+            files.forEach(f => {
+              items.push({
+                title: f.name,
+                subtitle: `${f.path} • ${f.size_human}`,
+                badge: f.is_dir ? 'KLASÖR' : 'DOSYA',
+                iconSvg: f.is_dir 
+                  ? '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>'
+                  : '<path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline>',
+                onSelect: () => {
+                  if (f.is_dir) {
+                    WindowManager.open('win-files');
+                    if (typeof FileManager !== 'undefined' && FileManager.loadDirectory) {
+                      FileManager.loadDirectory(f.path);
+                    }
+                  } else {
+                    TauriBridge.invoke('launch_application', { exec: `xdg-open "${f.path}"` })
+                      .catch(() => {
+                        WindowManager.open('win-files');
+                        const dir = f.path.substring(0, f.path.lastIndexOf('/'));
+                        if (typeof FileManager !== 'undefined' && FileManager.loadDirectory) {
+                          FileManager.loadDirectory(dir || '/');
+                        }
+                      });
+                  }
+                }
+              });
+            });
+          }
+        } catch (e) {}
+      }
+
+      this.currentItems = items;
+      this.selectedIndex = 0;
+      this.renderItems();
+    },
+
+    renderItems() {
+      if (!this.results) return;
+      this.results.innerHTML = '';
+
+      if (this.currentItems.length === 0) {
+        this.results.innerHTML = `
+          <div style="padding: 24px; text-align: center; color: var(--text-muted, #94a3b8); font-size: 13px;">
+            Eşleşen sonuç bulunamadı.
+          </div>
+        `;
+        return;
+      }
+
+      this.currentItems.forEach((item, idx) => {
+        const row = document.createElement('div');
+        row.className = `spotlight-item ${idx === this.selectedIndex ? 'active' : ''}`;
+        row.innerHTML = `
+          <div class="spotlight-item-icon">
+            <svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="width:20px;height:20px;">
+              ${item.iconSvg}
+            </svg>
+          </div>
+          <div class="spotlight-item-info">
+            <span class="spotlight-item-name">${escapeHtml(item.title)}</span>
+            <span class="spotlight-item-sub">${escapeHtml(item.subtitle)}</span>
+          </div>
+          <span class="spotlight-item-badge">${escapeHtml(item.badge)}</span>
+        `;
+
+        row.addEventListener('click', () => {
+          this.close();
+          item.onSelect();
+        });
+
+        row.addEventListener('mouseenter', () => {
+          this.selectedIndex = idx;
+          this.updateActiveItem();
+        });
+
+        this.results.appendChild(row);
+      });
+    },
+
+    updateActiveItem() {
+      const items = this.results?.querySelectorAll('.spotlight-item');
+      if (!items) return;
+      items.forEach((el, idx) => {
+        el.classList.toggle('active', idx === this.selectedIndex);
+        if (idx === this.selectedIndex) {
+          el.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    }
+  };
+
+  // ============================================================================
+  // MPRIS D-BUS MEDYA KONTROLCÜSÜ (Brave, Spotify, VLC, mpv vb.)
+  // ============================================================================
+  const MprisManager = {
+    pollTimer: null,
+    currentStatus: null,
+
+    init() {
+      const btnPrev = document.getElementById('mpris-btn-prev');
+      const btnPlay = document.getElementById('mpris-btn-play');
+      const btnNext = document.getElementById('mpris-btn-next');
+
+      if (btnPrev) {
+        btnPrev.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.sendCommand('previous');
+        });
+      }
+      if (btnPlay) {
+        btnPlay.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.sendCommand('play-pause');
+        });
+      }
+      if (btnNext) {
+        btnNext.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.sendCommand('next');
+        });
+      }
+
+      this.update();
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      this.pollTimer = setInterval(() => this.update(), 4000);
+    },
+
+    async update() {
+      try {
+        const res = await TauriBridge.invoke('get_mpris_status');
+        const card = document.getElementById('mpris-widget-card');
+        if (!card) return;
+
+        if (res && res.is_active && res.player_name) {
+          this.currentStatus = res;
+          card.style.display = 'flex';
+          const titleEl = document.getElementById('mpris-title');
+          const artistEl = document.getElementById('mpris-artist');
+          const playBtn = document.getElementById('mpris-btn-play');
+          const artBox = document.getElementById('mpris-art-box');
+
+          if (titleEl) titleEl.textContent = res.title || 'Bilinmeyen Parça';
+          if (artistEl) {
+            const sub = [res.artist, res.player_name].filter(Boolean).join(' • ');
+            artistEl.textContent = sub || 'Medya Oynatıcı';
+          }
+          if (playBtn) {
+            const isPlaying = (res.playback_status || '').toLowerCase() === 'playing';
+            playBtn.textContent = isPlaying ? '⏸' : '▶';
+            playBtn.title = isPlaying ? 'Duraklat' : 'Oynat';
+          }
+          if (artBox && res.art_url && (res.art_url.startsWith('http') || res.art_url.startsWith('file://'))) {
+            artBox.innerHTML = `<img src="${escapeHtml(res.art_url)}" alt="Albüm Kapağı" style="width:100%;height:100%;object-fit:cover;border-radius:6px;">`;
+          } else if (artBox && !artBox.querySelector('svg')) {
+            artBox.innerHTML = '<svg class="glyph" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>';
+          }
+        } else {
+          this.currentStatus = null;
+          card.style.display = 'none';
+        }
+      } catch (err) {
+        const card = document.getElementById('mpris-widget-card');
+        if (card) card.style.display = 'none';
+      }
+    },
+
+    async sendCommand(cmd) {
+      try {
+        await TauriBridge.invoke('send_mpris_command', { command: cmd });
+        setTimeout(() => this.update(), 250);
+      } catch (err) {
+        console.warn('[MprisManager] Komut iletilemedi:', err);
+      }
+    }
+  };
+
+  // ============================================================================
+  // STATUSNOTIFIERITEM (SNI) & SYSTRAY YÖNETİCİSİ (Discord, Telegram, Steam vb.)
+  // ============================================================================
+  const SystrayManager = {
+    pollTimer: null,
+    items: [],
+
+    init() {
+      this.refresh();
+      if (this.pollTimer) clearInterval(this.pollTimer);
+      this.pollTimer = setInterval(() => this.refresh(), 4000);
+    },
+
+    async refresh() {
+      const container = document.getElementById('taskbar-systray-container');
+      if (!container) return;
+
+      try {
+        const items = await TauriBridge.invoke('get_tray_items');
+        if (!Array.isArray(items)) return;
+
+        this.items = items;
+        container.innerHTML = '';
+
+        items.forEach(item => {
+          const btn = document.createElement('button');
+          btn.className = 'systray-item-btn';
+          btn.title = item.title || item.tooltip || item.id || 'Tepsi Öğesi';
+          btn.dataset.trayId = item.id || '';
+
+          if (item.icon_path && (item.icon_path.startsWith('/') || item.icon_path.startsWith('data:'))) {
+            const img = document.createElement('img');
+            img.src = item.icon_path;
+            img.alt = item.title || 'tray';
+            img.style.width = '16px';
+            img.style.height = '16px';
+            img.style.objectFit = 'contain';
+            btn.appendChild(img);
+          } else {
+            const span = document.createElement('span');
+            span.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><circle cx="12" cy="12" r="10"></circle><circle cx="12" cy="12" r="4" fill="currentColor"></circle></svg>';
+            btn.appendChild(span);
+          }
+
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            TauriBridge.invoke('activate_tray_item', { service: item.service || item.id }).catch(() => {});
+          });
+
+          btn.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            TauriBridge.invoke('context_menu_tray_item', { service: item.service || item.id }).catch(() => {});
+          });
+
+          container.appendChild(btn);
+        });
+      } catch (err) {
+        // Hata durumunda sessiz kal
+      }
+    }
+  };
+
+  // ============================================================================
+  // ANKORA FLASHER & USB BİÇİMLENDİRİCİ
+  // ============================================================================
+  const FlasherManager = {
+    progressTimer: null,
+
+    init() {
+      const tabIso = document.getElementById('flasher-tab-iso');
+      const tabFormat = document.getElementById('flasher-tab-format');
+      const paneIso = document.getElementById('flasher-pane-iso');
+      const paneFormat = document.getElementById('flasher-pane-format');
+
+      if (tabIso && tabFormat && paneIso && paneFormat) {
+        tabIso.addEventListener('click', () => {
+          tabIso.classList.add('active');
+          tabFormat.classList.remove('active');
+          paneIso.style.display = 'flex';
+          paneFormat.style.display = 'none';
+        });
+
+        tabFormat.addEventListener('click', () => {
+          tabFormat.classList.add('active');
+          tabIso.classList.remove('active');
+          paneFormat.style.display = 'flex';
+          paneIso.style.display = 'none';
+          this.refreshFormatTargets();
+        });
+      }
+
+      const btnBrowse = document.getElementById('btn-flasher-browse-iso');
+      const isoInput = document.getElementById('flasher-iso-path');
+      if (btnBrowse && isoInput) {
+        btnBrowse.addEventListener('click', () => {
+          const val = prompt('Lütfen yazdırılacak ISO dosyasının tam yolunu girin:', isoInput.value || '/home/live/Downloads/ankora-linux.iso');
+          if (val && val.trim()) {
+            isoInput.value = val.trim();
+          }
+        });
+      }
+
+      const btnRefresh = document.getElementById('btn-flasher-refresh-drives');
+      if (btnRefresh) {
+        btnRefresh.addEventListener('click', () => {
+          this.refreshTargets();
+          this.refreshFormatTargets();
+        });
+      }
+
+      const btnStartFlash = document.getElementById('btn-flasher-start');
+      if (btnStartFlash) {
+        btnStartFlash.addEventListener('click', () => this.startFlash());
+      }
+
+      const btnStartFormat = document.getElementById('btn-format-start');
+      if (btnStartFormat) {
+        btnStartFormat.addEventListener('click', () => this.startFormat());
+      }
+
+      this.refreshTargets();
+    },
+
+    open() {
+      WindowManager.open('win-flasher');
+      this.refreshTargets();
+      this.refreshFormatTargets();
+    },
+
+    async refreshTargets() {
+      const select = document.getElementById('flasher-target-select');
+      if (!select) return;
+
+      select.innerHTML = '<option value="">USB sürücüler taranıyor...</option>';
+
+      try {
+        const targets = await TauriBridge.invoke('get_usb_flash_targets');
+        select.innerHTML = '';
+
+        if (!Array.isArray(targets) || targets.length === 0) {
+          select.innerHTML = '<option value="">Uygun USB bellek bulunamadı (Sistem diskleri korunmuştur)</option>';
+          return;
+        }
+
+        targets.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.path || t.name;
+          const label = `${t.path || t.name} — ${t.vendor || ''} ${t.model || ''} (${t.size_human || ''})`.replace(/\s+/g, ' ').trim();
+          opt.textContent = label;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        select.innerHTML = '<option value="">Sürücüler taranamadı</option>';
+      }
+    },
+
+    async refreshFormatTargets() {
+      const select = document.getElementById('format-target-select');
+      if (!select) return;
+
+      select.innerHTML = '<option value="">USB sürücüler taranıyor...</option>';
+
+      try {
+        const targets = await TauriBridge.invoke('get_usb_flash_targets');
+        select.innerHTML = '';
+
+        if (!Array.isArray(targets) || targets.length === 0) {
+          select.innerHTML = '<option value="">Uygun USB bellek bulunamadı</option>';
+          return;
+        }
+
+        targets.forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.path || t.name;
+          const label = `${t.path || t.name} — ${t.vendor || ''} ${t.model || ''} (${t.size_human || ''})`.replace(/\s+/g, ' ').trim();
+          opt.textContent = label;
+          select.appendChild(opt);
+        });
+      } catch (err) {
+        select.innerHTML = '<option value="">Sürücüler taranamadı</option>';
+      }
+    },
+
+    async startFlash() {
+      const isoPath = document.getElementById('flasher-iso-path')?.value?.trim();
+      const targetDev = document.getElementById('flasher-target-select')?.value;
+
+      if (!isoPath) {
+        alert('Lütfen geçerli bir ISO dosyası yolu belirtin.');
+        return;
+      }
+      if (!targetDev) {
+        alert('Lütfen hedef USB bellek seçin.');
+        return;
+      }
+
+      const confirmMsg = `⚠️ DİKKAT!\n\n${targetDev} cihazındaki tüm veriler kalıcı olarak silinecek ve ISO kalıbı yazılacaktır.\n\nDevam etmek istiyor musunuz?`;
+      if (!confirm(confirmMsg)) return;
+
+      const progressWrap = document.getElementById('flasher-progress-wrap');
+      const progressBar = document.getElementById('flasher-progress-bar');
+      const progressStatus = document.getElementById('flasher-progress-status');
+      const progressPct = document.getElementById('flasher-progress-pct');
+      const btnStart = document.getElementById('btn-flasher-start');
+
+      if (progressWrap) progressWrap.style.display = 'flex';
+      if (progressBar) progressBar.style.width = '0%';
+      if (progressStatus) progressStatus.textContent = 'Yazma işlemi başlatılıyor...';
+      if (progressPct) progressPct.textContent = '0%';
+      if (btnStart) btnStart.disabled = true;
+
+      try {
+        await TauriBridge.invoke('flash_iso_to_usb', {
+          isoPath: isoPath,
+          iso_path: isoPath,
+          targetDevice: targetDev,
+          target_device: targetDev
+        });
+
+        if (this.progressTimer) clearInterval(this.progressTimer);
+        this.progressTimer = setInterval(async () => {
+          try {
+            const prog = await TauriBridge.invoke('get_flash_progress');
+            if (!prog) return;
+
+            const pct = Math.min(100, Math.max(0, Math.round(prog.percent || 0)));
+            if (progressBar) progressBar.style.width = `${pct}%`;
+            if (progressPct) progressPct.textContent = `${pct}%`;
+            if (progressStatus) progressStatus.textContent = prog.message || prog.status || 'Yazılıyor...';
+
+            if (prog.status === 'done' || pct >= 100) {
+              clearInterval(this.progressTimer);
+              if (btnStart) btnStart.disabled = false;
+              if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+                ReportManager.showToast('ISO başarıyla USB belleğe yazdırıldı!');
+              } else {
+                alert('ISO başarıyla USB belleğe yazdırıldı!');
+              }
+            } else if (prog.status === 'error') {
+              clearInterval(this.progressTimer);
+              if (btnStart) btnStart.disabled = false;
+              alert('Flaşlama hatası: ' + (prog.message || 'Bilinmeyen hata'));
+            }
+          } catch (e) {
+            // İlerleme sorgulama hatası
+          }
+        }, 1200);
+
+      } catch (err) {
+        alert('İşlem başlatılamadı: ' + (err.message || err));
+        if (btnStart) btnStart.disabled = false;
+        if (progressWrap) progressWrap.style.display = 'none';
+      }
+    },
+
+    async startFormat() {
+      const targetDev = document.getElementById('format-target-select')?.value;
+      const fsType = document.getElementById('format-fs-select')?.value || 'vfat';
+      const label = document.getElementById('format-label-input')?.value?.trim() || 'ANKORA';
+
+      if (!targetDev) {
+        alert('Lütfen biçimlendirilecek USB sürücüyü seçin.');
+        return;
+      }
+
+      const confirmMsg = `⚠️ DİKKAT!\n\n${targetDev} üzerindeki tüm veriler silinecek ve sürücü ${fsType.toUpperCase()} olarak biçimlendirilecektir.\n\nEmin misiniz?`;
+      if (!confirm(confirmMsg)) return;
+
+      const btnFormat = document.getElementById('btn-format-start');
+      if (btnFormat) {
+        btnFormat.disabled = true;
+        btnFormat.textContent = 'Biçimlendiriliyor...';
+      }
+
+      try {
+        const msg = await TauriBridge.invoke('format_usb_drive', {
+          targetDevice: targetDev,
+          target_device: targetDev,
+          filesystem: fsType,
+          label: label
+        });
+
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(msg || 'USB sürücü başarıyla biçimlendirildi!');
+        } else {
+          alert(msg || 'USB sürücü başarıyla biçimlendirildi!');
+        }
+      } catch (err) {
+        alert('Biçimlendirme başarısız: ' + (err.message || err));
+      } finally {
+        if (btnFormat) {
+          btnFormat.disabled = false;
+          btnFormat.textContent = 'Biçimlendir';
+        }
+        this.refreshTargets();
+        this.refreshFormatTargets();
+      }
+    }
+  };
+
+  // ============================================================================
+  // SİSTEM KURTARMA NOKTALARI (SNAPSHOT & ROLLBACK)
+  // ============================================================================
+  const SnapshotManager = {
+    init() {
+      const btnCreate = document.getElementById('btn-create-snapshot');
+      if (btnCreate) {
+        btnCreate.addEventListener('click', () => this.createSnapshot());
+      }
+    },
+
+    async loadSnapshots() {
+      const container = document.getElementById('snapshots-list-container');
+      if (!container) return;
+
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px 0;">Kurtarma noktaları yükleniyor...</div>';
+
+      try {
+        const snapshots = await TauriBridge.invoke('list_system_snapshots');
+        container.innerHTML = '';
+
+        if (!Array.isArray(snapshots) || snapshots.length === 0) {
+          container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px dashed rgba(255,255,255,0.1);">Henüz bir kurtarma noktası oluşturulmamış. "Nokta Oluştur" butonuna basarak ilk kurtarma noktanızı kaydedebilirsiniz.</div>';
+          return;
+        }
+
+        snapshots.forEach(s => {
+          const card = document.createElement('div');
+          card.className = 'snapshot-card';
+          const name = s.name || s.id;
+          const date = s.date_str || (s.timestamp ? new Date(s.timestamp * 1000).toLocaleString('tr-TR') : 'Bilinmiyor');
+          const size = s.size_human || '0 KB';
+
+          card.innerHTML = `
+            <div class="snapshot-card-left">
+              <div class="snapshot-title">${escapeHtml(name)}</div>
+              <div class="snapshot-meta">
+                <span>Tarih: ${escapeHtml(date)}</span>
+                <span>• Boyut: ${escapeHtml(size)}</span>
+                ${s.description ? `<span>• Açıklama: ${escapeHtml(s.description)}</span>` : ''}
+              </div>
+            </div>
+            <div class="snapshot-card-actions">
+              <button class="btn-pkg btn-snapshot-restore" data-id="${escapeHtml(s.id)}" style="padding:4px 10px;font-size:11px;cursor:pointer;">Geri Yükle</button>
+              <button class="btn-pkg btn-snapshot-del" data-id="${escapeHtml(s.id)}" style="padding:4px 8px;font-size:11px;cursor:pointer;color:#f87171;">✕</button>
+            </div>
+          `;
+
+          const btnRestore = card.querySelector('.btn-snapshot-restore');
+          if (btnRestore) {
+            btnRestore.addEventListener('click', () => this.restoreSnapshot(s.id, name));
+          }
+
+          const btnDel = card.querySelector('.btn-snapshot-del');
+          if (btnDel) {
+            btnDel.addEventListener('click', () => this.deleteSnapshot(s.id, name));
+          }
+
+          container.appendChild(card);
+        });
+      } catch (err) {
+        container.innerHTML = `<div style="color:#f87171;font-size:12px;">Kurtarma noktaları listelenirken hata oluştu: ${escapeHtml(err.message || String(err))}</div>`;
+      }
+    },
+
+    async createSnapshot() {
+      const defaultName = 'Kurtarma Noktası ' + new Date().toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' });
+      const name = prompt('Kurtarma noktası için bir açıklama girin:', defaultName);
+      if (!name) return;
+
+      const btnCreate = document.getElementById('btn-create-snapshot');
+      if (btnCreate) {
+        btnCreate.disabled = true;
+        btnCreate.textContent = 'Oluşturuluyor...';
+      }
+
+      try {
+        await TauriBridge.invoke('create_system_snapshot', {
+          name: name.trim(),
+          description: name.trim()
+        });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast('Kurtarma noktası başarıyla kaydedildi!');
+        } else {
+          alert('Kurtarma noktası başarıyla kaydedildi!');
+        }
+        this.loadSnapshots();
+      } catch (err) {
+        alert('Kurtarma noktası oluşturulamadı: ' + (err.message || err));
+      } finally {
+        if (btnCreate) {
+          btnCreate.disabled = false;
+          btnCreate.textContent = '+ Nokta Oluştur';
+        }
+      }
+    },
+
+    async restoreSnapshot(id, name) {
+      const confirmMsg = `⚠️ DİKKAT: "${name || id}" kurtarma noktasına dönülecek.\n\nSistem yapılandırması (/etc) ve paket durumları bu anlık kopyaya geri yüklenecektir.\n\nDevam etmek istiyor musunuz?`;
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        const msg = await TauriBridge.invoke('restore_system_snapshot', {
+          snapshotId: id,
+          snapshot_id: id
+        });
+        if (typeof ReportManager !== 'undefined' && ReportManager.showToast) {
+          ReportManager.showToast(msg || 'Sistem başarıyla geri yüklendi!');
+        } else {
+          alert(msg || 'Sistem başarıyla geri yüklendi!');
+        }
+      } catch (err) {
+        alert('Geri yükleme hatası: ' + (err.message || err));
+      }
+    },
+
+    async deleteSnapshot(id, name) {
+      if (!confirm(`"${name || id}" kurtarma noktasını silmek istediğinize emin misiniz?`)) return;
+
+      try {
+        await TauriBridge.invoke('delete_system_snapshot', {
+          snapshotId: id,
+          snapshot_id: id
+        });
+        this.loadSnapshots();
+      } catch (err) {
+        alert('Silinemedi: ' + (err.message || err));
+      }
+    }
+  };
+
   function boot() {
     // Oturum işareti en başta okunur: çökme sayacı ve geri yükleme
     // kararı diğer modüllerden önce belirlenir.
@@ -7455,10 +10442,63 @@
     safeInit('Radio', () => RadioManager.init());
     safeInit('ReportManager', () => ReportManager.init());
     safeInit('LockManager', () => LockManager.init());
+    safeInit('ScreenshotManager', () => ScreenshotManager.init());
+    safeInit('PowerManager', () => PowerManager.init());
+    safeInit('ClipboardManager', () => ClipboardManager.init());
+    safeInit('UsbDriveWatcher', () => UsbDriveWatcher.init());
+    safeInit('ShortcutManager', () => ShortcutManager.init());
+    safeInit('NotificationManager', () => NotificationManager.init());
+    safeInit('AudioDeviceManager', () => AudioDeviceManager.init());
+    safeInit('BluetoothManager', () => BluetoothManager.init());
+    safeInit('SpotlightManager', () => SpotlightManager.init());
+    safeInit('MprisManager', () => MprisManager.init());
+    safeInit('SystrayManager', () => SystrayManager.init());
+    safeInit('FlasherManager', () => FlasherManager.init());
+    safeInit('SnapshotManager', () => SnapshotManager.init());
 
     // 3. Kayıtlı oturum geri yüklenir; çökme sayacı eşiği aşıldıysa
     // SessionManager.restore bunu kendi içinde değerlendirir.
     safeInit('SessionRestore', () => SessionManager.restore());
+
+    // Ayaz DE modüllerini pencere nesnesine bağla (test, otomasyon ve dış kontrol)
+    window.AyazDE = {
+      WindowManager,
+      ThemeManager,
+      ShortcutManager,
+      NotificationManager,
+      AudioDeviceManager,
+      BluetoothManager,
+      SpotlightManager,
+      ScreenshotManager,
+      PowerManager,
+      ReportManager,
+      InstallerWizard,
+      UpdaterManager,
+      TaskManager,
+      AIAgent,
+      Terminal,
+      ClipboardManager,
+      UsbDriveWatcher,
+      MprisManager,
+      SystrayManager,
+      FlasherManager,
+      SnapshotManager
+    };
+    window.WindowManager = WindowManager;
+    window.ThemeManager = ThemeManager;
+    window.ShortcutManager = ShortcutManager;
+    window.NotificationManager = NotificationManager;
+    window.AudioDeviceManager = AudioDeviceManager;
+    window.BluetoothManager = BluetoothManager;
+    window.SpotlightManager = SpotlightManager;
+    window.ScreenshotManager = ScreenshotManager;
+    window.PowerManager = PowerManager;
+    window.ClipboardManager = ClipboardManager;
+    window.UsbDriveWatcher = UsbDriveWatcher;
+    window.MprisManager = MprisManager;
+    window.SystrayManager = SystrayManager;
+    window.FlasherManager = FlasherManager;
+    window.SnapshotManager = SnapshotManager;
   }
 
   if (document.readyState === 'loading') {

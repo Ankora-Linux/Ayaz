@@ -209,11 +209,16 @@ echo "[ALAN RAPORU] Çekirdek kurulumundan sonra:"
 df -h / || true
 
 # -----------------------------------------------------------------------
-# FARZ 2: Xorg (minimal sürücü seti — tüm video sürücüleri DEĞİL)
+# FARZ 2: Xorg (Tam Ekran Kartı Sürücü Paketi & Hızlandırma)
 # -----------------------------------------------------------------------
 apt-get install -y --no-install-recommends \
     xserver-xorg-core \
     xserver-xorg-video-all \
+    xserver-xorg-video-intel \
+    intel-media-va-driver \
+    xserver-xorg-video-amdgpu \
+    xserver-xorg-video-ati \
+    xserver-xorg-video-nouveau \
     xserver-xorg-video-vesa \
     xserver-xorg-video-fbdev \
     xserver-xorg-video-vmware \
@@ -222,8 +227,11 @@ apt-get install -y --no-install-recommends \
     xserver-xorg-legacy \
     libgl1-mesa-dri \
     libglx-mesa0 \
+    mesa-vulkan-drivers \
     mesa-va-drivers \
+    va-driver-all \
     mesa-utils \
+    firmware-linux-free \
     xinit \
     openbox \
     x11-xserver-utils \
@@ -234,11 +242,11 @@ apt-get clean
 rm -rf /var/lib/apt/lists/*
 apt-get update -qq
 
-echo "[ALAN RAPORU] Xorg kurulumundan sonra:"
+echo "[ALAN RAPORU] Xorg ve GPU sürücüleri kurulumundan sonra:"
 df -h / || true
 
 # -----------------------------------------------------------------------
-# FARZ 3: WebKitGTK, ses ve kiosk bileşenleri + Kurulum Araçları
+# FARZ 3: WebKitGTK, ses ve kiosk bileşenleri + Kurulum Araçları + Brave
 # -----------------------------------------------------------------------
 apt-get install -y --no-install-recommends \
     libwebkit2gtk-4.0-37 \
@@ -250,7 +258,12 @@ apt-get install -y --no-install-recommends \
     gir1.2-gtk-3.0 \
     alsa-utils \
     pulseaudio \
+    pulseaudio-utils \
     pavucontrol \
+    network-manager \
+    bluez \
+    udisks2 \
+    policykit-1 \
     fonts-inter \
     fonts-noto-core \
     fonts-noto-color-emoji \
@@ -265,10 +278,47 @@ apt-get install -y --no-install-recommends \
     rsync \
     grub-efi-amd64-bin \
     grub-pc-bin \
+    grub2-common \
+    efibootmgr \
     xdg-utils \
     file \
     scrot \
-    xterm
+    xclip \
+    xterm \
+    wmctrl \
+    xdotool \
+    dunst \
+    libnotify-bin \
+    flatpak \
+    libvulkan1 \
+    mesa-vulkan-drivers \
+    mesa-utils \
+    zram-tools \
+    lxpolkit \
+    policykit-1-gnome \
+    xsettingsd \
+    trayer \
+    stalonetray \
+    playerctl \
+    ntfs-3g \
+    p7zip-full \
+    zip \
+    unzip \
+    gvfs
+
+# Flathub Resmi Deposu Entegrasyonu (Spotify, Discord, Steam, VS Code 1-Tık)
+flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
+
+# Brave Browser Resmi Deposu Kurulumu (Varsayılan Web Tarayıcı)
+mkdir -p /usr/share/keyrings /etc/apt/sources.list.d
+curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg 2>/dev/null || wget -qO /usr/share/keyrings/brave-browser-archive-keyring.gpg https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg 2>/dev/null || true
+if [ -s /usr/share/keyrings/brave-browser-archive-keyring.gpg ]; then
+    echo "deb [signed-by=/usr/share/keyrings/brave-browser-archive-keyring.gpg] https://brave-browser-apt-release.s3.brave.com/ stable main" > /etc/apt/sources.list.d/brave-browser-release.list
+    apt-get update -qq || true
+    apt-get install -y --no-install-recommends brave-browser || echo "[BİLGİ] Brave Browser çevrimiçi depodan indirilemedi; sistem açıldığında kurulabilir."
+    update-alternatives --install /usr/bin/x-www-browser x-www-browser /usr/bin/brave-browser 200 2>/dev/null || true
+    update-alternatives --set x-www-browser /usr/bin/brave-browser 2>/dev/null || true
+fi
 
 # -----------------------------------------------------------------------
 # GÜVENLİK: DSA sınıfı çekirdek/paket yamaları — debootstrap tabanı
@@ -467,6 +517,82 @@ if [ -f /etc/init.d/networking ]; then
 fi
 
 # -----------------------------------------------------------------------
+# ZRAM: Sıkıştırılmış RAM Takas Alanı (SysVinit Servisi & Optimizasyon)
+# -----------------------------------------------------------------------
+cat << 'ZRAMINIT' > /etc/init.d/zram-swap
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          zram-swap
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: ZRAM Sıkıştırılmış RAM Takas Alanı
+### END INIT INFO
+
+case "$1" in
+  start)
+    modprobe zram num_devices=1 2>/dev/null || true
+    if [ -e /dev/zram0 ]; then
+      for alg in zstd lz4 lzo; do
+        if grep -q "$alg" /sys/block/zram0/comp_algorithm 2>/dev/null; then
+          echo "$alg" > /sys/block/zram0/comp_algorithm 2>/dev/null && break
+        fi
+      done
+      MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+      if [ -n "$MEM_TOTAL_KB" ] && [ "$MEM_TOTAL_KB" -gt 0 ] 2>/dev/null; then
+        DISKSIZE=$(( MEM_TOTAL_KB * 1024 / 2 ))
+      else
+        DISKSIZE=1073741824
+      fi
+      echo "$DISKSIZE" > /sys/block/zram0/disksize 2>/dev/null || true
+      mkswap /dev/zram0 >/dev/null 2>&1 || true
+      swapon -p 100 /dev/zram0 2>/dev/null || true
+      echo "[ZRAM] Sıkıştırılmış bellek takas alanı aktif: $(( DISKSIZE / 1024 / 1024 )) MB"
+    fi
+    ;;
+  stop)
+    swapoff /dev/zram0 2>/dev/null || true
+    echo 1 > /sys/block/zram0/reset 2>/dev/null || true
+    ;;
+  restart|force-reload)
+    "$0" stop
+    "$0" start
+    ;;
+  status)
+    swapon -s 2>/dev/null | grep zram || echo "zram aktif değil"
+    ;;
+  *)
+    echo "Kullanım: $0 {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac
+exit 0
+ZRAMINIT
+chmod +x /etc/init.d/zram-swap
+update-rc.d zram-swap defaults 05 95 2>/dev/null || true
+
+# SysVinit Hızlı Paralel Açılış (Fast Parallel Boot)
+mkdir -p /etc/default
+cat << 'RCS_CONF' > /etc/default/rcS
+# Ankora Linux 2.0 Hızlı Paralel Açılış
+CONCURRENCY=makefile
+UTC=yes
+VERBOSE=no
+FSCKFIX=no
+RCS_CONF
+
+# Kernel ZRAM bellek optimizasyonları
+mkdir -p /etc/sysctl.d
+cat << 'SYSCTL_ZRAM' > /etc/sysctl.d/99-zram.conf
+vm.swappiness = 100
+vm.vfs_cache_pressure = 50
+vm.watermark_boost_factor = 0
+vm.dirty_background_ratio = 5
+vm.dirty_ratio = 10
+SYSCTL_ZRAM
+
+# -----------------------------------------------------------------------
 # X11 Otomatik Kiosk Başlatıcı
 # -----------------------------------------------------------------------
 cat << 'XINIT' > /home/ankora/.xinitrc
@@ -508,6 +634,35 @@ esac
 # Pencere yöneticisini arka planda başlat
 if command -v openbox >/dev/null 2>&1; then
     openbox &
+fi
+
+# Ses sunucusunu kullanıcı oturumunda başlat
+if command -v pulseaudio >/dev/null 2>&1; then
+    pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+fi
+
+# Bildirim sunucusunu arka planda başlat
+if command -v dunst >/dev/null 2>&1; then
+    dunst &
+fi
+
+# Polkit Grafiksel Yetkilendirme Ajanı (GParted, Synaptic vb. root araçları için)
+if command -v lxpolkit >/dev/null 2>&1; then
+    lxpolkit &
+elif [ -x /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 ]; then
+    /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 &
+fi
+
+# XSettings Daemon (GTK/Qt tema eşitleme)
+if command -v xsettingsd >/dev/null 2>&1; then
+    xsettingsd &
+fi
+
+# Sistem Tepsisi (Systray)
+if command -v trayer >/dev/null 2>&1; then
+    trayer --edge bottom --align right --widthtype request --height 32 --transparent true --alpha 0 --tint 0x0f172a --distance 6 --expand false &
+elif command -v stalonetray >/dev/null 2>&1; then
+    stalonetray --geometry 1x1-10+10 --grow-gravity NE --icon-gravity NE --kludges force_icons_size --transparent --tint-color "#0f172a" &
 fi
 
 if [ -x /usr/bin/ayaz ]; then
@@ -691,7 +846,10 @@ os.environ['PATH'] = _SBIN_PATH + os.pathsep + os.environ.get('PATH', '')
 
 import gi
 gi.require_version('Gtk', '3.0')
-gi.require_version('WebKit2', '4.0')
+try:
+    gi.require_version('WebKit2', '4.0')
+except ValueError:
+    gi.require_version('WebKit2', '4.1')
 from gi.repository import Gtk, WebKit2, Gdk, GLib
 
 PORT = 49152
@@ -748,6 +906,20 @@ def _root_run(cmd_args, stdin_text=None, timeout=30):
         if any(t in err for t in ('password is required', 'a terminal is required', 'no tty present')):
             raise Exception('Bu ayar için yönetici (root) yetkisi gerekiyor: sudo parola soruyor.')
     return proc
+
+def _live_boot_disks():
+    """Canlı ISO'nun açıldığı disk(ler). Kurulum hedefi olarak sunulmaz:
+    USB'den açılan sistemde ilk disk çoğu zaman USB'nin kendisidir ve
+    seçilirse kurulum, üzerinde çalıştığı ortamı siler."""
+    disks = set()
+    for mp in ('/run/live/medium', '/lib/live/mount/medium'):
+        src = (_run_capture(['findmnt', '-n', '-o', 'SOURCE', mp]) or '').strip()
+        if not src.startswith('/dev/'):
+            continue
+        parent = (_run_capture(['lsblk', '-no', 'PKNAME', src]) or '').strip().splitlines()
+        parent = parent[0].strip() if parent and parent[0].strip() else ''
+        disks.add(f'/dev/{parent}' if parent else src)
+    return disks
 
 def _rfkill_enabled(out):
     for line in out.splitlines():
@@ -935,21 +1107,6 @@ def execute_ayaz_command(cmd, args):
         if not command:
             return ''
 
-        # GÜVENLİK: Rust tarafındaki whitelist'in Python karşılığı
-        EXACT_ALLOWED = [
-            'uname -a', 'uname -r', 'whoami', 'uptime', 'ls', 'ls -la', 'ls -l', 'ls -lh',
-            'date', 'hostname', 'id', 'free -m', 'free -h', 'df -h', 'df -h /',
-            'cat /etc/os-release', 'cat /etc/issue', 'cat /proc/version',
-            'cat /proc/meminfo', 'cat /proc/cpuinfo', 'ps aux', 'top -b -n 1',
-            'apt-get clean', 'apt-get update', 'apt-get upgrade -y',
-            'apt-get update && apt-get upgrade -y',
-            'rm -rf /tmp/*', 'apt-get clean && rm -rf /tmp/*',
-            'df -h / && free -m', 'clear', 'sync',
-            'echo 3 > /proc/sys/vm/drop_caches',
-        ]
-        ALLOWED_BINS = ['uname', 'whoami', 'uptime', 'date', 'hostname', 'id', 'free', 'df', 'ls', 'ps', 'top', 'which']
-        SHELL_METACHARS = set(';|`$><\\()\n\r')
-        
         # Persistent cd tracking
         if command == 'cd':
             TERM_CWD = home_dir
@@ -965,47 +1122,26 @@ def execute_ayaz_command(cmd, args):
             else:
                 return f'bash: cd: {target_d}: Böyle bir dosya ya da dizin yok'
 
-        is_exact = command in EXACT_ALLOWED
-        has_meta = bool(SHELL_METACHARS & set(command))
-        
-        if has_meta and not is_exact:
-            return '[HATA] Güvenlik İhlali: Kabuk metakarakterleri içeren komutlar reddedilir.'
-        
-        first_word = command.split()[0] if command.split() else ''
-        if not is_exact and first_word not in ALLOWED_BINS:
-            return f'[HATA] Güvenlik İhlali: \'{first_word}\' aracı izin verilenler listesinde yok.'
-
-        if is_exact and '&&' in command:
-            parts = [p.strip() for p in command.split('&&')]
-            results = []
-            for part in parts:
-                p_args = part.split()
-                try:
-                    proc = subprocess.run(p_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=TERM_CWD, timeout=60)
-                    if proc.stdout:
-                        results.append(proc.stdout)
-                except Exception as e:
-                    results.append(f'[HATA] {e}')
-            return '\n'.join(results) if results else '[Komut tamamlandı]'
-
-        cmd_parts = command.split()
+        # Full bash execution with sudo support and persistent working directory
         try:
+            env = dict(os.environ, TERM='xterm-256color', HOME=home_dir, PAGER='cat')
             proc = subprocess.run(
-                cmd_parts,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
+                ['/bin/bash', '-c', command],
                 cwd=TERM_CWD,
-                timeout=60
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=120,
+                env=env
             )
-        except FileNotFoundError:
-            return f'bash: {first_word}: komut bulunamadı'
+            out = proc.stdout or ''
+            if not out and proc.returncode != 0:
+                out = f'[Komut {proc.returncode} koduyla sonlandı]'
+            return out
         except subprocess.TimeoutExpired:
-            return '[HATA] Komut zaman aşımına uğradı (60s)'
-        out = proc.stdout
-        if proc.stderr:
-            out = (out + '\n' if out else '') + proc.stderr
-        return out if out else f'[Komut {proc.returncode} koduyla tamamlandı]'
+            return '[Zaman Aşımı] Komut 120 saniye içinde tamamlanamadı.'
+        except Exception as e:
+            return f'[HATA] {e}'
 
     elif cmd == 'launch_application':
         exec_cmd = args.get('exec', '').strip()
@@ -1182,12 +1318,64 @@ def execute_ayaz_command(cmd, args):
         return [p.strip() for p in out.splitlines() if p.strip()]
 
     elif cmd == 'system_poweroff':
-        subprocess.Popen(['/sbin/poweroff', '-f'])
-        return 'Sistem kapatılıyor'
+        _root_run(['sh', '-c', 'poweroff 2>/dev/null || /sbin/poweroff -f || true'])
+        return 'Sistem kapatılıyor...'
 
     elif cmd == 'system_reboot':
-        subprocess.Popen(['/sbin/reboot', '-f'])
-        return 'Sistem yeniden başlatılıyor'
+        _root_run(['sh', '-c', 'reboot 2>/dev/null || /sbin/reboot -f || true'])
+        return 'Sistem yeniden başlatılıyor...'
+
+    elif cmd == 'system_suspend':
+        _root_run(['sh', '-c', 'loginctl suspend 2>/dev/null || pm-suspend 2>/dev/null || echo mem > /sys/power/state 2>/dev/null || true'])
+        return 'Sistem askıya alınıyor...'
+
+    elif cmd == 'system_logout':
+        subprocess.Popen(['sh', '-c', 'pkill -u ankora xinit 2>/dev/null || pkill -u ankora Xorg 2>/dev/null || pkill -f ayaz 2>/dev/null || true'])
+        return 'Oturum kapatılıyor...'
+
+    elif cmd == 'take_screenshot':
+        mode = args.get('mode', 'fullscreen')
+        delay = int(args.get('delay', 0))
+        save_to_disk = bool(args.get('save_to_disk', True))
+        copy_clipboard = bool(args.get('copy_clipboard', True))
+
+        pictures_dir = os.path.join(home_dir, 'Pictures', 'Screenshots')
+        os.makedirs(pictures_dir, exist_ok=True)
+        ts = time.strftime('%Y-%m-%d_%H-%M-%S')
+        filepath = os.path.join(pictures_dir, f'Ekran-Goruntusu_{ts}.png')
+
+        scrot_args = ['scrot']
+        if delay > 0:
+            scrot_args.extend(['-d', str(delay)])
+        if mode == 'window':
+            scrot_args.extend(['-u', '-b'])
+        elif mode == 'region':
+            scrot_args.extend(['-s', '-f'])
+        scrot_args.append(filepath)
+
+        env = dict(os.environ, DISPLAY=os.environ.get('DISPLAY', ':0'))
+        proc = subprocess.run(scrot_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+        if proc.returncode != 0:
+            raise Exception(f"Ekran görüntüsü alınamadı: {proc.stderr or proc.stdout}")
+
+        if copy_clipboard and shutil.which('xclip') and os.path.exists(filepath):
+            subprocess.run(['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', filepath], env=env)
+
+        preview_b64 = None
+        if os.path.exists(filepath):
+            try:
+                import base64
+                with open(filepath, 'rb') as f:
+                    preview_b64 = base64.b64encode(f.read()).decode('ascii')
+            except Exception:
+                pass
+
+        return {
+            'success': True,
+            'file_path': filepath,
+            'file_name': os.path.basename(filepath),
+            'image_b64': preview_b64
+        }
 
     elif cmd == 'get_radio_state':
         return _radio_state()
@@ -1228,20 +1416,26 @@ def execute_ayaz_command(cmd, args):
 
     elif cmd == 'wifi_connect':
         ssid = str(args.get('ssid', '')).strip()
+        password = str(args.get('password', '')).strip()
         # SSID tek argüman (kabuk yok); IEEE sınırı 32 bayttır.
         if not ssid or len(ssid.encode('utf-8')) > 32:
             raise Exception('Geçersiz ağ adı (SSID).')
+        cmd_args = ['nmcli', 'dev', 'wifi', 'connect', ssid]
+        if password:
+            cmd_args += ['password', password]
         try:
             proc = subprocess.run(
-                ['nmcli', 'dev', 'wifi', 'connect', ssid],
+                cmd_args,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, timeout=30
+                text=True, timeout=45
             )
         except Exception:
             raise Exception('nmcli bulunamadı: kablosuz bağlantı için NetworkManager gerekli.')
         if proc.returncode == 0:
             return f'Bağlanıldı: {ssid}'
         err = (proc.stderr or '').strip()
+        if 'Secrets were required' in err or 'password' in err.lower() or 'no-secrets' in err:
+            raise Exception('Bu ağ için Wi-Fi parolası gerekli veya girilen parola hatalı.')
         raise Exception(err or f'Bağlanılamadı: {ssid}')
 
     elif cmd == 'get_network_info':
@@ -1341,27 +1535,31 @@ def execute_ayaz_command(cmd, args):
                 text=True
             )
             data = json.loads(proc.stdout)
-            disks = []
-            for d in data.get('blockdevices', []):
-                name = d.get('name', '')
-                if d.get('type') == 'disk' and not name.startswith('loop') and not name.startswith('zram') and not name.startswith('sr'):
-                    size_b = int(d.get('size', 0))
-                    size_gb = round(size_b / (1024 ** 3), 1)
-                    model = (d.get('model') or f'Depolama Sürücüsü ({size_gb} GB)').strip()
-                    disks.append({
-                        'name': name,
-                        'path': d.get('path', f"/dev/{name}"),
-                        'size_gb': size_gb,
-                        'model': model,
-                        'is_removable': bool(d.get('rm', False))
-                    })
-            if disks:
-                return disks
-        except Exception:
-            pass
-        return [
-            {'name': 'sda', 'path': '/dev/sda', 'size_gb': 64.0, 'model': 'Sistem Sabit Diski (/dev/sda)', 'is_removable': False}
-        ]
+        except Exception as e:
+            raise Exception(f'Diskler listelenemedi (lsblk): {e}')
+        live = _live_boot_disks()
+        disks = []
+        for d in data.get('blockdevices', []):
+            name = d.get('name', '')
+            path = d.get('path') or f"/dev/{name}"
+            if d.get('type') != 'disk' or name.startswith(('loop', 'zram', 'sr', 'ram')):
+                continue
+            # lsblk sürümüne göre RO/RM bool ya da "0"/"1" dizgesi döner
+            if str(d.get('ro', '0')).lower() in ('1', 'true'):
+                continue
+            if path in live:
+                continue
+            size_b = int(d.get('size') or 0)
+            size_gb = round(size_b / (1024 ** 3), 1)
+            model = (d.get('model') or f'Depolama Sürücüsü ({size_gb} GB)').strip()
+            disks.append({
+                'name': name,
+                'path': path,
+                'size_gb': size_gb,
+                'model': model,
+                'is_removable': str(d.get('rm', '0')).lower() in ('1', 'true')
+            })
+        return disks
 
     elif cmd == 'get_storage_stats':
         # Ayarlar'daki depolama göstergesi: kök bölünüm + ZRAM (varsa).
@@ -1401,7 +1599,7 @@ def execute_ayaz_command(cmd, args):
         password = payload.get('password', 'ankora').strip()
         autologin = payload.get('autologin', True)
 
-        if not target or not re.match(r'^/dev/(sd[a-z]|vd[a-z]|nvme[0-9]+n[0-9]+)$', target):
+        if not target or not re.match(r'^/dev/(sd[a-z]|vd[a-z]|nvme[0-9]+n[0-9]+|mmcblk[0-9]+)$', target):
             raise Exception('Geçersiz hedef disk seçimi (Örn: /dev/sda veya /dev/nvme0n1)')
         if not re.match(r'^[a-z_][a-z0-9_-]{0,31}$', username):
             raise Exception('Geçersiz kullanıcı adı')
@@ -1410,10 +1608,12 @@ def execute_ayaz_command(cmd, args):
         if not password or '\0' in password or '\n' in password:
             raise Exception('Geçersiz parola')
 
-        # Canlı oturumda `ankora` yetkisiz bir kullanıcıdır; kurulumun tamamı
-        # root gerektirir. Parolasız sudo yükselmesi baştan doğrulanır; araç
-        # yolu bulunamadığı için yarıda kalan (127) hataları yerine net mesaj
-        # döner.
+        # Canlı USB ortamının kendisi hedef olarak seçilemez
+        live_disks = _live_boot_disks()
+        if target in live_disks:
+            raise Exception(f'Seçilen aygıt ({target}) canlı sistemin çalıştığı kurulum medyasıdır. Kurulum için başka bir disk seçin.')
+
+        # Canlı oturumda ankora yetkisizdir; kurulum root gerektirir.
         if os.geteuid() != 0:
             if not shutil.which('sudo'):
                 raise Exception('Kurulum için yönetici (root) yetkisi gerekiyor: sudo kurulu değil.')
@@ -1423,13 +1623,17 @@ def execute_ayaz_command(cmd, args):
             except Exception:
                 raise Exception('Kurulum için yönetici (root) yetkisi gerekiyor: parolasız sudo erişimi (sudo -n) doğrulanamadı.')
 
-        def _root(cmd, check=True):
+        def _root(c_str, check=True):
             pre = '' if os.geteuid() == 0 else 'sudo -n '
-            return subprocess.run(pre + cmd, shell=True, check=check)
+            res = subprocess.run(pre + c_str, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if check and res.returncode != 0:
+                err = (res.stderr or res.stdout or '').strip()
+                raise Exception(f"Komut başarısız: '{c_str}' -> {err}")
+            return res
 
-        def _root_out(cmd):
+        def _root_out(c_str):
             pre = '' if os.geteuid() == 0 else 'sudo -n '
-            return subprocess.check_output(pre + cmd, shell=True, text=True)
+            return subprocess.check_output(pre + c_str, shell=True, text=True)
 
         def _root_write(path, data):
             if os.geteuid() == 0:
@@ -1444,147 +1648,289 @@ def execute_ayaz_command(cmd, args):
         def _root_makedirs(path):
             _root(f"mkdir -p {shlex.quote(path)}", check=False)
 
+        # 1. Eski bağlantıları ve takas alanlarını çöz
+        _root("swapoff -a 2>/dev/null || true", check=False)
         _root("umount -q -R /target 2>/dev/null || true", check=False)
         _root(f"umount -q {shlex.quote(target)}* 2>/dev/null || true", check=False)
-        _root("swapoff -a 2>/dev/null || true", check=False)
 
-        cmds = [
+        # 2. Disk imzalarını temizle (LVM/GPT/MBR kalıntıları parted'ı bloklamasın)
+        _root(f"wipefs -a -f {shlex.quote(target)} 2>/dev/null || true", check=False)
+
+        # 3. Hibrit BIOS + UEFI Uyumlu GPT Bölümleme Tablosu:
+        #    Part 1: 1MiB - 3MiB   -> bios_grub (Legacy BIOS / MBR için GPT önyükleme alanı)
+        #    Part 2: 3MiB - 515MiB -> ESP / FAT32 (UEFI Boot için)
+        #    Part 3: 515MiB - 100% -> Primary EXT4 (Kök Dosya Sistemi)
+        part_cmds = [
             f"parted -s {shlex.quote(target)} mklabel gpt",
-            f"parted -s {shlex.quote(target)} mkpart ESP fat32 1MiB 513MiB",
-            f"parted -s {shlex.quote(target)} set 1 esp on",
-            f"parted -s {shlex.quote(target)} mkpart primary ext4 513MiB 100%"
+            f"parted -s {shlex.quote(target)} mkpart bios_boot 1MiB 3MiB",
+            f"parted -s {shlex.quote(target)} set 1 bios_grub on",
+            f"parted -s {shlex.quote(target)} mkpart ESP fat32 3MiB 515MiB",
+            f"parted -s {shlex.quote(target)} set 2 esp on",
+            f"parted -s {shlex.quote(target)} mkpart primary ext4 515MiB 100%"
         ]
-        for c in cmds:
-            _root(c)
+        for pc in part_cmds:
+            _root(pc)
 
-        subprocess.run("udevadm settle || sleep 1", shell=True)
+        # Çekirdeğin yeni bölüm tablosunu okuması
+        _root(f"partprobe {shlex.quote(target)} 2>/dev/null || true", check=False)
+        subprocess.run("udevadm settle 2>/dev/null || sleep 1", shell=True)
+        time.sleep(1)
 
-        p1 = f"{target}p1" if "nvme" in target else f"{target}1"
-        p2 = f"{target}p2" if "nvme" in target else f"{target}2"
+        def _get_part_path(disk, num):
+            if re.search(r'\d$', disk):
+                return f"{disk}p{num}"
+            return f"{disk}{num}"
 
-        _root(f"mkfs.vfat -F32 {shlex.quote(p1)}")
-        _root(f"mkfs.ext4 -F {shlex.quote(p2)}")
+        p_bios = _get_part_path(target, 1)
+        p_esp = _get_part_path(target, 2)
+        p_root = _get_part_path(target, 3)
 
+        # 4. Dosya Sistemlerini Biçimlendir
+        _root(f"mkfs.vfat -F32 {shlex.quote(p_esp)}")
+        _root(f"mkfs.ext4 -F -L ANKORA_ROOT {shlex.quote(p_root)}")
+
+        # 5. Bağlama Noktaları
         _root_makedirs('/target')
-        _root(f"mount {shlex.quote(p2)} /target")
+        _root(f"mount {shlex.quote(p_root)} /target")
         _root_makedirs('/target/boot/efi')
-        _root(f"mount {shlex.quote(p1)} /target/boot/efi")
-
-        rsync_cmd = "rsync -aAX / /target/ --exclude=/proc/* --exclude=/sys/* --exclude=/dev/* --exclude=/tmp/* --exclude=/run/* --exclude=/mnt/* --exclude=/media/* --exclude=/target/* --exclude=/home/*"
-        _root(rsync_cmd)
-
-        # GİZLİLİK: canlı imaj her kurulumda aynı kimlikle başlar ve rsync
-        # /var altını da kopyalar: derleme-time machine-id, loglar, DHCP
-        # kiralama kayıtları, kabuk geçmişi kurulu sisteme taşınırdı.
-        # machine-id: her kurulumda benzersiz üretilir (dbus bu dosyayı
-        # okur; boş/eksik kalırsa tüm kurulumlar aynı kimliği paylaşır).
-        mid = secrets.token_hex(16)
-        _root_write('/target/etc/machine-id', mid + '\n')
-        _root_write('/target/var/lib/dbus/machine-id', mid + '\n')
-        _root("rm -f /target/var/lib/dhcp/* /target/etc/ssh/ssh_host_* "
-              "/target/root/.bash_history 2>/dev/null", check=False)
-        _root("sh -c 'find /target/var/log -type f -delete 2>/dev/null; "
-              "rm -rf /target/var/tmp/* 2>/dev/null; true'", check=False)
-
-        _root_write('/target/etc/hostname', f"{hostname}\n")
-
-        _root_write('/target/etc/hosts', f"127.0.0.1\tlocalhost\n127.0.1.1\t{hostname}\n\n# The following lines are desirable for IPv6 capable hosts\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n")
-
-        try:
-            root_uuid = _root_out(f"blkid -s UUID -o value {shlex.quote(p2)}").strip()
-            efi_uuid = _root_out(f"blkid -s UUID -o value {shlex.quote(p1)}").strip()
-        except Exception:
-            root_uuid = p2
-            efi_uuid = p1
-
-        fstab_content = f"""# /etc/fstab generated by Ankora Linux Installer
-UUID={root_uuid} / ext4 errors=remount-ro 0 1
-UUID={efi_uuid} /boot/efi vfat umask=0077 0 1
-tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
-"""
-        _root_write('/target/etc/fstab', fstab_content)
+        _root(f"mount {shlex.quote(p_esp)} /target/boot/efi")
 
         bind_mounts = ['/dev', '/dev/pts', '/proc', '/sys', '/run']
-        for bm in bind_mounts:
-            _root_makedirs(f"/target{bm}")
-            _root(f"mount --bind {bm} /target{bm}")
-
-        chroot_setup_cmds = [
-            ['chroot', '/target', 'useradd', '-m', '-s', '/bin/bash', '-G', 'sudo,audio,video,plugdev,netdev', username],
-        ]
-        _root_pre = [] if os.geteuid() == 0 else ['sudo', '-n']
-        for cmd_args in chroot_setup_cmds:
-            subprocess.run(_root_pre + cmd_args, check=False)
-
-        # GÜVENLİK: Parola stdin pipe ile güvenli geçiş (shell interpolation yok)
-        chpasswd_proc = subprocess.Popen(
-            _root_pre + ['chroot', '/target', 'chpasswd'],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        chpasswd_proc.communicate(input=f"{username}:{password}\n".encode())
-
-        # Sudoers dosyası
-        _root_write(f'/target/etc/sudoers.d/{username}', f"{username} ALL=(ALL:ALL) ALL\n")
-        _root(f"chmod 0440 /target/etc/sudoers.d/{shlex.quote(username)}")
-
-        # GÜVENLİK: rsync /etc'i de kopyaladığı için canlı oturumun izleri
-        # kurulu sisteme geçerdi: `ankora` hesabının herkese açık bilinen
-        # parolası + şifresiz sudo yetkisi = parolasız root. Canlı hesap
-        # kurulu sistemde yetkisiz ve parolası bilinmeyen bir hesap olur.
-        if username != 'ankora':
-            _root("rm -f /target/etc/sudoers.d/ankora", check=False)
-            subprocess.run(_root_pre + ['chroot', '/target', 'gpasswd', '-d', 'ankora', 'sudo'], check=False)
-            try:
-                live_pw = secrets.token_urlsafe(24)
-                subprocess.run(_root_pre + ['chroot', '/target', 'chpasswd'],
-                               input=f"ankora:{live_pw}\n".encode(), check=False)
-            except Exception:
-                pass
-            try:
-                _root_write('/target/etc/sudoers.d/ankora-updater',
-                            f"{username} ALL=(root) NOPASSWD: "
-                            "/usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper\n")
-                _root("chmod 0440 /target/etc/sudoers.d/ankora-updater")
-            except Exception:
-                pass
-
-        # GRUB
-        subprocess.run(_root_pre + ['chroot', '/target', 'grub-install', '--target=x86_64-efi', '--efi-directory=/boot/efi', '--bootloader-id=ankora', '--recheck'], check=False)
-        subprocess.run(_root_pre + ['chroot', '/target', 'update-grub'], check=False)
-
-        if autologin:
-            inittab_path = '/target/etc/inittab'
-            if os.path.exists(inittab_path):
-                with open(inittab_path, 'r') as f:
-                    content = f.read()
-                content = re.sub(
-                    r'^1:2345:respawn:/sbin/getty.*tty1.*',
-                    f'1:2345:respawn:/sbin/getty --autologin {username} --noclear 38400 tty1 linux',
-                    content,
-                    flags=re.MULTILINE
-                )
-                _root_write(inittab_path, content)
-        else:
-            # Canlı ISO'nun `--autologin ankora` satırı kurulu sistemde
-            # kalmamalı: hem kullanıcı otomatik girişi kapatmış oluyor hem de
-            # o satır artık yetkisiz olan canlı hesaba bağlanırdı.
-            inittab_path = '/target/etc/inittab'
-            if os.path.exists(inittab_path):
-                with open(inittab_path, 'r') as f:
-                    content = f.read()
-                content = re.sub(
-                    r'^1:2345:respawn:/sbin/getty --autologin \S+ --noclear 38400 tty1 linux',
-                    '1:2345:respawn:/sbin/getty 38400 tty1 linux',
-                    content,
-                    flags=re.MULTILINE
-                )
-                _root_write(inittab_path, content)
 
         try:
-            pass  # chroot komutları yukarıda zaten çalıştırıldı
+            # 6. Kök Sistemi Hedefe Aktar
+            squashfs_cand = [
+                '/run/live/medium/live/filesystem.squashfs',
+                '/lib/live/mount/medium/live/filesystem.squashfs',
+                '/run/live/rootfs/filesystem.squashfs'
+            ]
+            found_sq = None
+            for sq in squashfs_cand:
+                if os.path.isfile(sq):
+                    found_sq = sq
+                    break
+
+            if found_sq and shutil.which('unsquashfs'):
+                _root(f"unsquashfs -f -d /target {shlex.quote(found_sq)}")
+            else:
+                rsync_cmd = (
+                    "rsync -aAX / /target/ "
+                    "--exclude=/proc/* --exclude=/sys/* --exclude=/dev/* "
+                    "--exclude=/tmp/* --exclude=/run/* --exclude=/mnt/* "
+                    "--exclude=/media/* --exclude=/target/* --exclude=/home/* "
+                    "--exclude=/lib/live/mount/* --exclude=/var/log/*"
+                )
+                _root(rsync_cmd)
+
+            # 7. Kimlik ve Ağ Dosyaları
+            mid = secrets.token_hex(16)
+            _root_write('/target/etc/machine-id', mid + '\n')
+            _root_write('/target/var/lib/dbus/machine-id', mid + '\n')
+            _root("rm -f /target/var/lib/dhcp/* /target/etc/ssh/ssh_host_* /target/root/.bash_history 2>/dev/null", check=False)
+            _root("sh -c 'find /target/var/log -type f -delete 2>/dev/null; rm -rf /target/var/tmp/* /target/tmp/* 2>/dev/null; true'", check=False)
+
+            _root_write('/target/etc/hostname', f"{hostname}\n")
+            _root_write('/target/etc/hosts',
+                        f"127.0.0.1\tlocalhost\n127.0.1.1\t{hostname}\n\n"
+                        "::1\tlocalhost ip6-localhost ip6-loopback\nff02::1\tip6-allnodes\nff02::2\tip6-allrouters\n")
+
+            # 8. /etc/fstab Yapılandırması
+            try:
+                root_uuid = _root_out(f"blkid -s UUID -o value {shlex.quote(p_root)}").strip()
+                efi_uuid = _root_out(f"blkid -s UUID -o value {shlex.quote(p_esp)}").strip()
+            except Exception:
+                root_uuid = ''
+                efi_uuid = ''
+
+            root_dev = f"UUID={root_uuid}" if root_uuid else p_root
+            efi_dev = f"UUID={efi_uuid}" if efi_uuid else p_esp
+
+            fstab_content = f"""# /etc/fstab generated by Ankora Linux Installer
+{root_dev} / ext4 errors=remount-ro 0 1
+{efi_dev} /boot/efi vfat umask=0077 0 1
+tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
+"""
+            _root_write('/target/etc/fstab', fstab_content)
+
+            # 9. Bind Mounts (Chroot için)
+            for bm in bind_mounts:
+                _root_makedirs(f"/target{bm}")
+                _root(f"mount --bind {bm} /target{bm}")
+
+            if os.path.exists('/sys/firmware/efi/efivars'):
+                _root_makedirs('/target/sys/firmware/efi/efivars')
+                _root("mount --bind /sys/firmware/efi/efivars /target/sys/firmware/efi/efivars 2>/dev/null || true", check=False)
+
+            _root_pre = [] if os.geteuid() == 0 else ['sudo', '-n']
+
+            # 10. Kullanıcı Hesapları
+            user_exists = subprocess.run(_root_pre + ['chroot', '/target', 'id', username],
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+            if not user_exists:
+                _root(f"chroot /target useradd -m -s /bin/bash -G sudo,audio,video,plugdev,netdev {shlex.quote(username)}")
+            else:
+                _root_makedirs(f"/target/home/{username}")
+                _root(f"cp -rT /target/etc/skel /target/home/{shlex.quote(username)} 2>/dev/null || true", check=False)
+                _root(f"chroot /target chown -R {shlex.quote(username)}:{shlex.quote(username)} /home/{shlex.quote(username)}")
+                _root(f"chroot /target usermod -aG sudo,audio,video,plugdev,netdev {shlex.quote(username)}")
+                _root(f"chroot /target usermod -U {shlex.quote(username)} 2>/dev/null || true", check=False)
+
+            # Parola Belirleme
+            chpasswd_proc = subprocess.Popen(
+                _root_pre + ['chroot', '/target', 'chpasswd'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            chpasswd_proc.communicate(input=f"{username}:{password}\n".encode())
+
+            # Sudoers Yetkisi (Masaüstü Terminali ve Yönetici İşlemleri İçin Tam Sudo)
+            _root_write(f'/target/etc/sudoers.d/{username}', f"{username} ALL=(ALL:ALL) NOPASSWD: ALL\n")
+            _root(f"chmod 0440 /target/etc/sudoers.d/{shlex.quote(username)}")
+
+            # Ayaz güncelleyici sudoers
+            _root_write('/target/etc/sudoers.d/ankora-updater',
+                        f"{username} ALL=(root) NOPASSWD: "
+                        "/usr/local/bin/ayaz-update-helper, /usr/local/bin/ayaz-pkg-helper\n")
+            _root("chmod 0440 /target/etc/sudoers.d/ankora-updater")
+
+            # Hızlı Paralel Açılış ve ZRAM Swap Servisi Optimizasyonlarını Kurulu Sisteme Aktar
+            _root_write('/target/etc/default/rcS',
+                        "# Ankora Linux 2.0 Hızlı Paralel Açılış\nCONCURRENCY=makefile\nUTC=yes\nVERBOSE=no\nFSCKFIX=no\n")
+            _root_write('/target/etc/sysctl.d/99-zram.conf',
+                        "vm.swappiness = 100\nvm.vfs_cache_pressure = 50\nvm.watermark_boost_factor = 0\nvm.dirty_background_ratio = 5\nvm.dirty_ratio = 10\n")
+            zram_target_script = """#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          zram-swap
+# Required-Start:    $local_fs
+# Required-Stop:     $local_fs
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: ZRAM Sıkıştırılmış RAM Takas Alanı
+### END INIT INFO
+
+case "$1" in
+  start)
+    modprobe zram num_devices=1 2>/dev/null || true
+    if [ -e /dev/zram0 ]; then
+      for alg in zstd lz4 lzo; do
+        if grep -q "$alg" /sys/block/zram0/comp_algorithm 2>/dev/null; then
+          echo "$alg" > /sys/block/zram0/comp_algorithm 2>/dev/null && break
+        fi
+      done
+      MEM_TOTAL_KB=$(grep MemTotal /proc/meminfo 2>/dev/null | awk '{print $2}')
+      if [ -n "$MEM_TOTAL_KB" ] && [ "$MEM_TOTAL_KB" -gt 0 ] 2>/dev/null; then
+        DISKSIZE=$(( MEM_TOTAL_KB * 1024 / 2 ))
+      else
+        DISKSIZE=1073741824
+      fi
+      echo "$DISKSIZE" > /sys/block/zram0/disksize 2>/dev/null || true
+      mkswap /dev/zram0 >/dev/null 2>&1 || true
+      swapon -p 100 /dev/zram0 2>/dev/null || true
+    fi
+    ;;
+  stop)
+    swapoff /dev/zram0 2>/dev/null || true
+    echo 1 > /sys/block/zram0/reset 2>/dev/null || true
+    ;;
+  restart|force-reload)
+    "$0" stop
+    "$0" start
+    ;;
+  status)
+    swapon -s 2>/dev/null | grep zram || echo "zram aktif değil"
+    ;;
+  *)
+    echo "Kullanım: $0 {start|stop|restart|status}" >&2
+    exit 1
+    ;;
+esac
+exit 0
+"""
+            _root_write('/target/etc/init.d/zram-swap', zram_target_script)
+            _root("chmod 0755 /target/etc/init.d/zram-swap")
+            _root("chroot /target update-rc.d zram-swap defaults 05 95 2>/dev/null || true", check=False)
+
+            # Eğer farklı bir kullanıcı oluşturulduysa canlı 'ankora' kalıntısını temizle
+            if username != 'ankora':
+                _root("rm -f /target/etc/sudoers.d/ankora", check=False)
+                _root("chroot /target deluser --remove-home ankora 2>/dev/null || chroot /target userdel -r ankora 2>/dev/null || true", check=False)
+
+            # 11. Otomatik Giriş (Getty inittab)
+            inittab_path = '/target/etc/inittab'
+            if os.path.exists(inittab_path):
+                try:
+                    with open(inittab_path, 'r') as f:
+                        content = f.read()
+                    tty1_line = f'1:2345:respawn:/sbin/getty --autologin {username} --noclear 38400 tty1 linux' if autologin else '1:2345:respawn:/sbin/getty 38400 tty1 linux'
+                    if re.search(r'^[0-9a-zA-Z]+:[0-9]+:respawn:/sbin/getty.*tty1.*', content, flags=re.MULTILINE):
+                        content = re.sub(r'^[0-9a-zA-Z]+:[0-9]+:respawn:/sbin/getty.*tty1.*', tty1_line, content, flags=re.MULTILINE)
+                    else:
+                        content += f'\n{tty1_line}\n'
+                    _root_write(inittab_path, content)
+                except Exception:
+                    pass
+
+            # Canlı sistem servislerini kurulu sistemde pasifleştir
+            _root("rm -f /target/etc/rcS.d/S*live-config* /target/etc/init.d/live-config* 2>/dev/null || true", check=False)
+
+            # 12. Önyükleyici (GRUB) Kurulumu
+            is_efi = os.path.isdir('/sys/firmware/efi')
+            grub_ok = False
+
+            if is_efi:
+                res_efi = subprocess.run(
+                    _root_pre + ['chroot', '/target', 'grub-install',
+                                 '--target=x86_64-efi', '--efi-directory=/boot/efi',
+                                 '--bootloader-id=ankora', '--recheck'],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+                if res_efi.returncode == 0:
+                    grub_ok = True
+                    subprocess.run(
+                        _root_pre + ['chroot', '/target', 'grub-install',
+                                     '--target=x86_64-efi', '--efi-directory=/boot/efi',
+                                     '--bootloader-id=ankora', '--removable', '--recheck'],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    )
+
+                subprocess.run(
+                    _root_pre + ['chroot', '/target', 'grub-install',
+                                 '--target=i386-pc', '--recheck', target],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            else:
+                res_bios = subprocess.run(
+                    _root_pre + ['chroot', '/target', 'grub-install',
+                                 '--target=i386-pc', '--recheck', target],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+                if res_bios.returncode == 0:
+                    grub_ok = True
+
+            if not grub_ok:
+                res_retry = subprocess.run(
+                    _root_pre + ['chroot', '/target', 'grub-install',
+                                 '--target=i386-pc', '--recheck', target],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                )
+                if res_retry.returncode == 0:
+                    grub_ok = True
+                else:
+                    err_msg = (res_retry.stderr or res_retry.stdout or '').strip()
+                    raise Exception(f'Önyükleyici (GRUB) kurulamadı: {err_msg}')
+
+            res_ug = subprocess.run(
+                _root_pre + ['chroot', '/target', 'update-grub'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            if res_ug.returncode != 0:
+                err_msg = (res_ug.stderr or res_ug.stdout or '').strip()
+                raise Exception(f'update-grub başarısız oldu: {err_msg}')
+
         finally:
+            # 13. Güvenli Çözme (Umount)
+            _root("umount -l /target/sys/firmware/efi/efivars 2>/dev/null || true", check=False)
             for bm in reversed(bind_mounts):
                 _root(f"umount -l /target{bm} 2>/dev/null || true", check=False)
             _root("umount -l /target/boot/efi 2>/dev/null || true", check=False)
@@ -1760,8 +2106,13 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
             return True
         if not handler.endswith('.desktop'):
             return False
-        dirs = ['/usr/share/applications', '/usr/local/share/applications',
-                os.path.expanduser('~/.local/share/applications')]
+        dirs = [
+            '/usr/share/applications',
+            '/usr/local/share/applications',
+            '/var/lib/flatpak/exports/share/applications',
+            os.path.expanduser('~/.local/share/applications'),
+            os.path.expanduser('~/.local/share/flatpak/exports/share/applications'),
+        ]
         return any(os.path.exists(os.path.join(d, handler)) for d in dirs)
 
     elif cmd == 'delete_file':
@@ -1788,10 +2139,17 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
 
     elif cmd == 'scan_xdg_applications':
         global _XDG_CACHE
-        app_dirs = ['/usr/share/applications', os.path.expanduser('~/.local/share/applications')]
-        user_app_dir = app_dirs[1]
-        # Dizin özetleri değişmediyse (içine dosya eklenip çıkarılmadıysa)
-        # tarama ve dosya okuma tekrarlanmaz.
+        user_app_dir = os.path.expanduser('~/.local/share/applications')
+        user_fp_dir = os.path.expanduser('~/.local/share/flatpak/exports/share/applications')
+        sys_fp_dir = '/var/lib/flatpak/exports/share/applications'
+        app_dirs = [
+            '/usr/share/applications',
+            '/usr/local/share/applications',
+            sys_fp_dir,
+            user_app_dir,
+            user_fp_dir,
+        ]
+        user_dirs = {user_app_dir, user_fp_dir, sys_fp_dir}
         sig = []
         for ad in app_dirs:
             try:
@@ -1802,24 +2160,37 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         if _XDG_CACHE is not None and _XDG_CACHE[0] == sig:
             return _XDG_CACHE[1]
         apps = []
+        seen_ids = set()
         for ad in app_dirs:
             if os.path.exists(ad):
-                for fname in os.listdir(ad):
+                for fname in sorted(os.listdir(ad)):
                     if fname.endswith('.desktop'):
+                        app_id = fname[:-8]
+                        if app_id in seen_ids:
+                            continue
                         p = os.path.join(ad, fname)
                         try:
-                            name = fname.replace('.desktop', '')
-                            exec_cmd = name
+                            name = app_id
+                            exec_cmd = app_id
                             cat = 'util'
                             comment = ''
+                            icon = 'application-x-executable'
+                            no_display = False
                             with open(p, 'r', errors='ignore') as f:
                                 for line in f:
-                                    if line.startswith('Name=') and name == fname.replace('.desktop', ''):
-                                        name = line.strip().split('=', 1)[1]
-                                    elif line.startswith('Exec='):
-                                        exec_cmd = line.strip().split('=', 1)[1].split()[0]
-                                    elif line.startswith('Categories='):
-                                        c = line.lower()
+                                    l_str = line.strip()
+                                    if l_str.startswith('NoDisplay=') and l_str.split('=', 1)[1].strip().lower() == 'true':
+                                        no_display = True
+                                        break
+                                    elif l_str.startswith('Name=') and name == app_id:
+                                        name = l_str.split('=', 1)[1].strip()
+                                    elif l_str.startswith('Exec=') and exec_cmd == app_id:
+                                        raw_exec = l_str.split('=', 1)[1].strip()
+                                        exec_cmd = re.sub(r'%[fFuUdDnNickvm]', '', raw_exec).strip()
+                                    elif l_str.startswith('Icon=') and icon == 'application-x-executable':
+                                        icon = l_str.split('=', 1)[1].strip()
+                                    elif l_str.startswith('Categories='):
+                                        c = l_str.lower()
                                         if 'audio' in c or 'video' in c or 'media' in c:
                                             cat = 'media'
                                         elif 'graphic' in c:
@@ -1830,17 +2201,21 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                                             cat = 'office'
                                         elif 'development' in c:
                                             cat = 'dev'
-                                        elif 'system' in c:
+                                        elif 'system' in c or 'settings' in c:
                                             cat = 'sys'
-                                    elif line.startswith('Comment='):
-                                        comment = line.strip().split('=', 1)[1]
+                                    elif l_str.startswith('Comment=') and not comment:
+                                        comment = l_str.split('=', 1)[1].strip()
+                            if no_display:
+                                continue
+                            seen_ids.add(app_id)
                             apps.append({
-                                'id': fname.replace('.desktop', ''),
+                                'id': app_id,
                                 'name': name,
                                 'exec': exec_cmd,
+                                'icon': icon,
                                 'cat': cat,
                                 'comment': comment,
-                                'is_installed_by_user': ad == user_app_dir
+                                'is_installed_by_user': ad in user_dirs
                             })
                         except Exception:
                             continue
@@ -2077,6 +2452,540 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                 err = (proc.stderr or proc.stdout or '').strip()
                 raise Exception(err or 'Ses seviyesi ayarlanamadı')
         return f'Ses seviyesi ayarlandı: %{level}'
+
+    elif cmd == 'get_native_windows':
+        if not shutil.which('wmctrl'):
+            return []
+        try:
+            out = subprocess.run(['wmctrl', '-l', '-x'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3).stdout
+        except Exception:
+            return []
+        active_id = ''
+        if shutil.which('xprop'):
+            try:
+                xprop_out = subprocess.run(['xprop', '-root', '_NET_ACTIVE_WINDOW'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2).stdout
+                if '#' in xprop_out:
+                    active_id = xprop_out.split('#')[1].strip().lower()
+            except Exception:
+                pass
+        windows = []
+        for line in out.splitlines():
+            parts = line.split(None, 3)
+            if len(parts) < 4:
+                continue
+            win_id = parts[0].strip().lower()
+            wm_class = parts[2].strip()
+            title = parts[3].strip()
+            lower_class = wm_class.lower()
+            lower_title = title.lower()
+            if any(k in lower_class for k in ['ayaz', 'openbox', 'desktop']) or 'ayaz — ankora' in lower_title or title == 'Desktop':
+                continue
+            app_name = wm_class.split('.')[-1] if '.' in wm_class else wm_class
+            is_active = bool(active_id and (win_id in active_id or active_id in win_id))
+            windows.append({
+                'id': parts[0].strip(),
+                'title': title,
+                'app_name': app_name,
+                'is_active': is_active
+            })
+        return windows
+
+    elif cmd == 'activate_native_window':
+        win_id = str(args.get('id', '')).strip()
+        if win_id and shutil.which('wmctrl'):
+            subprocess.run(['wmctrl', '-i', '-a', win_id], timeout=3)
+        return True
+
+    elif cmd == 'close_native_window':
+        win_id = str(args.get('id', '')).strip()
+        if win_id and shutil.which('wmctrl'):
+            subprocess.run(['wmctrl', '-i', '-c', win_id], timeout=3)
+        return True
+
+    elif cmd == 'minimize_native_window':
+        win_id = str(args.get('id', '')).strip()
+        if win_id and shutil.which('xdotool'):
+            subprocess.run(['xdotool', 'windowminimize', win_id], timeout=3)
+        return True
+
+    elif cmd == 'minimize_all_windows':
+        if shutil.which('wmctrl'):
+            subprocess.run(['wmctrl', '-k', 'on'], timeout=3)
+        return True
+
+    elif cmd == 'get_removable_drives':
+        if not shutil.which('lsblk'):
+            return []
+        try:
+            p = subprocess.run(['lsblk', '-J', '-o', 'NAME,SIZE,LABEL,MOUNTPOINT,RM,TYPE,FSTYPE'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+            data = json.loads(p.stdout)
+        except Exception:
+            return []
+        drives = []
+        for dev in data.get('blockdevices', []):
+            is_rm = str(dev.get('rm', '')).lower() in ('1', 'true')
+            name = dev.get('name', '')
+            if any(name.startswith(pfx) for pfx in ('loop', 'zram', 'sr')):
+                continue
+            targets = dev.get('children', []) if dev.get('children') else ([dev] if is_rm else [])
+            for item in targets:
+                iname = item.get('name', '')
+                if not iname:
+                    continue
+                size = item.get('size', '')
+                label = item.get('label', '') or iname
+                fstype = item.get('fstype', '')
+                mountpoint = item.get('mountpoint')
+                if is_rm and not mountpoint and fstype and fstype != 'swap' and shutil.which('udisksctl'):
+                    try:
+                        u_res = subprocess.run(['udisksctl', 'mount', '-b', f'/dev/{iname}', '--no-user-interaction'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+                        if ' at ' in u_res.stdout:
+                            mountpoint = u_res.stdout.split(' at ')[1].strip()
+                    except Exception:
+                        pass
+                if is_rm or (mountpoint and (mountpoint.startswith('/media') or mountpoint.startswith('/mnt'))):
+                    drives.append({
+                        'name': iname,
+                        'label': label,
+                        'mountpoint': mountpoint,
+                        'size': size,
+                        'fstype': fstype
+                    })
+        return drives
+
+    elif cmd == 'unmount_drive':
+        device = str(args.get('device', '')).strip()
+        dev_arg = device if device.startswith('/') else f'/dev/{device}'
+        if shutil.which('udisksctl'):
+            try:
+                subprocess.run(['udisksctl', 'unmount', '-b', dev_arg, '--no-user-interaction'], timeout=5)
+                return 'Sürücü güvenle çıkarıldı'
+            except Exception:
+                pass
+        subprocess.run(['umount', dev_arg], timeout=5)
+        return 'Sürücü bağlantısı kesildi'
+
+    elif cmd == 'get_clipboard_text':
+        if shutil.which('xclip'):
+            try:
+                p = subprocess.run(['xclip', '-selection', 'clipboard', '-o'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
+                return p.stdout
+            except Exception:
+                pass
+        return ''
+
+    elif cmd == 'set_clipboard_text':
+        text = str(args.get('text', ''))
+        if shutil.which('xclip'):
+            try:
+                subprocess.run(['xclip', '-selection', 'clipboard', '-i'], input=text, text=True, timeout=2)
+            except Exception:
+                pass
+        return True
+
+    elif cmd == 'install_flatpak_app':
+        app_id = str(args.get('app_id', args.get('appId', ''))).strip()
+        if not shutil.which('flatpak'):
+            raise Exception('Flatpak kurulu değil')
+        p = subprocess.run(['flatpak', 'install', '-y', '--noninteractive', 'flathub', app_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=600)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Flatpak kurulamadı')
+        return f'{app_id} kuruldu'
+
+    elif cmd == 'remove_flatpak_app':
+        app_id = str(args.get('app_id', args.get('appId', ''))).strip()
+        if not shutil.which('flatpak'):
+            raise Exception('Flatpak kurulu değil')
+        p = subprocess.run(['flatpak', 'uninstall', '-y', '--noninteractive', app_id], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Flatpak kaldırılamadı')
+        return f'{app_id} kaldırıldı'
+
+    elif cmd == 'list_installed_flatpaks':
+        if not shutil.which('flatpak'):
+            return []
+        try:
+            p = subprocess.run(['flatpak', 'list', '--app', '--columns=application'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+            return [l.strip() for l in p.stdout.splitlines() if l.strip()]
+        except Exception:
+            return []
+
+    elif cmd == 'move_to_trash':
+        target_path = str(args.get('path', '')).strip()
+        if not target_path or not os.path.exists(target_path):
+            raise Exception('Dosya bulunamadı')
+        real_p = os.path.realpath(target_path)
+        if real_p in ('/', '/home', home_dir):
+            raise Exception('Kritik sistem dizinleri çöpe taşınamaz')
+        if shutil.which('gio'):
+            try:
+                res = subprocess.run(['gio', 'trash', real_p], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                if res.returncode == 0:
+                    return f"Çöp kutusuna taşındı: {os.path.basename(real_p)}"
+            except Exception:
+                pass
+        trash_dir = os.path.join(home_dir, '.local/share/Trash')
+        files_dir = os.path.join(trash_dir, 'files')
+        info_dir = os.path.join(trash_dir, 'info')
+        os.makedirs(files_dir, exist_ok=True)
+        os.makedirs(info_dir, exist_ok=True)
+        base_name = os.path.basename(real_p)
+        dest_f = os.path.join(files_dir, base_name)
+        dest_i = os.path.join(info_dir, f"{base_name}.trashinfo")
+        with open(dest_i, 'w', encoding='utf-8') as f:
+            f.write(f"[Trash Info]\nPath={real_p}\nDeletionDate=2026-01-01T00:00:00\n")
+        shutil.move(real_p, dest_f)
+        return f"Çöp kutusuna taşındı: {base_name}"
+
+    elif cmd == 'list_trash':
+        trash_files = os.path.join(home_dir, '.local/share/Trash/files')
+        items = []
+        if os.path.exists(trash_files):
+            for fname in os.listdir(trash_files):
+                fp = os.path.join(trash_files, fname)
+                is_d = os.path.isdir(fp)
+                sz = 0 if is_d else (os.path.getsize(fp) if os.path.exists(fp) else 0)
+                ext = fname.rsplit('.', 1)[-1].lower() if '.' in fname else ''
+                # format size
+                if sz < 1024:
+                    s_str = f"{sz} B"
+                elif sz < 1048576:
+                    s_str = f"{round(sz/1024, 1)} KB"
+                else:
+                    s_str = f"{round(sz/1048576, 1)} MB"
+                items.append({
+                    'name': fname,
+                    'path': fp,
+                    'is_dir': is_d,
+                    'size_str': s_str,
+                    'ext': ext,
+                    'is_hidden': False
+                })
+        items.sort(key=lambda x: (not x['is_dir'], x['name'].lower()))
+        return items
+
+    elif cmd == 'restore_trash_item':
+        file_name = str(args.get('fileName', args.get('file_name', ''))).strip()
+        trash_dir = os.path.join(home_dir, '.local/share/Trash')
+        file_p = os.path.join(trash_dir, 'files', file_name)
+        info_p = os.path.join(trash_dir, 'info', f"{file_name}.trashinfo")
+        if not os.path.exists(file_p):
+            raise Exception('Geri yüklenecek dosya bulunamadı')
+        target_dest = os.path.join(home_dir, 'Masaüstü', file_name)
+        if os.path.exists(info_p):
+            try:
+                with open(info_p, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        if line.startswith('Path='):
+                            orig = line.strip().split('=', 1)[1]
+                            if os.path.exists(os.path.dirname(orig)):
+                                target_dest = orig
+                            break
+            except Exception:
+                pass
+        shutil.move(file_p, target_dest)
+        if os.path.exists(info_p):
+            try: os.remove(info_p)
+            except Exception: pass
+        return f"Geri yüklendi: {target_dest}"
+
+    elif cmd == 'empty_trash':
+        if shutil.which('gio'):
+            try:
+                subprocess.run(['gio', 'trash', '--empty'], timeout=5)
+                return "Çöp kutusu tamamen boşaltıldı."
+            except Exception:
+                pass
+        trash_dir = os.path.join(home_dir, '.local/share/Trash')
+        for sub in ['files', 'info']:
+            sd = os.path.join(trash_dir, sub)
+            if os.path.exists(sd):
+                shutil.rmtree(sd, ignore_errors=True)
+                os.makedirs(sd, exist_ok=True)
+        return "Çöp kutusu tamamen boşaltıldı."
+
+    elif cmd == 'extract_archive':
+        arc = str(args.get('archivePath', args.get('archive_path', ''))).strip()
+        dest = str(args.get('destDir', args.get('dest_dir', ''))).strip() or os.path.dirname(arc) or home_dir
+        if not os.path.exists(arc):
+            raise Exception('Arşiv bulunamadı')
+        low = arc.lower()
+        if low.endswith('.zip') and shutil.which('unzip'):
+            p = subprocess.run(['unzip', '-q', '-o', arc, '-d', dest], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        elif (low.endswith('.tar.gz') or low.endswith('.tgz')) and shutil.which('tar'):
+            p = subprocess.run(['tar', '-xzf', arc, '-C', dest], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        elif (low.endswith('.tar.xz') or low.endswith('.txz')) and shutil.which('tar'):
+            p = subprocess.run(['tar', '-xJf', arc, '-C', dest], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        elif low.endswith('.7z') and shutil.which('7z'):
+            p = subprocess.run(['7z', 'x', '-y', arc, f'-o{dest}'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        else:
+            p = subprocess.run(['tar', '-xf', arc, '-C', dest], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Arşiv çıkartılamadı')
+        return f"Arşiv çıkarıldı: {dest}"
+
+    elif cmd == 'create_archive':
+        src = str(args.get('sourcePath', args.get('source_path', ''))).strip()
+        atype = str(args.get('archiveType', args.get('archive_type', 'zip'))).strip().lower()
+        if not os.path.exists(src):
+            raise Exception('Arşivlenecek dosya bulunamadı')
+        parent = os.path.dirname(src) or '.'
+        bname = os.path.basename(src)
+        out_arc = f"{src}.zip" if atype == 'zip' else f"{src}.tar.gz"
+        if atype == 'zip' and shutil.which('zip'):
+            p = subprocess.run(['zip', '-r', '-q', out_arc, bname], cwd=parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        else:
+            p = subprocess.run(['tar', '-czf', out_arc, bname], cwd=parent, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        if p.returncode != 0:
+            raise Exception(p.stderr.strip() or 'Arşivlenemedi')
+        return f"Arşiv oluşturuldu: {out_arc}"
+
+    elif cmd == 'move_path':
+        src = str(args.get('sourcePath', args.get('source_path', ''))).strip()
+        dest = str(args.get('destPath', args.get('dest_path', ''))).strip()
+        if not os.path.exists(src):
+            raise Exception('Kaynak dosya veya klasör bulunamadı')
+        shutil.move(src, dest)
+        return f"Öge taşındı: {dest}"
+
+    elif cmd == 'sync_desktop_theme':
+        is_dark = bool(args.get('isDark', args.get('is_dark', True)))
+        tname = 'Adwaita-dark' if is_dark else 'Adwaita'
+        iname = 'Papirus-Dark' if is_dark else 'Papirus'
+        pdark = '1' if is_dark else '0'
+        cscheme = 'prefer-dark' if is_dark else 'default'
+        # GTK3
+        g3 = os.path.join(home_dir, '.config/gtk-3.0')
+        os.makedirs(g3, exist_ok=True)
+        with open(os.path.join(g3, 'settings.ini'), 'w', encoding='utf-8') as f:
+            f.write(f"[Settings]\ngtk-theme-name = {tname}\ngtk-icon-theme-name = {iname}\ngtk-application-prefer-dark-theme = {pdark}\ngtk-font-name = Sans 10\n")
+        # GTK4
+        g4 = os.path.join(home_dir, '.config/gtk-4.0')
+        os.makedirs(g4, exist_ok=True)
+        with open(os.path.join(g4, 'settings.ini'), 'w', encoding='utf-8') as f:
+            f.write(f"[Settings]\ngtk-theme-name = {tname}\ngtk-icon-theme-name = {iname}\ngtk-application-prefer-dark-theme = {pdark}\n")
+        # GTK2
+        with open(os.path.join(home_dir, '.gtkrc-2.0'), 'w', encoding='utf-8') as f:
+            f.write(f"gtk-theme-name=\"{tname}\"\ngtk-icon-theme-name=\"{iname}\"\n")
+        # xsettingsd
+        xsd = os.path.join(home_dir, '.config/xsettingsd')
+        os.makedirs(xsd, exist_ok=True)
+        with open(os.path.join(xsd, 'xsettingsd.conf'), 'w', encoding='utf-8') as f:
+            f.write(f"Net/ThemeName \"{tname}\"\nNet/IconThemeName \"{iname}\"\nGtk/ApplicationPreferDarkTheme {pdark}\nGtk/CursorThemeName \"Adwaita\"\n")
+        subprocess.run(['pkill', '-HUP', 'xsettingsd'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if shutil.which('gsettings'):
+            subprocess.run(['gsettings', 'set', 'org.gnome.desktop.interface', 'color-scheme', cscheme], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['gsettings', 'set', 'org.gnome.desktop.interface', 'gtk-theme', tname], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['gsettings', 'set', 'org.gnome.desktop.interface', 'icon-theme', iname], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    elif cmd == 'set_native_workspace':
+        idx = str(args.get('index', 0))
+        if shutil.which('wmctrl'):
+            subprocess.run(['wmctrl', '-s', idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif shutil.which('xdotool'):
+            subprocess.run(['xdotool', 'set_desktop', idx], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    elif cmd == 'get_audio_devices':
+        sinks = []
+        sources = []
+        def_sink = ''
+        def_source = ''
+        if shutil.which('pactl'):
+            p1 = subprocess.run(['pactl', 'get-default-sink'], stdout=subprocess.PIPE, text=True)
+            def_sink = p1.stdout.strip()
+            p2 = subprocess.run(['pactl', 'get-default-source'], stdout=subprocess.PIPE, text=True)
+            def_source = p2.stdout.strip()
+
+            p_sinks = subprocess.run(['pactl', 'list', 'sinks'], stdout=subprocess.PIPE, text=True)
+            cur_name, cur_desc = '', ''
+            for line in p_sinks.stdout.splitlines():
+                t = line.strip()
+                if t.startswith('Name: '):
+                    cur_name = t.split('Name: ', 1)[1].strip()
+                elif t.startswith('Description: '):
+                    cur_desc = t.split('Description: ', 1)[1].strip()
+                elif t.startswith('Sink #') or not t:
+                    if cur_name:
+                        sinks.append({'id': cur_name, 'name': cur_name, 'description': cur_desc or cur_name, 'is_default': cur_name == def_sink})
+                        cur_name, cur_desc = '', ''
+            if cur_name:
+                sinks.append({'id': cur_name, 'name': cur_name, 'description': cur_desc or cur_name, 'is_default': cur_name == def_sink})
+
+            p_src = subprocess.run(['pactl', 'list', 'sources'], stdout=subprocess.PIPE, text=True)
+            cur_name, cur_desc = '', ''
+            for line in p_src.stdout.splitlines():
+                t = line.strip()
+                if t.startswith('Name: '):
+                    cur_name = t.split('Name: ', 1)[1].strip()
+                elif t.startswith('Description: '):
+                    cur_desc = t.split('Description: ', 1)[1].strip()
+                elif t.startswith('Source #') or not t:
+                    if cur_name:
+                        sources.append({'id': cur_name, 'name': cur_name, 'description': cur_desc or cur_name, 'is_default': cur_name == def_source})
+                        cur_name, cur_desc = '', ''
+            if cur_name:
+                sources.append({'id': cur_name, 'name': cur_name, 'description': cur_desc or cur_name, 'is_default': cur_name == def_source})
+
+        if not sinks:
+            sinks.append({'id': 'default_speaker', 'name': 'Dahili Hoparlör', 'description': 'Sistem Varsayılan Ses Çıkışı', 'is_default': True})
+        if not sources:
+            sources.append({'id': 'default_mic', 'name': 'Dahili Mikrofon', 'description': 'Sistem Varsayılan Girişi', 'is_default': True})
+        return {'sinks': sinks, 'sources': sources, 'default_sink': def_sink, 'default_source': def_source}
+
+    elif cmd == 'set_default_audio_device':
+        kind = str(args.get('kind', 'sink')).strip()
+        dev = str(args.get('deviceName', args.get('device_name', ''))).strip()
+        if shutil.which('pactl') and dev:
+            sub = 'set-default-source' if kind == 'source' else 'set-default-sink'
+            subprocess.run(['pactl', sub, dev], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+
+    elif cmd == 'get_bluetooth_status':
+        is_avail = False
+        is_pow = False
+        devs = []
+        if shutil.which('bluetoothctl'):
+            p = subprocess.run(['timeout', '1.5', 'bluetoothctl', 'show'], stdout=subprocess.PIPE, text=True)
+            if p.stdout and 'No default controller' not in p.stdout:
+                is_avail = True
+                if 'Powered: yes' in p.stdout:
+                    is_pow = True
+            if is_avail:
+                p2 = subprocess.run(['timeout', '1.5', 'bluetoothctl', 'devices'], stdout=subprocess.PIPE, text=True)
+                for line in p2.stdout.splitlines():
+                    pts = line.split()
+                    if len(pts) >= 3 and pts[0] == 'Device':
+                        devs.append({
+                            'address': pts[1],
+                            'name': ' '.join(pts[2:]),
+                            'is_connected': '(connected)' in line,
+                            'is_paired': True
+                        })
+        return {'is_available': is_avail, 'is_powered': is_pow, 'devices': devs}
+
+    elif cmd == 'toggle_bluetooth':
+        pow_on = bool(args.get('powered', True))
+        val = 'on' if pow_on else 'off'
+        if shutil.which('bluetoothctl'):
+            subprocess.run(['timeout', '2', 'bluetoothctl', 'power', val], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if shutil.which('rfkill'):
+            subprocess.run(['rfkill', 'unblock' if pow_on else 'block', 'bluetooth'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return pow_on
+
+    elif cmd == 'scan_bluetooth':
+        en = bool(args.get('enable', True))
+        val = 'on' if en else 'off'
+        if shutil.which('bluetoothctl'):
+            subprocess.run(['timeout', '2', 'bluetoothctl', 'scan', val], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return en
+
+    elif cmd == 'connect_bluetooth_device':
+        addr = str(args.get('address', '')).strip()
+        if shutil.which('bluetoothctl') and addr:
+            p = subprocess.run(['timeout', '5', 'bluetoothctl', 'connect', addr], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if p.returncode != 0:
+                raise Exception(p.stderr.strip() or 'Bağlantı kurulamadı')
+            return f"{addr} aygıtına bağlanıldı."
+        return f"{addr} aygıtına bağlanıldı (Simüle)."
+
+    elif cmd == 'disconnect_bluetooth_device':
+        addr = str(args.get('address', '')).strip()
+        if shutil.which('bluetoothctl') and addr:
+            subprocess.run(['timeout', '3', 'bluetoothctl', 'disconnect', addr], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return f"{addr} bağlantısı kesildi."
+
+    elif cmd == 'spotlight_search_files':
+        q = str(args.get('query', '')).strip().lower()
+        if not q:
+            return []
+        roots = [
+            os.path.join(home_dir, 'Masaüstü'),
+            os.path.join(home_dir, 'Belgeler'),
+            os.path.join(home_dir, 'İndirilenler'),
+            os.path.join(home_dir, 'Resimler'),
+            os.path.join(home_dir, 'Müzik'),
+            os.path.join(home_dir, 'Videolar'),
+            home_dir
+        ]
+        results = []
+        seen = set()
+        for root in roots:
+            if not os.path.exists(root):
+                continue
+            try:
+                for entry in os.scandir(root):
+                    if len(results) >= 20:
+                        break
+                    if entry.name.startswith('.'):
+                        continue
+                    if q in entry.name.lower() and entry.path not in seen:
+                        seen.add(entry.path)
+                        is_dir = entry.is_dir()
+                        ext = entry.name.rsplit('.', 1)[-1].lower() if '.' in entry.name else ''
+                        sz = entry.stat().st_size if not is_dir else 0
+                        sz_str = 'Klasör' if is_dir else (f"{sz} B" if sz < 1024 else (f"{sz/1024:.1f} KB" if sz < 1048576 else f"{sz/1048576:.1f} MB"))
+                        results.append({
+                            'name': entry.name,
+                            'path': entry.path,
+                            'ext': ext,
+                            'is_dir': is_dir,
+                            'size_str': sz_str
+                        })
+            except Exception:
+                continue
+            if len(results) >= 20:
+                break
+        return results
+
+    elif cmd == 'get_system_notifications':
+        items = []
+        nfile = '/tmp/ayaz-notifications.jsonl'
+        if os.path.exists(nfile):
+            try:
+                with open(nfile, 'r', encoding='utf-8') as f:
+                    for line in reversed(f.readlines()[-30:]):
+                        line = line.strip()
+                        if line:
+                            items.append(json.loads(line))
+            except Exception:
+                pass
+        return items
+
+    elif cmd == 'send_desktop_notification':
+        title = str(args.get('title', '')).strip()
+        body = str(args.get('body', '')).strip()
+        app = str(args.get('appName', args.get('app_name', 'Sistem'))).strip()
+        if shutil.which('notify-send'):
+            subprocess.run(['notify-send', '-a', app, title, body], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        now_str = time.strftime('%H:%M')
+        item = {
+            'id': str(int(time.time() * 1000)),
+            'app_name': app,
+            'title': title,
+            'body': body,
+            'timestamp': now_str
+        }
+        try:
+            with open('/tmp/ayaz-notifications.jsonl', 'a', encoding='utf-8') as f:
+                f.write(json.dumps(item) + '\n')
+        except Exception:
+            pass
+        return True
+
+    elif cmd == 'clear_system_notifications':
+        nfile = '/tmp/ayaz-notifications.jsonl'
+        if os.path.exists(nfile):
+            try:
+                with open(nfile, 'w', encoding='utf-8') as f:
+                    f.write('')
+            except Exception:
+                pass
+        if shutil.which('dunstctl'):
+            subprocess.run(['dunstctl', 'history-clear'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['dunstctl', 'close-all'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
 
     elif cmd == 'get_cpu_governor':
         try:
@@ -2319,9 +3228,26 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         return True
 
     elif cmd == 'query_local_ai':
-        prompt = args.get('prompt', '')
+        prompt = (args.get('prompt') or '').strip()
+        provider = (args.get('provider') or 'ollama').strip().lower()
+        api_key = (args.get('apiKey') or args.get('api_key') or '').strip()
+        model = (args.get('model') or '').strip()
+        endpoint = (args.get('endpoint') or '').strip()
+
+        if not api_key:
+            c_file = os.path.expanduser('~/.config/ankora/ai_creds.json')
+            if os.path.exists(c_file):
+                try:
+                    with open(c_file, 'r') as f:
+                        creds = json.load(f)
+                    api_key = creds.get(provider, '')
+                except Exception:
+                    pass
+
         p_lower = prompt.lower()
-        if 'temizle' in p_lower or 'önbellek' in p_lower:
+
+        # Sistem bakım kısayol eylemleri (canlı teftiş)
+        if any(w in p_lower for w in ['temizle', 'önbellek', 'çöp']):
             return {
                 'reply': 'Sistem ve paket önbelleklerinin temizlenmesi önerilir.',
                 'has_action': True,
@@ -2329,7 +3255,7 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                 'action_desc': 'Geçici önbellekleri temizleme',
                 'action_token': 'live_iso_token'
             }
-        elif 'disk' in p_lower or 'ram' in p_lower or 'durum' in p_lower:
+        elif any(w in p_lower for w in ['disk', 'ram', 'depolama', 'kaynak', 'durum', 'hafıza']):
             return {
                 'reply': 'Sistem donanım ve depolama kaynakları taranıyor.',
                 'has_action': True,
@@ -2337,8 +3263,98 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
                 'action_desc': 'Disk ve bellek doluluk durumu',
                 'action_token': 'live_iso_token'
             }
+        elif any(w in p_lower for w in ['güncelle', 'update', 'yükselt']):
+            return {
+                'reply': 'Paket listelerinin resmi Devuan depolarından güncellenmesi önerilir.',
+                'has_action': True,
+                'action_command': 'apt-get update',
+                'action_desc': 'APT paket listelerini güncelle',
+                'action_token': 'live_iso_token'
+            }
+
+        # Eğer API anahtarı veya Ollama varsa canlı HTTP çağrısı yap
+        if api_key or provider == 'ollama':
+            try:
+                import urllib.request
+                if provider == 'gemini' and api_key:
+                    ai_model = model or 'gemini-2.0-flash'
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{ai_model}:generateContent?key={api_key}"
+                    sys_prompt = "Sen Ankora Linux (Devuan Daedalus) sistem yöneticisi ve yapay zeka asistanısın. Türkçe, net ve teknik olarak kusursuz yanıtlar ver."
+                    body = json.dumps({
+                        "contents": [{"parts": [{"text": f"{sys_prompt}\n\nKullanıcı: {prompt}"}]}]
+                    }).encode('utf-8')
+                    req = urllib.request.Request(url, data=body, headers={'Content-Type': 'application/json'})
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        res_data = json.loads(resp.read().decode('utf-8'))
+                        parts = res_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])
+                        reply_text = parts[0].get('text', '') if parts else ''
+                        if reply_text:
+                            return {'reply': reply_text, 'has_action': False, 'action_command': None, 'action_desc': None, 'action_token': None}
+
+                elif provider in ('openai', 'groq', 'openrouter') and api_key:
+                    ep = endpoint or ('https://api.groq.com/openai/v1/chat/completions' if provider == 'groq' else 'https://api.openai.com/v1/chat/completions')
+                    ai_model = model or ('llama-3.3-70b-versatile' if provider == 'groq' else 'gpt-4o-mini')
+                    body = json.dumps({
+                        "model": ai_model,
+                        "messages": [
+                            {"role": "system", "content": "Sen Ankora Linux için yardımcı bir yapay zeka asistanısın."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "temperature": 0.3
+                    }).encode('utf-8')
+                    req = urllib.request.Request(ep, data=body, headers={
+                        'Content-Type': 'application/json',
+                        'Authorization': f'Bearer {api_key}'
+                    })
+                    with urllib.request.urlopen(req, timeout=20) as resp:
+                        res_data = json.loads(resp.read().decode('utf-8'))
+                        reply_text = res_data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                        if reply_text:
+                            return {'reply': reply_text, 'has_action': False, 'action_command': None, 'action_desc': None, 'action_token': None}
+
+                elif provider == 'ollama':
+                    ep = endpoint or 'http://127.0.0.1:11434/api/generate'
+                    ai_model = model or 'qwen2.5:0.5b'
+                    body = json.dumps({
+                        "model": ai_model,
+                        "prompt": prompt,
+                        "stream": False
+                    }).encode('utf-8')
+                    req = urllib.request.Request(ep, data=body, headers={'Content-Type': 'application/json'})
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        res_data = json.loads(resp.read().decode('utf-8'))
+                        reply_text = res_data.get('response', '')
+                        if reply_text:
+                            return {'reply': reply_text, 'has_action': False, 'action_command': None, 'action_desc': None, 'action_token': None}
+            except Exception:
+                pass
+
+        # Çevrimdışı / Dahili Asistan Yanıtı
+        if any(w in p_lower for w in ['merhaba', 'selam', 'hey', 'günaydın']):
+            reply = "Merhaba! Ankora Linux ve Ayaz DE otonom sistem asistanınızım. Sistem yönetimi, paket kurulumu, donanım yapılandırması ve terminal komutları konusunda size yardımcı olabilirim. Ne yapmak istersiniz?"
+        elif any(w in p_lower for w in ['kimsin', 'nesin']):
+            reply = "Ben Ankora AI; bağımsız Devuan Daedalus 5 tabanlı Ankora Linux işletim sisteminin yerleşik yapay zekâ asistanıyım. Gemini, Groq, OpenAI veya yerel Ollama modelleriyle entegre çalışabilirim."
+        elif any(w in p_lower for w in ['kapat', 'kapan']):
+            return {
+                'reply': 'Sistemi kapatmak istiyorsanız onaylayın.',
+                'has_action': True,
+                'action_command': 'poweroff',
+                'action_desc': 'Bilgisayarı Kapat',
+                'action_token': 'live_iso_token'
+            }
+        elif any(w in p_lower for w in ['yeniden başlat', 'reboot']):
+            return {
+                'reply': 'Sistemi yeniden başlatmak istiyorsanız onaylayın.',
+                'has_action': True,
+                'action_command': 'reboot',
+                'action_desc': 'Sistemi Yeniden Başlat',
+                'action_token': 'live_iso_token'
+            }
+        else:
+            reply = f"Ankora AI Çekirdeği hazır. \"{prompt}\" sorgusu için:\n• API anahtarınızı (Gemini, Groq veya OpenAI) bağlayarak derin yapay zekâ yanıtları alabilirsiniz.\n• Hızlı sistem eylemleri için 'önbelleği temizle', 'disk durumu' veya 'paketleri güncelle' yazabilirsiniz."
+
         return {
-            'reply': f"Ankora AI Çekirdeği hazır. Canlı sistem oturumunda yanıtlanıyor:\n\"{prompt}\"",
+            'reply': reply,
             'has_action': False,
             'action_command': None,
             'action_desc': None,
@@ -2363,25 +3379,456 @@ tmpfs /tmp tmpfs defaults,noatime,mode=1777 0 0
         return True
 
     elif cmd == 'check_de_update':
-        return {
+        current_ver = '2.0.0'
+        result = {
             'has_update': False,
-            'current_version': '2.0.0',
-            'latest_version': '2.0.0',
-            'release_name': 'Ankora Linux 2.0 (Canlı Kalıp)',
-            'release_notes': 'Sisteminiz şu anda en güncel Ayaz DE sürümünü çalıştırmaktadır.',
+            'current_version': current_ver,
+            'latest_version': current_ver,
+            'release_name': 'Ankora Linux 2.0 (AyazDE)',
+            'release_notes': 'Sisteminiz güncel. AyazDE v2.0 kararlı sürüm devrededir.',
             'download_url': None,
-            'published_at': '2026-09-27',
+            'published_at': '2026-10-03',
             'package_size_bytes': 0,
             'expected_sha256': None,
             'sha256_url': None
         }
+        try:
+            req = urllib.request.Request(
+                'https://api.github.com/repos/Ankora-Linux/Ayaz/releases/latest',
+                headers={'User-Agent': f'ayaz-updater/{current_ver}'}
+            )
+            with urllib.request.urlopen(req, timeout=6) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    tag = data.get('tag_name', '').lstrip('v')
+                    if tag and tag != current_ver:
+                        result['has_update'] = True
+                        result['latest_version'] = tag
+                        result['release_name'] = data.get('name', f'Ayaz DE {tag}')
+                        result['release_notes'] = data.get('body', 'Yeni özellikler ve hata düzeltmeleri.')
+                        result['published_at'] = data.get('published_at', '')
+                        for asset in data.get('assets', []):
+                            if asset.get('name', '').endswith('.deb'):
+                                result['download_url'] = asset.get('browser_download_url')
+                                result['package_size_bytes'] = asset.get('size', 0)
+                                break
+        except Exception:
+            pass
+        return result
 
     elif cmd == 'download_and_apply_de_update':
-        return 'Canlı ISO ortamında güncelleme simülasyonu tamamlandı.'
+        download_url = args.get('download_url')
+        if not download_url:
+            return 'Güncelleme paketi URL adresi belirtilmedi.'
+        staging = '/var/cache/ayaz-updates'
+        os.makedirs(staging, exist_ok=True)
+        target_deb = os.path.join(staging, 'ayaz-update.deb')
+        try:
+            req = urllib.request.Request(download_url, headers={'User-Agent': 'ayaz-updater/2.0.0'})
+            with urllib.request.urlopen(req, timeout=120) as resp, open(target_deb, 'wb') as f:
+                f.write(resp.read())
+            if os.path.exists('/usr/local/bin/ayaz-update-helper.sh'):
+                proc = subprocess.run(['sudo', '/usr/local/bin/ayaz-update-helper.sh', target_deb],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if proc.returncode == 0:
+                    return 'Ayaz DE başarıyla güncellendi!'
+                else:
+                    return f'Güncelleme yardımcısı hata verdi: {proc.stderr or proc.stdout}'
+            else:
+                proc = subprocess.run(['sudo', 'dpkg', '-i', target_deb],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                return 'Güncelleme paketi kuruldu.' if proc.returncode == 0 else f'Kurulum hatası: {proc.stderr}'
+        except Exception as e:
+            return f'Güncelleme uygulanamadı: {e}'
 
     elif cmd == 'restart_desktop_process':
         subprocess.Popen(['pkill', '-x', 'ayaz'])
         return True
+
+    elif cmd == 'get_mpris_status':
+        try:
+            res = subprocess.run(
+                ['playerctl', '-a', 'metadata', '--format', '{{playerName}}|||{{status}}|||{{title}}|||{{artist}}|||{{album}}|||{{mpris:artUrl}}'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=1.5
+            )
+            if res.returncode == 0 and res.stdout.strip():
+                for line in res.stdout.splitlines():
+                    parts = line.split('|||')
+                    if len(parts) >= 2:
+                        p_name = parts[0].strip()
+                        p_status = parts[1].strip()
+                        p_title = parts[2].strip() if len(parts) > 2 else ''
+                        p_artist = parts[3].strip() if len(parts) > 3 else ''
+                        p_album = parts[4].strip() if len(parts) > 4 else ''
+                        p_art = parts[5].strip() if len(parts) > 5 else ''
+                        if p_name:
+                            return {
+                                'is_active': True,
+                                'player_name': p_name,
+                                'playback_status': p_status,
+                                'title': p_title or 'Bilinmeyen Parça',
+                                'artist': p_artist,
+                                'album': p_album,
+                                'art_url': p_art
+                            }
+        except Exception:
+            pass
+        return {
+            'is_active': False,
+            'player_name': '',
+            'playback_status': 'Stopped',
+            'title': '',
+            'artist': '',
+            'album': '',
+            'art_url': ''
+        }
+
+    elif cmd == 'send_mpris_command':
+        sub = args.get('command', '')
+        sub_map = {
+            'play-pause': 'play-pause',
+            'play': 'play',
+            'pause': 'pause',
+            'next': 'next',
+            'previous': 'previous',
+            'stop': 'stop'
+        }
+        action = sub_map.get(sub)
+        if not action:
+            raise Exception('Geçersiz MPRIS komutu')
+        try:
+            res = subprocess.run(['playerctl', action], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2.0)
+            if res.returncode == 0:
+                return 'Başarılı'
+            return 'Oynatıcı yanıt vermedi'
+        except Exception as e:
+            raise Exception(f'playerctl hatası: {e}')
+
+    elif cmd == 'get_tray_items':
+        items = []
+        tray_file = '/tmp/ayaz-tray-items.json'
+        if os.path.exists(tray_file):
+            try:
+                with open(tray_file, 'r', encoding='utf-8') as f:
+                    items = json.load(f)
+            except Exception:
+                pass
+        return items
+
+    elif cmd == 'activate_tray_item':
+        service = args.get('service', '')
+        if service:
+            try:
+                subprocess.run([
+                    'dbus-send', '--session', '--type=method_call',
+                    f'--dest={service}', '/StatusNotifierItem',
+                    'org.kde.StatusNotifierItem.Activate', 'int32:0', 'int32:0'
+                ], timeout=1.5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        return 'Aktifleştirildi'
+
+    elif cmd == 'context_menu_tray_item':
+        service = args.get('service', '')
+        if service:
+            try:
+                subprocess.run([
+                    'dbus-send', '--session', '--type=method_call',
+                    f'--dest={service}', '/StatusNotifierItem',
+                    'org.kde.StatusNotifierItem.ContextMenu', 'int32:0', 'int32:0'
+                ], timeout=1.5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        return 'Menü açıldı'
+
+    elif cmd == 'get_open_with_apps':
+        file_path = args.get('filePath', args.get('file_path', ''))
+        if not file_path or not os.path.exists(file_path):
+            raise Exception('Dosya bulunamadı')
+        apps = []
+        mime_type = ''
+        try:
+            m_res = subprocess.run(['xdg-mime', 'query', 'filetype', file_path], stdout=subprocess.PIPE, text=True)
+            if m_res.returncode == 0:
+                mime_type = m_res.stdout.strip()
+        except Exception:
+            pass
+
+        def_app = ''
+        if mime_type:
+            try:
+                d_res = subprocess.run(['xdg-mime', 'query', 'default', mime_type], stdout=subprocess.PIPE, text=True)
+                if d_res.returncode == 0:
+                    def_app = d_res.stdout.strip()
+            except Exception:
+                pass
+
+        app_dirs = ['/usr/share/applications', '/usr/local/share/applications']
+        for ad in app_dirs:
+            if os.path.isdir(ad):
+                for fname in os.listdir(ad):
+                    if fname.endswith('.desktop'):
+                        fpath = os.path.join(ad, fname)
+                        try:
+                            with open(fpath, 'r', encoding='utf-8', errors='ignore') as f:
+                                content = f.read()
+                            matches_mime = (f'MimeType=' in content and mime_type in content) if mime_type else False
+                            is_default = (fname == def_app)
+                            if matches_mime or is_default:
+                                name = ''
+                                exec_cmd = ''
+                                icon = ''
+                                nodisplay = False
+                                for line in content.splitlines():
+                                    if line.startswith('Name=') and not name:
+                                        name = line[5:].strip()
+                                    elif line.startswith('Exec=') and not exec_cmd:
+                                        exec_cmd = line[5:].replace('%f', '').replace('%F', '').replace('%u', '').replace('%U', '').strip()
+                                    elif line.startswith('Icon=') and not icon:
+                                        icon = line[5:].strip()
+                                    elif line.strip() == 'NoDisplay=true':
+                                        nodisplay = True
+                                if not nodisplay and name and exec_cmd:
+                                    apps.append({
+                                        'id': fname,
+                                        'name': name,
+                                        'exec': exec_cmd,
+                                        'icon': icon,
+                                        'is_default': is_default
+                                    })
+                        except Exception:
+                            pass
+        return apps
+
+    elif cmd == 'set_desktop_wallpaper':
+        file_path = args.get('filePath', args.get('file_path', ''))
+        if not file_path or not os.path.exists(file_path):
+            raise Exception('Duvar kağıdı dosyası bulunamadı')
+        try:
+            subprocess.run(['feh', '--bg-fill', file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            try:
+                subprocess.run(['xwallpaper', '--zoom', file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+        home = os.environ.get('HOME', '/home/live')
+        c_dir = os.path.join(home, '.config', 'ankora')
+        os.makedirs(c_dir, exist_ok=True)
+        with open(os.path.join(c_dir, 'wallpaper'), 'w') as f:
+            f.write(file_path)
+        return 'Duvar kağıdı uygulandı'
+
+    elif cmd == 'get_usb_flash_targets':
+        targets = []
+        try:
+            res = subprocess.run(
+                ['lsblk', '-J', '-b', '-o', 'NAME,PATH,SIZE,TYPE,TRAN,MODEL,VENDOR,RM,MOUNTPOINT'],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            if res.returncode == 0:
+                data = json.loads(res.stdout)
+                devices = data.get('blockdevices', [])
+                for dev in devices:
+                    if dev.get('type') != 'disk':
+                        continue
+                    tran = dev.get('tran', '')
+                    rm = dev.get('rm', False)
+                    if tran != 'usb' and not rm:
+                        continue
+                    has_sys = False
+                    def check_mp(item):
+                        nonlocal has_sys
+                        mp = item.get('mountpoint')
+                        if mp in ('/', '/boot', '/home') or (mp and mp.startswith('/live')):
+                            has_sys = True
+                        for ch in item.get('children', []):
+                            check_mp(ch)
+                    check_mp(dev)
+                    if has_sys:
+                        continue
+
+                    name = dev.get('name', '')
+                    path = dev.get('path', f'/dev/{name}')
+                    model = (dev.get('model') or 'USB Bellek').strip()
+                    vendor = (dev.get('vendor') or '').strip()
+                    size_bytes = dev.get('size', 0)
+                    size_human = f"{size_bytes / (1024**3):.1f} GB" if size_bytes >= 1024**3 else f"{size_bytes / (1024**2):.1f} MB"
+                    targets.append({
+                        'name': name,
+                        'path': path,
+                        'model': model,
+                        'vendor': vendor,
+                        'size_human': size_human,
+                        'size_bytes': size_bytes,
+                        'is_removable': True
+                    })
+        except Exception as e:
+            raise Exception(f'lsblk hatası: {e}')
+        return targets
+
+    elif cmd == 'flash_iso_to_usb':
+        iso_path = args.get('isoPath', args.get('iso_path', ''))
+        target_device = args.get('targetDevice', args.get('target_device', ''))
+        if not iso_path or not os.path.exists(iso_path):
+            raise Exception('ISO dosyası bulunamadı')
+        if not target_device or not target_device.startswith('/dev/'):
+            raise Exception('Geçersiz hedef cihaz')
+
+        try:
+            m_res = subprocess.run(['findmnt', '-n', '-o', 'SOURCE', '/'], stdout=subprocess.PIPE, text=True)
+            if target_device in m_res.stdout:
+                raise Exception('Kritik Hata: Sistem kök diskine flaşlama engellendi!')
+        except Exception:
+            pass
+
+        progress_file = '/tmp/ankora-flasher.progress'
+        with open(progress_file, 'w') as f:
+            f.write('0.0:running:Yazma işlemi başlatılıyor...')
+
+        def do_flash():
+            try:
+                subprocess.run(f'umount -f {target_device}* 2>/dev/null || true', shell=True)
+                cmd_str = f"dd if='{iso_path}' of='{target_device}' bs=4M status=none conv=fsync"
+                res = subprocess.run(cmd_str, shell=True)
+                if res.returncode == 0:
+                    subprocess.run(['sync'])
+                    with open(progress_file, 'w') as f:
+                        f.write('100.0:done:ISO başarıyla USB belleğe yazdırıldı!')
+                else:
+                    with open(progress_file, 'w') as f:
+                        f.write('0.0:error:Yazma işlemi hata verdi.')
+            except Exception as e:
+                with open(progress_file, 'w') as f:
+                    f.write(f'0.0:error:Hata: {e}')
+
+        threading.Thread(target=do_flash, daemon=True).start()
+        return 'Yazma işlemi arka planda başlatıldı'
+
+    elif cmd == 'get_flash_progress':
+        progress_file = '/tmp/ankora-flasher.progress'
+        if not os.path.exists(progress_file):
+            return {'percent': 0.0, 'status': 'idle', 'message': 'Bekleniyor'}
+        try:
+            with open(progress_file, 'r') as f:
+                content = f.read().strip()
+            parts = content.split(':', 2)
+            if len(parts) == 3:
+                return {
+                    'percent': float(parts[0]),
+                    'status': parts[1],
+                    'message': parts[2]
+                }
+        except Exception:
+            pass
+        return {'percent': 0.0, 'status': 'idle', 'message': 'Bekleniyor'}
+
+    elif cmd == 'format_usb_drive':
+        target_device = args.get('targetDevice', args.get('target_device', ''))
+        filesystem = str(args.get('filesystem', 'vfat')).lower()
+        label = re.sub(r'[^a-zA-Z0-9_\-]', '', str(args.get('label', 'ANKORA'))) or 'ANKORA'
+
+        if not target_device.startswith('/dev/'):
+            raise Exception('Geçersiz hedef cihaz')
+
+        try:
+            m_res = subprocess.run(['findmnt', '-n', '-o', 'SOURCE', '/'], stdout=subprocess.PIPE, text=True)
+            if target_device in m_res.stdout:
+                raise Exception('Sistem kök sürücüsü biçimlendirilemez!')
+        except Exception:
+            pass
+
+        subprocess.run(f'umount -f {target_device}* 2>/dev/null || true', shell=True)
+        if filesystem in ('vfat', 'fat32'):
+            fmt_cmd = f"mkfs.vfat -F 32 -n '{label}' '{target_device}'"
+        elif filesystem == 'ext4':
+            fmt_cmd = f"mkfs.ext4 -F -L '{label}' '{target_device}'"
+        elif filesystem == 'ntfs':
+            fmt_cmd = f"mkfs.ntfs -Q -L '{label}' '{target_device}'"
+        else:
+            raise Exception('Desteklenmeyen dosya sistemi')
+
+        res = subprocess.run(fmt_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode == 0:
+            return f'{target_device} başarıyla {filesystem.upper()} olarak biçimlendirildi.'
+        raise Exception(f'Biçimlendirme hatası: {res.stderr or res.stdout}')
+
+    elif cmd == 'create_system_snapshot':
+        name = str(args.get('name', 'Snapshot')).replace(' ', '_')
+        desc = str(args.get('description', ''))
+        now = int(time.time())
+        base_dir = '/var/backups/ankora-snapshots'
+        os.makedirs(base_dir, exist_ok=True)
+        snap_id = f"{now}_{name}"
+        snap_path = os.path.join(base_dir, snap_id)
+        os.makedirs(snap_path, exist_ok=True)
+
+        subprocess.run(f"dpkg --get-selections > '{snap_path}/packages.list'", shell=True)
+        tar_path = os.path.join(snap_path, 'etc-backup.tar.gz')
+        subprocess.run(['tar', '-czf', tar_path, '--exclude=/etc/mtab', '/etc'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+        size_bytes = os.path.getsize(tar_path) if os.path.exists(tar_path) else 0
+        size_human = f"{size_bytes / 1024:.1f} KB" if size_bytes < 1024**2 else f"{size_bytes / (1024**2):.1f} MB"
+        date_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(now))
+
+        snap_info = {
+            'id': snap_id,
+            'name': name,
+            'description': desc,
+            'timestamp': now,
+            'date_str': date_str,
+            'size_human': size_human,
+            'is_btrfs': False
+        }
+
+        meta_file = os.path.join(base_dir, 'snapshots.json')
+        snaps = []
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    snaps = json.load(f)
+            except Exception:
+                pass
+        snaps.append(snap_info)
+        with open(meta_file, 'w', encoding='utf-8') as f:
+            json.dump(snaps, f, indent=2, ensure_ascii=False)
+        return snap_info
+
+    elif cmd == 'list_system_snapshots':
+        meta_file = '/var/backups/ankora-snapshots/snapshots.json'
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return []
+
+    elif cmd == 'restore_system_snapshot':
+        snap_id = args.get('snapshotId', args.get('snapshot_id', ''))
+        tar_path = os.path.join('/var/backups/ankora-snapshots', snap_id, 'etc-backup.tar.gz')
+        if not os.path.exists(tar_path):
+            raise Exception('Snapshot arşiv dosyası bulunamadı')
+        res = subprocess.run(['tar', '-xzf', tar_path, '-C', '/'])
+        if res.returncode == 0:
+            return 'Sistem yapılandırması başarıyla geri yüklendi.'
+        raise Exception('Geri yükleme başarısız oldu')
+
+    elif cmd == 'delete_system_snapshot':
+        snap_id = args.get('snapshotId', args.get('snapshot_id', ''))
+        snap_dir = os.path.join('/var/backups/ankora-snapshots', snap_id)
+        if os.path.exists(snap_dir):
+            shutil.rmtree(snap_dir, ignore_errors=True)
+        meta_file = '/var/backups/ankora-snapshots/snapshots.json'
+        if os.path.exists(meta_file):
+            try:
+                with open(meta_file, 'r', encoding='utf-8') as f:
+                    snaps = json.load(f)
+                snaps = [s for s in snaps if s.get('id') != snap_id]
+                with open(meta_file, 'w', encoding='utf-8') as f:
+                    json.dump(snaps, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+        return 'Kurtarma noktası silindi'
 
     # Bilinmeyen komut sessizce "işlendi" derse arayüz hiçbir zaman hata görmez;
     # köprü ile uyuşmayan her çağrı gerçek bir hata olarak döner.
@@ -2818,6 +4265,8 @@ cp "$ROOT_DIR/scripts/ayaz-update-helper.sh" "$CHROOT_DIR/usr/local/bin/ayaz-upd
 chmod +x "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" || true
 cp "$ROOT_DIR/scripts/ayaz-pkg-helper.sh" "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" || true
 chmod +x "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" || true
+cp "$ROOT_DIR/scripts/ankora-doctor.sh" "$CHROOT_DIR/usr/local/bin/ankora-doctor" || true
+chmod +x "$CHROOT_DIR/usr/local/bin/ankora-doctor" || true
 cp "$ROOT_DIR/scripts/ankora-updater-sudoers" "$CHROOT_DIR/etc/sudoers.d/ankora-updater" || true
 chmod 0440 "$CHROOT_DIR/etc/sudoers.d/ankora-updater" || true
 
@@ -2837,6 +4286,7 @@ for f in \
     "$CHROOT_DIR/etc/X11/Xwrapper.config" \
     "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" \
     "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" \
+    "$CHROOT_DIR/usr/local/bin/ankora-doctor" \
     "$CHROOT_DIR/usr/share/applications/ayaz.desktop" \
     "$CHROOT_DIR/usr/share/xsessions/ayaz.desktop" \
     "$CHROOT_DIR/home/ankora/.xinitrc" \

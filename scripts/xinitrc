@@ -8,6 +8,38 @@ xset -dpms
 xset s off
 xset s noblank
 
+# Pencere yöneticisi ve ses sunucusunu arka planda başlat
+if command -v openbox >/dev/null 2>&1; then
+    openbox &
+fi
+
+if command -v pulseaudio >/dev/null 2>&1; then
+    pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+fi
+
+if command -v dunst >/dev/null 2>&1; then
+    dunst &
+fi
+
+# Polkit Grafiksel Yetkilendirme Ajanı (GParted, Synaptic, Sistem Araçları için)
+if command -v lxpolkit >/dev/null 2>&1; then
+    lxpolkit &
+elif [ -x /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 ]; then
+    /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 &
+fi
+
+# XSettings Daemon (GTK/Qt uygulamalarıyla anlık tema ve font eşitleme)
+if command -v xsettingsd >/dev/null 2>&1; then
+    xsettingsd &
+fi
+
+# Sistem Tepsisi (Systray / Notification Area - Discord, Telegram, VPN vb.)
+if command -v trayer >/dev/null 2>&1; then
+    trayer --edge bottom --align right --widthtype request --height 32 --transparent true --alpha 0 --tint 0x0f172a --distance 6 --expand false &
+elif command -v stalonetray >/dev/null 2>&1; then
+    stalonetray --geometry 1x1-10+10 --grow-gravity NE --icon-gravity NE --kludges force_icons_size --transparent --tint-color "#0f172a" &
+fi
+
 # Ayaz DE Masaüstü Ortamını çalıştır
 if [ -x /usr/bin/ayaz ]; then
     exec /usr/bin/ayaz
