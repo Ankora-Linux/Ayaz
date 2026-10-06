@@ -1,0 +1,71 @@
+#!/bin/bash
+# ==============================================================================
+# Ankora Linux 2.0 — Ayaz DE Oturum Başlatıcı (ayaz-session)
+# Openbox pencere yöneticisini, uyumluluk köprüsünü ve Ayaz arayüzünü başlatır.
+# ==============================================================================
+set -e
+
+# 1. X11 Temel Ayarları
+if command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -solid "#13141b"
+fi
+if command -v xset >/dev/null 2>&1; then
+    xset -dpms || true
+    xset s off || true
+    xset s noblank || true
+fi
+
+# 2. Openbox Yapılandırmasını Hazırla
+OPENBOX_DIR="$HOME/.config/openbox"
+mkdir -p "$OPENBOX_DIR"
+
+if [ -f "/usr/share/ayaz/openbox-rc.xml" ]; then
+    cp -u "/usr/share/ayaz/openbox-rc.xml" "$OPENBOX_DIR/rc.xml"
+elif [ -f "/etc/xdg/openbox/rc.xml" ] && [ ! -f "$OPENBOX_DIR/rc.xml" ]; then
+    cp "/etc/xdg/openbox/rc.xml" "$OPENBOX_DIR/rc.xml"
+fi
+
+# 3. Pencere Yöneticisi (Openbox) Başlat
+if command -v openbox >/dev/null 2>&1; then
+    if [ -f "$OPENBOX_DIR/rc.xml" ]; then
+        openbox --config-file "$OPENBOX_DIR/rc.xml" &
+    else
+        openbox &
+    fi
+    OPENBOX_PID=$!
+fi
+
+# 4. Ses ve Polkit Ajanı
+if command -v pulseaudio >/dev/null 2>&1; then
+    pulseaudio --start --exit-idle-time=-1 2>/dev/null || true
+fi
+
+if command -v lxpolkit >/dev/null 2>&1; then
+    lxpolkit &
+elif [ -x /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 ]; then
+    /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 &
+fi
+
+# 5. XSettings Daemon (GTK/Qt Tema Eşitleme)
+if command -v xsettingsd >/dev/null 2>&1; then
+    xsettingsd &
+fi
+
+# 6. Ayaz DE Başlatma ve Temiz Kapanış
+cleanup() {
+    if [ -n "${OPENBOX_PID:-}" ]; then
+        kill "$OPENBOX_PID" 2>/dev/null || true
+    fi
+    pkill -P $$ 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+if [ -x /usr/bin/ayaz ]; then
+    /usr/bin/ayaz
+elif [ -x /usr/local/bin/ayaz ]; then
+    /usr/local/bin/ayaz
+elif [ -x "$(dirname "$0")/../src-tauri/target/release/ayaz-de" ]; then
+    "$(dirname "$0")/../src-tauri/target/release/ayaz-de"
+else
+    xterm -e "echo [HATA] Ayaz ikili dosyası bulunamadı!; sh" || true
+fi

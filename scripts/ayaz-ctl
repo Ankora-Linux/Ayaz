@@ -1,0 +1,116 @@
+#!/bin/bash
+# ==============================================================================
+# Ankora Linux (Ayaz DE) — Masaüstü ve X11 Uyumluluk Köprüsü (ayaz-ctl)
+# Openbox, kısayollar ve Ayaz DE arasındaki köprüleme ve kontrol komutları
+# ==============================================================================
+set -euo pipefail
+
+CMD="${1:-help}"
+
+# Ayaz ana penceresinin X11 ID'sini bulur
+get_ayaz_win_id() {
+    local wid=""
+    if command -v xdotool >/dev/null 2>&1; then
+        wid=$(xdotool search --name "Ayaz — Ankora" 2>/dev/null | head -n 1 || true)
+        if [ -z "$wid" ]; then
+            wid=$(xdotool search --class "ayaz" 2>/dev/null | head -n 1 || true)
+        fi
+    fi
+    if [ -z "$wid" ] && command -v wmctrl >/dev/null 2>&1; then
+        wid=$(wmctrl -l -x 2>/dev/null | awk '/[aA]yaz/{print $1; exit}' || true)
+    fi
+    echo "$wid"
+}
+
+case "$CMD" in
+    toggle-start)
+        # 1. Başlat menüsünü aç / kapat
+        WID=$(get_ayaz_win_id)
+        if [ -n "$WID" ] && command -v xdotool >/dev/null 2>&1; then
+            # Önce Ayaz'ı geçici olarak öne çıkar
+            if command -v wmctrl >/dev/null 2>&1; then
+                wmctrl -i -r "$WID" -b add,above 2>/dev/null || true
+            fi
+            xdotool windowactivate --sync "$WID" 2>/dev/null || true
+            # Ayaz başlat menüsü için Ctrl+Space sinyali yolla (Openbox Super yakalamasından etkilenmez)
+            xdotool key --clearmodifiers ctrl+space 2>/dev/null || xdotool key --clearmodifiers Super 2>/dev/null || true
+        else
+            # Fallback HTTP IPC
+            if command -v curl >/dev/null 2>&1; then
+                curl -s -m 1 -X POST http://127.0.0.1:49152/api/ipc \
+                    -H "Content-Type: application/json" \
+                    -d '{"cmd":"shortcut_dispatch","args":{"id":"start_menu"}}' >/dev/null 2>&1 || true
+            fi
+        fi
+        ;;
+
+    toggle-spotlight)
+        # 2. Evrensel hızlı aramayı aç / kapat
+        WID=$(get_ayaz_win_id)
+        if [ -n "$WID" ] && command -v xdotool >/dev/null 2>&1; then
+            if command -v wmctrl >/dev/null 2>&1; then
+                wmctrl -i -r "$WID" -b add,above 2>/dev/null || true
+            fi
+            xdotool windowactivate --sync "$WID" 2>/dev/null || true
+            xdotool key --clearmodifiers alt+space 2>/dev/null || true
+        fi
+        ;;
+
+    show-desktop)
+        # 3. Masaüstünü göster (Tüm pencereleri küçült)
+        if command -v wmctrl >/dev/null 2>&1; then
+            wmctrl -k on 2>/dev/null || true
+        fi
+        ;;
+
+    raise-ayaz)
+        # 4. Ayaz penceresini en üst katmana çıkar (Menü/dialog modu)
+        WID=$(get_ayaz_win_id)
+        if [ -n "$WID" ] && command -v wmctrl >/dev/null 2>&1; then
+            wmctrl -i -r "$WID" -b add,above 2>/dev/null || true
+        fi
+        ;;
+
+    lower-ayaz)
+        # 5. Ayaz penceresini masaüstü katmanına indir
+        WID=$(get_ayaz_win_id)
+        if [ -n "$WID" ] && command -v wmctrl >/dev/null 2>&1; then
+            wmctrl -i -r "$WID" -b remove,above 2>/dev/null || true
+            wmctrl -i -r "$WID" -b add,below 2>/dev/null || true
+        fi
+        ;;
+
+    lock)
+        # 6. Ekranı kilitle
+        WID=$(get_ayaz_win_id)
+        if [ -n "$WID" ] && command -v xdotool >/dev/null 2>&1; then
+            if command -v wmctrl >/dev/null 2>&1; then
+                wmctrl -i -r "$WID" -b add,above 2>/dev/null || true
+            fi
+            xdotool windowactivate --sync "$WID" 2>/dev/null || true
+            xdotool key --clearmodifiers ctrl+alt+l 2>/dev/null || true
+        fi
+        ;;
+
+    screenshot)
+        # 7. Ekran görüntüsü alma
+        WID=$(get_ayaz_win_id)
+        if [ -n "$WID" ] && command -v xdotool >/dev/null 2>&1; then
+            xdotool windowactivate --sync "$WID" 2>/dev/null || true
+            xdotool key --clearmodifiers Print 2>/dev/null || true
+        fi
+        ;;
+
+    help|*)
+        echo "Kullanım: ayaz-ctl [komut]"
+        echo "Komutlar:"
+        echo "  toggle-start      Ayaz Başlat Menüsünü aç/kapat"
+        echo "  toggle-spotlight  Ayaz Hızlı Arama penceresini aç/kapat"
+        echo "  show-desktop      Tüm pencereleri küçült, masaüstünü göster"
+        echo "  raise-ayaz        Ayaz penceresini öne al (Menü katmanı)"
+        echo "  lower-ayaz        Ayaz penceresini arka plana al (Masaüstü katmanı)"
+        echo "  lock              Ekranı güvenli kilit moduna al"
+        echo "  screenshot        Ekran görüntüsü aracını tetikle"
+        ;;
+esac
+exit 0

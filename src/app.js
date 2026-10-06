@@ -5166,6 +5166,9 @@
       const isOpen = typeof forceState === 'boolean' ? forceState : !startFlyout.classList.contains('open');
       startFlyout.classList.toggle('open', isOpen);
       if (startBtn) startBtn.classList.toggle('active', isOpen);
+      try {
+        TauriBridge.invoke('set_desktop_layer', { above: isOpen }).catch(() => {});
+      } catch (e) {}
       if (startSearch) {
         // Menü her açılışta temiz başlar: önceki sorgu alttaki bölümleri gizli
         // bırakmasın.
@@ -7551,6 +7554,9 @@
         this.isLocked = true;
         this.updateClock();
         this.showOverlay();
+        try {
+          TauriBridge.invoke('set_desktop_layer', { above: true }).catch(() => {});
+        } catch (e) {}
         if (this.errorMsg) {
           this.errorMsg.textContent = '';
           this.errorMsg.classList.remove('show', 'success');
@@ -7560,10 +7566,6 @@
           setTimeout(() => { if (this.input) this.input.focus(); }, 150);
         }
         Terminal.log('[GÜVENLİK] Oturum kilitlendi (kiosk kilidi).', 'cmd');
-        // xtrlock çağrılmıyor: o süreç klavyeyi de imleci de X seviyesinde
-        // grab'ler ve -b ile ekranı karartır — Ayaz PIN alanı tuş alamaz,
-        // kilit ekranı görünmez kalır. Yerine capture-phase klavye muhafazası
-        // (installKeyGuard) devrede; imleç zaten tam ekran örtüde.
       } finally {
         this._locking = false;
       }
@@ -7581,6 +7583,9 @@
         if (ok) {
           this.isLocked = false;
           this.hideOverlay();
+          try {
+            TauriBridge.invoke('set_desktop_layer', { above: false }).catch(() => {});
+          } catch (e) {}
           this.input.value = '';
           // X11 girişi xtrlock'ta yakalanır: süreç kapatılmazsa imleç kilit
           // simgesinde kalır ve masaüstünde hiçbir yere tıklanamaz.
@@ -9586,6 +9591,9 @@
       this.selectedIndex = 0;
       this.input.focus();
       this.renderDefaults();
+      try {
+        TauriBridge.invoke('set_desktop_layer', { above: true }).catch(() => {});
+      } catch (e) {}
     },
 
     close() {
@@ -9593,6 +9601,9 @@
       this.isOpen = false;
       this.overlay.style.display = 'none';
       this.input.blur();
+      try {
+        TauriBridge.invoke('set_desktop_layer', { above: false }).catch(() => {});
+      } catch (e) {}
     },
 
     toggle() {

@@ -8,9 +8,20 @@ xset -dpms
 xset s off
 xset s noblank
 
-# Pencere yöneticisi ve ses sunucusunu arka planda başlat
+# Ankora Openbox Yapılandırmasını Hazırla ve Başlat
+mkdir -p "$HOME/.config/openbox"
+if [ -f /usr/share/ayaz/openbox-rc.xml ]; then
+    cp -u /usr/share/ayaz/openbox-rc.xml "$HOME/.config/openbox/rc.xml"
+elif [ -f "$(dirname "$0")/openbox-rc.xml" ]; then
+    cp -u "$(dirname "$0")/openbox-rc.xml" "$HOME/.config/openbox/rc.xml"
+fi
+
 if command -v openbox >/dev/null 2>&1; then
-    openbox &
+    if [ -f "$HOME/.config/openbox/rc.xml" ]; then
+        openbox --config-file "$HOME/.config/openbox/rc.xml" &
+    else
+        openbox &
+    fi
 fi
 
 if command -v pulseaudio >/dev/null 2>&1; then

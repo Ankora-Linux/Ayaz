@@ -55,23 +55,34 @@ if [ ! -f "/usr/share/debootstrap/scripts/$DEVUAN_SUITE" ]; then
 fi
 
 # Devuan GPG resmi anahtarlık denetimi
-if [ ! -f /usr/share/keyrings/devuan-archive-keyring.gpg ]; then
-    echo "[BİLGİ] Devuan resmi GPG anahtarlığı (devuan-keyring) aranıyor..."
-    wget -qO /tmp/devuan-keyring.deb https://pkgmaster.devuan.org/devuan/pool/main/d/devuan-keyring/devuan-keyring_2022.09.04_all.deb 2>/dev/null || true
-    if [ -f /tmp/devuan-keyring.deb ] && [ -s /tmp/devuan-keyring.deb ]; then
-        dpkg -i /tmp/devuan-keyring.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
-        rm -f /tmp/devuan-keyring.deb
+LOCAL_KEYRING="$ROOT_DIR/third_party/devuan-keyring/gpg/devuan-archive-keyring.gpg"
+LOCAL_DEB="$ROOT_DIR/third_party/devuan-keyring/devuan-keyring_2022.09.04_all.deb"
+
+if [ ! -f /usr/share/keyrings/devuan-archive-keyring.gpg ] && [ ! -f /etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg ]; then
+    if [ -f "$LOCAL_DEB" ]; then
+        echo "[BİLGİ] Yerel Devuan anahtarlık paketi kuruluyor ($LOCAL_DEB)..."
+        dpkg -i "$LOCAL_DEB" 2>/dev/null || true
+    elif [ ! -f "$LOCAL_KEYRING" ]; then
+        echo "[BİLGİ] Devuan resmi GPG anahtarlığı (devuan-keyring) aranıyor..."
+        wget -qO /tmp/devuan-keyring.deb https://pkgmaster.devuan.org/devuan/pool/main/d/devuan-keyring/devuan-keyring_2022.09.04_all.deb 2>/dev/null || true
+        if [ -f /tmp/devuan-keyring.deb ] && [ -s /tmp/devuan-keyring.deb ]; then
+            dpkg -i /tmp/devuan-keyring.deb 2>/dev/null || apt-get install -f -y 2>/dev/null || true
+            rm -f /tmp/devuan-keyring.deb
+        fi
     fi
 fi
 
 KEYRING_ARG=""
-if [ -f /usr/share/keyrings/devuan-archive-keyring.gpg ]; then
+if [ -f "$LOCAL_KEYRING" ]; then
+    KEYRING_ARG="--keyring=$LOCAL_KEYRING"
+elif [ -f /usr/share/keyrings/devuan-archive-keyring.gpg ]; then
     KEYRING_ARG="--keyring=/usr/share/keyrings/devuan-archive-keyring.gpg"
 elif [ -f /etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg ]; then
     KEYRING_ARG="--keyring=/etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg"
 else
     # Anahtarlıksız kurulum imzasız taban sistem demektir; sessizce geçilmez.
     echo "[HATA] Devuan GPG anahtarlığı bulunamadı:" >&2
+    echo "       $LOCAL_KEYRING" >&2
     echo "       /usr/share/keyrings/devuan-archive-keyring.gpg" >&2
     echo "       /etc/apt/trusted.gpg.d/devuan-archive-keyring.gpg" >&2
     echo "[HATA] Kurulum imzasız olacağı için durduruldu." >&2
@@ -106,6 +117,10 @@ debootstrap --arch=amd64 \
 mkdir -p "$CHROOT_DIR/etc/apt/trusted.gpg.d" "$CHROOT_DIR/usr/share/keyrings"
 cp -f /usr/share/keyrings/devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
 cp -f /usr/share/keyrings/devuan* "$CHROOT_DIR/usr/share/keyrings/" 2>/dev/null || true
+if [ -d "$ROOT_DIR/third_party/devuan-keyring/gpg" ]; then
+    cp -f "$ROOT_DIR/third_party/devuan-keyring/gpg/"devuan* "$CHROOT_DIR/etc/apt/trusted.gpg.d/" 2>/dev/null || true
+    cp -f "$ROOT_DIR/third_party/devuan-keyring/gpg/"devuan* "$CHROOT_DIR/usr/share/keyrings/" 2>/dev/null || true
+fi
 # Baz sistemler anahtarlığı yalnızca /etc/apt/trusted.gpg.d altında tutar.
 # Ama bu dosyalar devuan-keyring paketinin conffile'larıyla aynı yolda
 # çakışır: önceden konursa dpkg conffile sorusunda stdin'de eof alır, paketi
@@ -631,9 +646,18 @@ case "$CURW" in
     ''|640*|720*|800*|854*|960*) xrandr -s 1280x800 2>/dev/null || xrandr -s 1024x768 2>/dev/null || true ;;
 esac
 
-# Pencere yöneticisini arka planda başlat
+# Ankora Openbox Yapılandırmasını Hazırla ve Başlat
+mkdir -p "$HOME/.config/openbox"
+if [ -f /usr/share/ayaz/openbox-rc.xml ]; then
+    cp -u /usr/share/ayaz/openbox-rc.xml "$HOME/.config/openbox/rc.xml"
+fi
+
 if command -v openbox >/dev/null 2>&1; then
-    openbox &
+    if [ -f "$HOME/.config/openbox/rc.xml" ]; then
+        openbox --config-file "$HOME/.config/openbox/rc.xml" &
+    else
+        openbox &
+    fi
 fi
 
 # Ses sunucusunu kullanıcı oturumunda başlat
@@ -2513,6 +2537,15 @@ exit 0
             subprocess.run(['wmctrl', '-k', 'on'], timeout=3)
         return True
 
+    elif cmd == 'set_desktop_layer':
+        above = bool(args.get('above', False))
+        arg = 'add,above' if above else 'remove,above'
+        if shutil.which('wmctrl'):
+            subprocess.run(['wmctrl', '-r', 'Ayaz — Ankora', '-b', arg], timeout=3)
+            if not above:
+                subprocess.run(['wmctrl', '-r', 'Ayaz — Ankora', '-b', 'add,below'], timeout=3)
+        return True
+
     elif cmd == 'get_removable_drives':
         if not shutil.which('lsblk'):
             return []
@@ -4259,6 +4292,18 @@ AYAZ_PY
 fi
 
 # XDG ve Desktop Entegrasyonu
+mkdir -p "$CHROOT_DIR/etc/xdg/openbox" "$CHROOT_DIR/usr/share/ayaz" "$CHROOT_DIR/etc/skel/.config/openbox" "$CHROOT_DIR/home/ankora/.config/openbox"
+cp "$ROOT_DIR/scripts/openbox-rc.xml" "$CHROOT_DIR/etc/xdg/openbox/rc.xml" || true
+cp "$ROOT_DIR/scripts/openbox-rc.xml" "$CHROOT_DIR/usr/share/ayaz/openbox-rc.xml" || true
+cp "$ROOT_DIR/scripts/openbox-rc.xml" "$CHROOT_DIR/etc/skel/.config/openbox/rc.xml" || true
+cp "$ROOT_DIR/scripts/openbox-rc.xml" "$CHROOT_DIR/home/ankora/.config/openbox/rc.xml" || true
+chown -R 1000:1000 "$CHROOT_DIR/home/ankora/.config" 2>/dev/null || true
+
+cp "$ROOT_DIR/scripts/ayaz-ctl" "$CHROOT_DIR/usr/bin/ayaz-ctl" || true
+chmod +x "$CHROOT_DIR/usr/bin/ayaz-ctl" || true
+cp "$ROOT_DIR/scripts/ayaz-session" "$CHROOT_DIR/usr/bin/ayaz-session" || true
+chmod +x "$CHROOT_DIR/usr/bin/ayaz-session" || true
+
 cp "$ROOT_DIR/scripts/ayaz.desktop" "$CHROOT_DIR/usr/share/applications/ayaz.desktop" || true
 cp "$ROOT_DIR/scripts/ayaz-session.desktop" "$CHROOT_DIR/usr/share/xsessions/ayaz.desktop" || true
 cp "$ROOT_DIR/scripts/ayaz-update-helper.sh" "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" || true
@@ -4287,6 +4332,8 @@ for f in \
     "$CHROOT_DIR/usr/local/bin/ayaz-update-helper" \
     "$CHROOT_DIR/usr/local/bin/ayaz-pkg-helper" \
     "$CHROOT_DIR/usr/local/bin/ankora-doctor" \
+    "$CHROOT_DIR/usr/bin/ayaz-ctl" \
+    "$CHROOT_DIR/usr/bin/ayaz-session" \
     "$CHROOT_DIR/usr/share/applications/ayaz.desktop" \
     "$CHROOT_DIR/usr/share/xsessions/ayaz.desktop" \
     "$CHROOT_DIR/home/ankora/.xinitrc" \

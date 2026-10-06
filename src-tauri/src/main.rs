@@ -3673,6 +3673,23 @@ fn minimize_all_windows() -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn set_desktop_layer(above: bool) -> Result<bool, String> {
+    #[cfg(target_os = "linux")]
+    {
+        let arg = if above { "add,above" } else { "remove,above" };
+        let _ = Command::new("wmctrl")
+            .args(["-r", "Ayaz — Ankora", "-b", arg])
+            .spawn();
+        if !above {
+            let _ = Command::new("wmctrl")
+                .args(["-r", "Ayaz — Ankora", "-b", "add,below"])
+                .spawn();
+        }
+    }
+    Ok(true)
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DisplayModeEntry {
     pub mode: String,
@@ -5651,6 +5668,7 @@ fn main() {
             close_native_window,
             minimize_native_window,
             minimize_all_windows,
+            set_desktop_layer,
             get_display_modes,
             set_display_mode,
             get_removable_drives,
